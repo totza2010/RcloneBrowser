@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Install Development Tools
         run: |
           choco install visualstudio2019community visualstudio2019-workload-nativedesktop cmake qt5-default -y
@@ -38,8 +38,8 @@ jobs:
           cd build
           cmake -G "Visual Studio 16 2019" -A x64 -DCMAKE_CONFIGURATION_TYPES="Release" -DCMAKE_PREFIX_PATH=C:\Qt\5.15.2\msvc2019_64 .. 
           cmake --build . --config Release
-          C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe --release --no-translations --no-angle --no-compiler-runtime --no-svg ".\build\Release\RcloneBrowser.exe"
-      - uses: actions/upload-artifact@v4
+          C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe --no-translations --no-angle --no-compiler-runtime --no-svg ".\build\Release\RcloneBrowser.exe"
+      - uses: actions/upload-artifact@v3
         with:
           name: windows
           path: build\build\Release\*
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Install Development Tools
         run: |
           sudo apt update
@@ -61,7 +61,7 @@ jobs:
           cmake ..
           make -j $(nproc)
           
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
          name: linux
          path: build/build/*
@@ -71,42 +71,43 @@ jobs:
     runs-on: macos-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Install Development Tools
         run: brew install git cmake rclone qt5
       - name: Build Rclone Browser
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_PREFIX_PATH:PATH=/opt/homebrew/opt/qt@5
+          cmake .. -DCMAKE_PREFIX_PATH:PATH=/usr/local/opt/qt5
           make -j $(nproc)
           cd build
-          /opt/homebrew/opt/qt@5/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/
+          /usr/local/opt/qt@5/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/
           mv rclone-browser.app Rclone\ Browser.app
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: macos
           path: build/build/*
         
   build_freebsd:
     name: FreeBSD Build
-    runs-on: ubuntu-latest
+    runs-on: macos-12
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Install Development Tools and Build Rclone Browser
-        uses: vmactions/freebsd-vm@v1
+        uses: vmactions/freebsd-vm@v0
         with:
+          mem: 4096
           prepare: |
             env ASSUME_ALWAYS_YES=YES pkg update -f
             env ASSUME_ALWAYS_YES=YES pkg install -y git cmake qt5-buildtools qt5-declarative qt5-multimedia qt5-qmake
-          run: |
             cd work/RcloneBrowser/RcloneBrowser
             mkdir build
             cd build
             cmake ..
             make
-      - uses: actions/upload-artifact@v4
+            
+      - uses: actions/upload-artifact@v3
         with:
           name: freebsd
           path: build/build/*
@@ -117,10 +118,10 @@ jobs:
     needs: [build_windows, build_linux, build_macos, build_freebsd]
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Create artifact directory
         run: rm -rf /tmp/artifacts && mkdir /tmp/artifacts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
       - name: Compress artifacts
