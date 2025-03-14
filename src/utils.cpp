@@ -351,17 +351,17 @@ QDir GetConfigDir() {
         QDir(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
   }
 
- if (!outputDir.exists()) {
-   outputDir.mkpath(".");
- }
-  //  QString filePath = outputDir.absoluteFilePath(persistenceFileName);
-  //  QFile *file = new QFile(filePath);
-  //
-  //  if (!file->open(mode)) {
-  //    qDebug() << QString("Could not open ") << file->fileName();
-  //    delete file;
-  //    file = nullptr;
-  //  }
+  if (!outputDir.exists()) {
+    outputDir.mkpath(".");
+  }
+  QString filePath = outputDir.absoluteFilePath(persistenceFileName);
+  QFile *file = new QFile(filePath);
+
+  if (!file->open(mode)) {
+    qDebug() << QString("Could not open ") << file->fileName();
+    delete file;
+    file = nullptr;
+  }
   return outputDir;
 }
 
