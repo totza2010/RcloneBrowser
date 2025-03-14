@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.1.0][2.1.0] - 2025-03-14
+-   NEW: added teldrive icon
+-   FIXED: task save file not work 
+
 ## [2.0.0][2.0.0] - 2020-03-
 -   NEW: interface look and feel redisign - more space, more flexible and dynamic, more information, more cutomizations
 -   NEW: added queueing functionality. Tasks can be queued for later excecution. Queue itself can be rearranged and edidted. It is persistent between application restart. And in addition user defined script can be run when all queued tasks are processed.

@@ -351,9 +351,9 @@ QDir GetConfigDir() {
         QDir(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
   }
 
-  if (!outputDir.exists()) {
-    outputDir.mkpath(".");
-  }
+  // if (!outputDir.exists()) {
+  //   outputDir.mkpath(".");
+  // }
   // QString filePath = outputDir.absoluteFilePath(persistenceFileName);
   // QFile *file = new QFile(filePath);
 

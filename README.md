@@ -172,7 +172,7 @@ Build instructions
     *   **RHEL/CentOS**: `sudo yum -y install git gcc-c++ cmake make qt5-qtdeclarative qt5-qtmultimedia-devel`
     *   **Fedora**: `sudo dnf -y install git g++ cmake make qt5-qtdeclarative-devel qt5-qtmultimedia-devel`
     *   **Arch/Manjaro**: `sudo pacman -Sy --noconfirm --needed git gcc cmake make qt5-declarative qt5-multimedia`
-2.  Clone source code from this repo `git clone https://github.com/kapitainsky/RcloneBrowser.git`
+2.  Clone source code from this repo `git clone https://github.com/totza2010/RcloneBrowser.git`
 3.  Go to source folder `cd RcloneBrowser`
 4.  Create new build folder - `mkdir build && cd build`
 5.  Run `cmake ..` from build folder to create makefile
@@ -181,7 +181,7 @@ Build instructions
 
 ### FreeBSD
 1.  Install dependencies `sudo pkg install git cmake qt5-buildtools qt5-declarative qt5-multimedia qt5-qmake`
-2.  Clone source code from this repo `git clone https://github.com/kapitainsky/RcloneBrowser.git`
+2.  Clone source code from this repo `git clone https://github.com/totza2010/RcloneBrowser.git`
 3.  Go to source folder `cd RcloneBrowser`
 4.  Create new build folder - `mkdir build && cd build`
 5.  Run `cmake ..` from build folder to create makefile
@@ -192,7 +192,7 @@ Build instructions
 
 ### OpenBSD
 1.  Install dependencies `sudo pkg_add git cmake qt5`
-2.  Clone source code from this repo `git clone https://github.com/kapitainsky/RcloneBrowser.git`
+2.  Clone source code from this repo `git clone https://github.com/totza2010/RcloneBrowser.git`
 3.  Go to source folder `cd RcloneBrowser`
 4.  Create new build folder - `mkdir build && cd build`
 5.  Run `cmake .. -DCMAKE_PREFIX_PATH:PATH=/usr/local/lib/qt5/cmake` from build folder to create makefile
@@ -203,7 +203,7 @@ Build instructions
 
 ### NetBSD
 1.  Install dependencies `sudo pkgin install git cmake qt5-qtdeclarative qt5-qtmultimedia`
-2.  Clone source code from this repo `git clone https://github.com/kapitainsky/RcloneBrowser.git`
+2.  Clone source code from this repo `git clone https://github.com/totza2010/RcloneBrowser.git`
 3.  Go to source folder `cd RcloneBrowser`
 4.  Create new build folder - `mkdir build && cd build`
 5.  Run `cmake .. -DCMAKE_PREFIX_PATH:PATH=/usr/pkg/qt5` from build folder to create makefile
@@ -216,7 +216,7 @@ Build instructions
 1.  If you don't have [Homebrew](https://brew.sh/) yet install it `/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"`
 2.  You might be asked to install xcode command line tools - do it. This is actuall macOS SDK, headers, and build tools. You don't need full xcode IDE.
 3.  Install dependencies `brew install git cmake rclone qt5`
-4.  Clone source code from this repo `git clone https://github.com/kapitainsky/RcloneBrowser.git`
+4.  Clone source code from this repo `git clone https://github.com/totza2010/RcloneBrowser.git`
 5.  Go to source folder `cd RcloneBrowser`
 6.  Create new build folder - `mkdir build && cd build`
 7.  Run `cmake .. -DCMAKE_PREFIX_PATH:PATH=/usr/local/opt/qt` from build folder to create makefile
@@ -235,6 +235,15 @@ Build instructions
 8.  run `c:\Qt\5.13.2\msvc2017_64\bin\windeployqt.exe --no-translations --no-angle --no-compiler-runtime --no-svg ".\build\Release\RcloneBrowser.exe"`
 9.  build\Release folder contains now RcloneBrowser.exe binary and all other files required to run it
 10. If your system does not have required MSVC runtime you can install one from Microsoft [website](https://support.microsoft.com/en-gb/help/2977003/the-latest-supported-visual-c-downloads).
+
+Install script.
+-----------------------
+
+*   Linux/BSD/macOS:
+    *   `curl -fsSL https://raw.githubusercontent.com/totza2010/RcloneBrowser/main/install.sh | bash`
+
+*   Windows:
+    *   `irm https://raw.githubusercontent.com/totza2010/RcloneBrowser/main/install.ps1 | iex` 
 
 Portable vs standard mode
 -----------------------
