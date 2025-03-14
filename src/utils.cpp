@@ -354,14 +354,14 @@ QDir GetConfigDir() {
   if (!outputDir.exists()) {
     outputDir.mkpath(".");
   }
-  QString filePath = outputDir.absoluteFilePath(persistenceFileName);
-  QFile *file = new QFile(filePath);
+  // QString filePath = outputDir.absoluteFilePath(persistenceFileName);
+  // QFile *file = new QFile(filePath);
 
-  if (!file->open(mode)) {
-    qDebug() << QString("Could not open ") << file->fileName();
-    delete file;
-    file = nullptr;
-  }
+  // if (!file->open(mode)) {
+  //   qDebug() << QString("Could not open ") << file->fileName();
+  //   delete file;
+  //   file = nullptr;
+  // }
   return outputDir;
 }
 
