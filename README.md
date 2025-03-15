@@ -240,10 +240,10 @@ Install script.
 -----------------------
 
 *   Linux/BSD/macOS:
-    *   `curl -fsSL https://raw.githubusercontent.com/totza2010/RcloneBrowser/main/install.sh | bash`
+    *   `curl -fsSL https://raw.githubusercontent.com/totza2010/RcloneBrowser/master/install.sh | bash`
 
 *   Windows:
-    *   `irm https://raw.githubusercontent.com/totza2010/RcloneBrowser/main/install.ps1 | iex` 
+    *   `irm https://raw.githubusercontent.com/totza2010/RcloneBrowser/master/install.ps1 | iex` 
 
 Portable vs standard mode
 -----------------------

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright 2019 Dariusz Bogdanski <dariuszb@me.com> -->
 <component type="desktop-application">
-  <id>org.kapitainsky.rclone_browser</id>
+  <id>org.totza2010.rclone_browser</id>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <name>Rclone Browser</name>
@@ -36,10 +36,10 @@
       <image>https://github.com/kapitainsky/RcloneBrowser/wiki/images/IMGtransfer.png</image>
     </screenshot>
   </screenshots>
-  <url type="homepage">https://github.com/kapitainsky/RcloneBrowser/</url>
-  <url type="bugtracker">https://github.com/kapitainsky/RcloneBrowser/issues/</url>
-  <url type="faq">https://github.com/kapitainsky/RcloneBrowser/wiki</url>
-  <url type="help">https://github.com/kapitainsky/RcloneBrowser/issues/</url>
+  <url type="homepage">https://github.com/totza2010/RcloneBrowser/</url>
+  <url type="bugtracker">https://github.com/totza2010/RcloneBrowser/issues/</url>
+  <url type="faq">https://github.com/totza2010/RcloneBrowser/wiki</url>
+  <url type="help">https://github.com/totza2010/RcloneBrowser/issues/</url>
   <releases>
     <release version="1.6.0" date="2019-10-30" />
   </releases>

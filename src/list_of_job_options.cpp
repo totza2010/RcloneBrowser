@@ -87,10 +87,6 @@ QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
   }
   QString filePath = outputDir.absoluteFilePath(persistenceFileName);
   
-  if (!QFileInfo::exists(filePath) && mode == QIODevice::ReadOnly) {
-    return nullptr;
-  }
-
   QFile *file = new QFile(filePath);
 
   if (!file->open(mode)) {
@@ -102,9 +98,15 @@ QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
 }
 
 bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
-  QFile *file = GetPersistenceFile(QFileInfo(persistenceFileName).exists() ? QIODevice::ReadOnly : QIODevice::WriteOnly);
-  if (file == nullptr)
-    return false;
+  QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
+  if (file == nullptr) {
+      file = GetPersistenceFile(QIODevice::WriteOnly);
+  }
+
+  if (file == nullptr) {
+      return false;
+  }
+
   QDataStream instream(file);
   instream.setVersion(QDataStream::Qt_5_2);
 
@@ -128,14 +130,16 @@ bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
 }
 
 bool ListOfJobOptions::PersistToUserData() {
-  QFile *file = GetPersistenceFile(QFileInfo(persistenceFileName).exists() ? QIODevice::ReadOnly : QIODevice::WriteOnly);
+  QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
+  if (file == nullptr) {
+      file = GetPersistenceFile(QIODevice::WriteOnly);
+  }
 
-  if (file == nullptr)
-    return false;
+  if (file == nullptr) {
+      return false;
+  }
 
-  QFileInfo fileToSaveInfo(*file);
-
-  QSaveFile fileToSave(fileToSaveInfo.absoluteFilePath());
+  QSaveFile fileToSave(file->fileName());
 
   // note this mode implies Truncate also
   if (!fileToSave.open(QIODevice::WriteOnly)) {

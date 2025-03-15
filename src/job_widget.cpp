@@ -197,23 +197,17 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
         ui.bandwidth->setText(rxSize2.cap(6));
         ui.eta->setText(rxSize2.cap(8));
         ui.totalsize->setText(rxSize2.cap(3) + " " + rxSize2.cap(4));
-        
         ui.progress_info->setStyleSheet(
             "QLabel { color: green; font-weight: bold;}");
         ui.progress_info->setText("(" + rxSize2.cap(5) + ")");
-
-
-
-
-
-
-
-
       } else if (rxSize3.exactMatch(line)) {
         ui.size->setText(rxSize3.cap(1) + ", " + rxSize3.cap(3));
         ui.bandwidth->setText(rxSize3.cap(4));
         ui.eta->setText(rxSize3.cap(5));
         ui.totalsize->setText(rxSize3.cap(2));
+        ui.progress_info->setStyleSheet(
+          "QLabel { color: green; font-weight: bold;}");
+        ui.progress_info->setText("(" + rxSize3.cap(3) + ")");
       } else if (rxErrors.exactMatch(line)) {
         ui.errors->setText(rxErrors.cap(1));
 
@@ -301,10 +295,10 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        bar->setValue(rxProgress2.cap(2).toInt());
-        bar->setToolTip(
-            "File name: " + name + "\nFile stats" +
-            rxProgress2.cap(0).mid(rxProgress2.cap(0).indexOf(':')));
+        int progressValue = rxProgress2.cap(2).toInt();
+        bar->setValue(progressValue);
+        bar->setToolTip("File name: " + name + "\nFile stats" + rxProgress2.cap(0).mid(rxProgress2.cap(0).indexOf(':')));
+        bar->setFormat(rxProgress2.cap(0).mid(rxProgress2.cap(0).indexOf(':') + 2).trimmed());
 
         mUpdated.insert(label);
       } else if (rxProgress3.exactMatch(line)) {
@@ -342,8 +336,10 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        bar->setValue(rxProgress3.cap(2).toInt());
+        int progressValue = rxProgress3.cap(2).toInt();
+        bar->setValue(progressValue);
         bar->setToolTip("File name: " + name + "\nFile stats" + rxProgress3.cap(0).mid(rxProgress3.cap(0).indexOf(':')));
+        bar->setFormat(rxProgress3.cap(0).mid(rxProgress3.cap(0).indexOf(':') + 2).trimmed());
 
         mUpdated.insert(label);
       }
