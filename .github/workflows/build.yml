@@ -98,7 +98,7 @@ jobs:
           name: Rclone Browser Autobuild For Commit ${{ env.SHORT_SHA }}
           omitBody: true
           generateReleaseNotes: true
-          prerelease: true
+          prerelease: false
           skipIfReleaseExists: true
           tag: release-${{ env.SHORT_SHA }}
         

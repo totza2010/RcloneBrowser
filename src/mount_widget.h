@@ -44,6 +44,6 @@ private:
   QString mStatus = "0_zmount_mounted";
 
   QDateTime mStartDateTime = QDateTime::currentDateTime();
-  QDateTime mFinishDateTime;
-  void updateStartFinishInfo();
+  void updateStartInfo();
+  void updateFinishInfo();
 };

@@ -34,6 +34,6 @@ private:
   QString mStatus = "0_stream_streaming";
 
   QDateTime mStartDateTime = QDateTime::currentDateTime();
-  QDateTime mFinishDateTime;
-  void updateStartFinishInfo();
+  void updateStartInfo();
+  void updateFinishInfo();
 };

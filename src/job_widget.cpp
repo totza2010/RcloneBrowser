@@ -9,7 +9,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     : QWidget(parent), mProcess(process) {
   ui.setupUi(this);
 
-  updateStartFinishInfo();
+  updateStartInfo();
 
   mArgs = GetRcloneCmd(args);
 
@@ -196,6 +196,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
                          rxSize2.cap(5));
         ui.bandwidth->setText(rxSize2.cap(6));
         ui.eta->setText(rxSize2.cap(8));
+        updateFinishInfo(rxSize2.cap(8));
         ui.totalsize->setText(rxSize2.cap(3) + " " + rxSize2.cap(4));
         ui.progress_info->setStyleSheet(
             "QLabel { color: green; font-weight: bold;}");
@@ -204,6 +205,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
         ui.size->setText(rxSize3.cap(1) + ", " + rxSize3.cap(3));
         ui.bandwidth->setText(rxSize3.cap(4));
         ui.eta->setText(rxSize3.cap(5));
+        updateFinishInfo(rxSize3.cap(5));
         ui.totalsize->setText(rxSize3.cap(2));
         ui.progress_info->setStyleSheet(
           "QLabel { color: green; font-weight: bold;}");
@@ -386,8 +388,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           ui.progress_info->hide();
         }
 
-        mFinishDateTime = QDateTime::currentDateTime();
-        updateStartFinishInfo();
+        updateFinishInfo();
 
         ui.cancel->setToolTip("Close");
         ui.cancel->setStatusTip("Close");
@@ -430,15 +431,19 @@ QString JobWidget::getTransferMode() { return mTransferMode; }
 
 QDateTime JobWidget::getStartDateTime() { return mStartDateTime; }
 
-void JobWidget::updateStartFinishInfo() {
-
-  ui.le_StartFinishInfo->setText(
+void JobWidget::updateStartInfo() {
+  ui.le_StartInfo->setText(
       "Started:   " +
-      QLocale(QLocale::English)
-          .toString(mStartDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t") +
-      "              " + "Finished:  " +
-      QLocale(QLocale::English)
-          .toString(mFinishDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t"));
+      QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
+}
+
+void JobWidget::updateFinishInfo(const QString &ETA) {
+  qint64 etaSeconds = ETA.isEmpty() ? 0 : parseETAtoSeconds(ETA);
+  QString finishText = (etaSeconds > 0) ? "Finished (ETA):  " : "Finished:  ";
+
+  ui.le_FinishInfo->setText(
+    finishText +
+    QLocale::system().toString(QDateTime::currentDateTime().addSecs(etaSeconds), QLocale::LongFormat));
 }
 
 QString JobWidget::getStatus() { return mStatus; }

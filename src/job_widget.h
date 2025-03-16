@@ -47,6 +47,25 @@ private:
   QString mStatus = "0_transfer_running";
 
   QDateTime mStartDateTime = QDateTime::currentDateTime();
-  QDateTime mFinishDateTime;
-  void updateStartFinishInfo();
+  void updateStartInfo();
+  void updateFinishInfo(const QString &ETA = "");
+  qint64 parseETAtoSeconds(const QString &eta) {
+    QRegularExpression re("(\\d+)([ywdhms])");
+    QRegularExpressionMatchIterator i = re.globalMatch(eta);
+
+    qint64 totalSeconds = 0;
+    while (i.hasNext()) {
+        QRegularExpressionMatch match = i.next();
+        qint64 value = match.captured(1).toLongLong();
+        QString unit = match.captured(2);
+
+        if (unit == "y") totalSeconds += value * 365 * 24 * 3600;  // ปี → วินาที
+        if (unit == "w") totalSeconds += value * 7 * 24 * 3600;    // สัปดาห์
+        if (unit == "d") totalSeconds += value * 24 * 3600;        // วัน
+        if (unit == "h") totalSeconds += value * 3600;            // ชั่วโมง
+        if (unit == "m") totalSeconds += value * 60;              // นาที
+        if (unit == "s") totalSeconds += value;                   // วินาที
+    }
+    return totalSeconds;
+  }
 };

@@ -7,7 +7,7 @@ StreamWidget::StreamWidget(QProcess *rclone, QProcess *player,
     : QWidget(parent), mRclone(rclone), mPlayer(player) {
   ui.setupUi(this);
 
-  updateStartFinishInfo();
+  updateStartInfo();
 
   QString remoteTrimmed;
 
@@ -170,8 +170,7 @@ StreamWidget::StreamWidget(QProcess *rclone, QProcess *player,
         ui.cancel->setToolTip("Close");
         ui.cancel->setStatusTip("Close");
 
-        mFinishDateTime = QDateTime::currentDateTime();
-        updateStartFinishInfo();
+        updateFinishInfo();
 
         emit finished();
         //          emit closed();
@@ -197,15 +196,16 @@ void StreamWidget::cancel() {
 
 QDateTime StreamWidget::getStartDateTime() { return mStartDateTime; }
 
-void StreamWidget::updateStartFinishInfo() {
+void StreamWidget::updateStartInfo() {
+  ui.le_StartInfo->setText(
+    "Started:   " +
+    QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
+}
 
-  ui.le_StartFinishInfo->setText(
-      "Started:   " +
-      QLocale(QLocale::English)
-          .toString(mStartDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t") +
-      "              " + "Finished:  " +
-      QLocale(QLocale::English)
-          .toString(mFinishDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t"));
+void StreamWidget::updateFinishInfo() {
+  ui.le_FinishInfo->setText(
+    "Finished:   " +
+    QLocale::system().toString(QDateTime::currentDateTime(), QLocale::LongFormat));
 }
 
 QString StreamWidget::getStatus() { return mStatus; }

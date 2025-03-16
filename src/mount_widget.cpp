@@ -9,7 +9,7 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
     : QWidget(parent), mProcess(process) {
   ui.setupUi(this);
 
-  updateStartFinishInfo();
+  updateStartInfo();
 
   mUniqueID = uniqueID;
   QProcess *mScriptProcess = new QProcess();
@@ -325,8 +325,7 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
         ui.cancel->setStatusTip("Close");
         ui.cancel->setEnabled(true);
 
-        mFinishDateTime = QDateTime::currentDateTime();
-        updateStartFinishInfo();
+        updateFinishInfo();
         emit finished();
       });
 }
@@ -414,15 +413,16 @@ QString MountWidget::getUniqueID() { return mUniqueID; }
 QString MountWidget::getUnmountingError() { return mUnmountingError; }
 QDateTime MountWidget::getStartDateTime() { return mStartDateTime; }
 
-void MountWidget::updateStartFinishInfo() {
+void MountWidget::updateStartInfo() {
+  ui.le_StartInfo->setText(
+    "Started:   " +
+    QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
+}
 
-  ui.le_StartFinishInfo->setText(
-      "Started:   " +
-      QLocale(QLocale::English)
-          .toString(mStartDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t") +
-      "              " + "Finished:  " +
-      QLocale(QLocale::English)
-          .toString(mFinishDateTime, "ddd, dd/MMM/yyyy HH:mm:ss t"));
+void MountWidget::updateFinishInfo() {
+  ui.le_FinishInfo->setText(
+    "Finished:   " +
+    QLocale::system().toString(QDateTime::currentDateTime(), QLocale::LongFormat));
 }
 
 QString MountWidget::getStatus() { return mStatus; }

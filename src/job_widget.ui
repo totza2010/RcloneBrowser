@@ -607,28 +607,6 @@ QToolButton:pressed {
         </property>
        </widget>
       </item>
-      <item row="4" column="2" colspan="8">
-       <widget class="QLineEdit" name="le_StartFinishInfo">
-        <property name="contextMenuPolicy">
-         <enum>Qt::NoContextMenu</enum>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">* { background-color: rgba(0, 0, 0, 0); }</string>
-        </property>
-        <property name="text">
-         <string>Started: Sat, 11-Apr-2020 09:15:01 BST                                                 Finished: Sat, 11-Apr-2020 09:15:01 BST</string>
-        </property>
-        <property name="frame">
-         <bool>false</bool>
-        </property>
-        <property name="cursorPosition">
-         <number>126</number>
-        </property>
-        <property name="readOnly">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
       <item row="3" column="2">
        <spacer name="verticalSpacer_4">
         <property name="orientation">
@@ -644,6 +622,44 @@ QToolButton:pressed {
          </size>
         </property>
        </spacer>
+      </item>
+      <item row="4" column="2" colspan="4">
+       <widget class="QLineEdit" name="le_StartInfo">
+        <property name="contextMenuPolicy">
+         <enum>Qt::NoContextMenu</enum>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">* { background-color: rgba(0, 0, 0, 0); }</string>
+        </property>
+        <property name="frame">
+         <bool>false</bool>
+        </property>
+        <property name="cursorPosition">
+         <number>0</number>
+        </property>
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="6" colspan="4">
+       <widget class="QLineEdit" name="le_FinishInfo">
+        <property name="contextMenuPolicy">
+         <enum>Qt::NoContextMenu</enum>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">* { background-color: rgba(0, 0, 0, 0); }</string>
+        </property>
+        <property name="frame">
+         <bool>false</bool>
+        </property>
+        <property name="cursorPosition">
+         <number>0</number>
+        </property>
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+       </widget>
       </item>
      </layout>
     </widget>
