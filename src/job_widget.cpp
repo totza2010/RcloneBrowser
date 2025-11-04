@@ -147,7 +147,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     QRegularExpression rxTime(R"(^Elapsed time:\s+(\S+)$)");
     QRegularExpression rxProgress(R"(^\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+)$)"); // Until rclone 1.38
     QRegularExpression rxProgress2(R"(\*([^:]+):\s*([^%]+)% /[a-zA-z0-9.]+, [a-zA-z0-9.]+/s, (\w+)$)"); // Starting with rclone 1.39
-    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*([^%]+%) /([0-9.]+\w+), ([0-9.]*[a-zA-Z/]+s)*,)"); // Starting with rclone 1.56
+    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*([^%]+)% /([0-9.]+\w+), ([0-9.]*[a-zA-Z/]+s)*,)"); // Starting with rclone 1.56
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
       if (++mLines == 10000) {

@@ -2,7 +2,6 @@
 #include "global.h"
 #include "list_of_job_options.h"
 #include "utils.h"
-#include <QDialogButtonBox>
 
 RemoteFolderDialog::RemoteFolderDialog(
     bool isMove, bool isMultiSelect, QStringList includedList,

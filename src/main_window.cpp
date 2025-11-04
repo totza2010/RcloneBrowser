@@ -17,7 +17,6 @@
 #include "osx_helper.h"
 #endif
 #include "file_dialog.h"
-#include <QMediaPlayer>
 #include <QStyleFactory>
 #include <QInputDialog>
 #if defined(Q_OS_WIN)

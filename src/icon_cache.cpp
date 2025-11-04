@@ -4,12 +4,8 @@
 #include "osx_helper.h"
 #endif
 #include <QFileIconProvider>
-#include <QMimeDatabase>
-#include <QPixmap>
-#include <QIcon>
 #if defined(Q_OS_WIN32)
 #include <windows.h>
-#include <QImage>
 
 QPixmap pixmapFromHICON(HICON hIcon) {
     if (!hIcon) return QPixmap();

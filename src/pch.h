@@ -4,8 +4,6 @@
 #pragma warning(push, 0)
 #endif
 
-#include <memory>
-
 #include <QtCore>
 #include <QtDebug>
 #include <QtGui>

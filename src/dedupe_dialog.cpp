@@ -1,5 +1,4 @@
 #include "dedupe_dialog.h"
-#include "utils.h"
 
 DedupeDialog::DedupeDialog(const QString &remote, const QDir &path,
                            const QString &remoteType, QWidget *parent)

@@ -12,7 +12,6 @@
 #include "remote_folder_dialog.h"
 #include "transfer_dialog.h"
 #include "utils.h"
-#include <QStringConverter>
 #include <QMenu>
 #include <QInputDialog>
 

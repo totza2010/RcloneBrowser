@@ -1,5 +1,4 @@
 #include "check_dialog.h"
-#include "utils.h"
 #include <QFileDialog>
 
 CheckDialog::CheckDialog(const QString &remote, const QDir &path,

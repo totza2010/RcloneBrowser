@@ -5,9 +5,6 @@
 #include <algorithm>
 #include <QApplication>
 #include <QStyle>
-#include <QFileInfo>
-#include <QIcon>
-#include <QFontDatabase>
 
 namespace {
 static void advanceSpinner(QString &text) {

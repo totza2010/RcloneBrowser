@@ -6,10 +6,6 @@
 #include "stdio.h"
 #endif
 
-#ifdef Q_OS_MACOS
-extern void qt_set_sequence_auto_mnemonic(bool b);
-#endif
-
 #ifdef Q_OS_WIN
 // redirect debug to stderr so we can run "app.exe > log.txt 2>&1" on Windows
 void messageHandler(QtMsgType type, const QMessageLogContext &context,
