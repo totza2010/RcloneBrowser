@@ -2,7 +2,6 @@
 
 #include "hours_spinbox.h"
 #include "minutes_spinbox.h"
-#include "pch.h"
 #include "ui_scheduler_widget.h"
 
 class SchedulerWidget : public QWidget {

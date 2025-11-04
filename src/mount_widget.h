@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_mount_widget.h"
 
 class MountWidget : public QWidget {

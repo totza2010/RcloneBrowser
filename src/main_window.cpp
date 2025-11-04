@@ -17,6 +17,12 @@
 #include "osx_helper.h"
 #endif
 #include "file_dialog.h"
+#include <QMediaPlayer>
+#include <QStyleFactory>
+#include <QInputDialog>
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
 
 MainWindow::MainWindow() {
 
@@ -34,11 +40,6 @@ MainWindow::MainWindow() {
   }
 
   auto settings = GetSettings();
-
-#if defined(Q_OS_WIN)
-  // disable "?" WindowContextHelpButton
-  QApplication::setAttribute(Qt::AA_DisableWindowContextHelpButton);
-#endif
 
 #if !defined(Q_OS_MACOS)
   qApp->setStyle(QStyleFactory::create("Fusion"));
@@ -129,8 +130,8 @@ MainWindow::MainWindow() {
     }
   }
 #endif
-
-  mSystemTray.setIcon(qApp->windowIcon());
+  mSystemTray = new QSystemTrayIcon(this);
+  mSystemTray->setIcon(qApp->windowIcon());
   if (settings->contains("MainWindow/geometry")) {
     restoreGeometry(settings->value("MainWindow/geometry").toByteArray());
   }
@@ -144,7 +145,7 @@ MainWindow::MainWindow() {
       settings->value("Settings/notifyFinishedTransfers", true).toBool();
   mSoundNotif = settings->value("Settings/soundNotif", false).toBool();
 
-  mSystemTray.setVisible(mAlwaysShowInTray);
+  mSystemTray->setVisible(mAlwaysShowInTray);
 
   // during first run the lastUsed keys might not exist
   if (!(settings->contains("Settings/lastUsedSourceFolder"))) {
@@ -639,7 +640,7 @@ MainWindow::MainWindow() {
       mNotifyFinishedTransfers = dialog.getNotifyFinishedTransfers();
       mSoundNotif = dialog.getSoundNotif();
 
-      mSystemTray.setVisible(mAlwaysShowInTray);
+      mSystemTray->setVisible(mAlwaysShowInTray);
     }
   });
 
@@ -2030,21 +2031,21 @@ MainWindow::MainWindow() {
     ui.actionStartQueue->trigger();
   }
 
-  QObject::connect(&mSystemTray, &QSystemTrayIcon::activated, this,
+  QObject::connect(mSystemTray, &QSystemTrayIcon::activated, this,
                    [=](QSystemTrayIcon::ActivationReason reason) {
                      if (reason == QSystemTrayIcon::DoubleClick ||
                          reason == QSystemTrayIcon::Trigger) {
                        showNormal();
-                       mSystemTray.setVisible(mAlwaysShowInTray);
+                       mSystemTray->setVisible(mAlwaysShowInTray);
 #ifdef Q_OS_MACOS
                        osxShowDockIcon();
 #endif
                      }
                    });
 
-  QObject::connect(&mSystemTray, &QSystemTrayIcon::messageClicked, this, [=]() {
+  QObject::connect(mSystemTray, &QSystemTrayIcon::messageClicked, this, [=]() {
     showNormal();
-    mSystemTray.setVisible(mAlwaysShowInTray);
+    mSystemTray->setVisible(mAlwaysShowInTray);
 #ifdef Q_OS_MACOS
     osxShowDockIcon();
 #endif
@@ -2065,7 +2066,7 @@ MainWindow::MainWindow() {
         MainWindow::raise(); // bring window from minimized state on macOS
         MainWindow::activateWindow(); // bring window to front/unminimize on
                                       // windows
-        mSystemTray.setVisible(mAlwaysShowInTray);
+        mSystemTray->setVisible(mAlwaysShowInTray);
 #ifdef Q_OS_MACOS
         osxShowDockIcon();
 #endif
@@ -2080,7 +2081,7 @@ MainWindow::MainWindow() {
                      }
                    });
 
-  mSystemTray.setContextMenu(trayMenu);
+  mSystemTray->setContextMenu(trayMenu);
 
   mStatusMessage = new QLabel();
   ui.statusBar->addWidget(mStatusMessage);
@@ -2115,7 +2116,7 @@ MainWindow::MainWindow() {
 #ifdef Q_OS_MACOS
     osxHideDockIcon();
 #endif
-    mSystemTray.show();
+    mSystemTray->show();
     QTimer::singleShot(0, this, SLOT(hide()));
   }
 }
@@ -2538,11 +2539,7 @@ void MainWindow::rcloneGetVersion() {
           };
 #endif
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 1)
           QStringList lines = version.split("\n", Qt::SkipEmptyParts);
-#else
-          QStringList lines = version.split("\n", QString::SkipEmptyParts);
-#endif
 
           QString rclone_info2;
           QString rclone_info3;
@@ -3209,7 +3206,7 @@ void MainWindow::closeEvent(QCloseEvent *ev) {
 #ifdef Q_OS_MACOS
     osxHideDockIcon();
 #endif
-    mSystemTray.show();
+    mSystemTray->show();
     hide();
     ev->ignore();
     return;
@@ -3687,7 +3684,7 @@ void MainWindow::runItem(JobOptionsListWidgetItem *item,
 
     QDateTime dt = QDateTime::currentDateTime();
     QDateTime widgetStartDateTime = dt;
-    int remove;
+    int remove = 0;
     bool foundOldest = false;
 
     for (int i = widgetsCount - 2; i >= 0; i = i - 2) {
@@ -3938,8 +3935,9 @@ void MainWindow::runItem(JobOptionsListWidgetItem *item,
     if (!jo->extra.trimmed().isEmpty()) {
       for (auto line : jo->extra.trimmed().split('\n')) {
         if (!line.isEmpty()) {
-          for (QString arg :
-               line.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+          QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+
+          for (QString arg : line.split(re)) {
             if (!arg.isEmpty()) {
               args << arg.replace("\"", "");
             }
@@ -4241,7 +4239,7 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
         if (mNotifyFinishedTransfers) {
           mLastFinished = widget;
 #if defined(Q_OS_WIN)
-          mSystemTray.showMessage(
+          mSystemTray->showMessage(
               "Rclone Browser - transfer " + jobFinalStatus, info,
               QIcon(":media/images/program_icons/rclone-browser512.png"));
 #else
@@ -4249,15 +4247,20 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
           MacOsNotification::Display(
               "Rclone Browser - transfer " + jobFinalStatus, info);
 #else
-          mSystemTray.showMessage("Rclone Browser - transfer " + jobFinalStatus,
+          mSystemTray->showMessage("Rclone Browser - transfer " + jobFinalStatus,
                                   info, QSystemTrayIcon::Information);
 #endif
 #endif
         }
+        QMediaPlayer *mPlayer = nullptr;
 
         if (mSoundNotif) {
-          // play notification sound
-          QSound::play(":media/sounds/notification-sound.wav");
+            if (!mPlayer) {
+                mPlayer = new QMediaPlayer(this);
+            }
+            mPlayer->setSource(QUrl("qrc:/media/sounds/notification-sound.wav"));
+            mPlayer->setLoops(1);
+            mPlayer->play();
         }
 
         --mTransferJobCount;
@@ -4582,7 +4585,9 @@ void MainWindow::runScript(const QString &script) {
 
   QStringList scriptList;
 
-  for (QString arg : script.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+  QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+
+  for (QString arg : script.split(re)) {
     if (!arg.isEmpty()) {
       scriptList << arg.replace("\"", "");
     }
@@ -4618,13 +4623,12 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
   QString opt = settings->value("Settings/mount").toString();
 
   if (!opt.isEmpty()) {
-    // split on spaces but not if inside quotes e.g. --option-1 --option-2="arg1
-    // arg2" --option-3 arg3 should generate "--option-1" "--option-2=\"arg1
-    // arg2\"" "--option-3" "arg3"
-    for (QString arg : opt.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
-      if (!arg.isEmpty()) {
-        argsFinal << arg.replace("\"", "");
-      }
+    QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+
+    for (QString arg : opt.split(re)) {
+        if (!arg.isEmpty()) {
+            argsFinal << arg.replace("\"", "");
+        }
     }
   }
 
@@ -5087,8 +5091,9 @@ void MainWindow::addStream(const QString &remote, const QString &stream,
   ui.buttonSortByStatus->setEnabled(_jobsCount > 1);
 
   QStringList streamPrefsList;
+  QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
 
-  for (QString arg : stream.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+  for (QString arg : stream.split(re)) {
     if (!arg.isEmpty()) {
       streamPrefsList << arg.replace("\"", "");
     }
@@ -5146,7 +5151,7 @@ void MainWindow::sortJobs() {
   }
 
   int widgetsCount = ui.jobs->count();
-  int move;
+  int move = 0;
   QDateTime dt;
   QDateTime widgetStartDateTime;
   QString widgetStatus = 0;

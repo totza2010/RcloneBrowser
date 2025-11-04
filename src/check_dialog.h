@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_check_dialog.h"
 
 class CheckDialog : public QDialog {

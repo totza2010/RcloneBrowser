@@ -1,5 +1,5 @@
 #pragma once
-#include "pch.h"
+#include <QSpinBox>
 
 class MinutesSpinBox : public QSpinBox {
   Q_OBJECT

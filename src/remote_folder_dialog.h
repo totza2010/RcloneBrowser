@@ -2,7 +2,6 @@
 
 #include "item_model.h"
 #include "job_options.h"
-#include "pch.h"
 #include "ui_remote_folder_dialog.h"
 
 QString setRemoteMode(int, QString);

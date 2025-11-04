@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_progress_dialog.h"
 
 class ProgressDialog : public QDialog {

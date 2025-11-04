@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_export_dialog.h"
 
 class ExportDialog : public QDialog {

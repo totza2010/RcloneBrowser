@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_job_widget.h"
 
 class JobWidget : public QWidget {

@@ -11,15 +11,8 @@
 #include <QtGui>
 #include <QtMultimedia>
 #include <QtNetwork>
-#include <QtWidgets>
-
-#if defined(Q_OS_WIN32)
-#include <QtWinExtras>
-#endif
-
-#ifdef Q_OS_MACOS
-#include <QtMacExtras>
-#endif
+#include <QMessageBox>
+#include <QPushButton>
 
 #ifdef _MSC_VER
 #pragma warning pop

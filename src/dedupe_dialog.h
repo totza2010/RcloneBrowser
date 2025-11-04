@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_dedupe_dialog.h"
 
 class DedupeDialog : public QDialog {

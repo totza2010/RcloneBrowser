@@ -1,5 +1,9 @@
 #pragma once
-#include "pch.h"
+#include <QFileDialog>
+#include <QListView>
+#include <QTreeView>
+#include <QStringList>
+#include <QEvent>
 
 // Subclass QFileDialog for customise allow select both file/folder
 class FileDialog : public QFileDialog {

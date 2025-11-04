@@ -1,5 +1,7 @@
 #include "job_widget.h"
 #include "utils.h"
+#include <QProgressBar>
+#include <QLabel>
 
 JobWidget::JobWidget(QProcess *process, const QString &info,
                      const QStringList &args, const QString &source,
@@ -133,30 +135,19 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
     // regex101.com great for testing regexp
-    QRegExp rxSize(
-        R"(^Transferred:\s+(\S+ \S+) \(([^)]+)\)$)"); // Until rclone 1.42
-    QRegExp rxSize2(
-        R"(^Transferred:\s+([0-9.]+)(\S)? \/ (\S+) (\S+), ([0-9%-]+), (\S+ \S+), (\S+) (\S+)$)"); // Starting with rclone 1.43
-    QRegExp rxSize3(
-        R"(^Transferred:\s+([0-9.]+ \w+) \/ ([0-9.]+ \w+), ([0-9%-]+), ([0-9.]+ \w+\/s), \w+ (\S+)$)"); // Starting with rclone 1.57
-    QRegExp rxErrors(
-        R"(^Errors:\s+(\d+)(.*)$)"); // captures also following variant:
-                                     // "Errors: 123 (bla bla bla)"
-    QRegExp rxChecks(R"(^Checks:\s+(\S+)$)"); // Until rclone 1.42
-    QRegExp rxChecks2(
-        R"(^Checks:\s+(\S+) \/ (\S+), ([0-9%-]+)$)");   // Starting with
-                                                        // rclone 1.43
-    QRegExp rxTransferred(R"(^Transferred:\s+(\S+)$)"); // Until rclone 1.42
-    QRegExp rxTransferred2(
-        R"(^Transferred:\s+(\d+) \/ (\d+), ([0-9%-]+)$)"); // Starting with
-                                                           // rclone 1.43
-    QRegExp rxTime(R"(^Elapsed time:\s+(\S+)$)");
-    QRegExp rxProgress(
-        R"(^\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+)$)"); // Until rclone 1.38
-    QRegExp rxProgress2(
-        R"(\*([^:]+):\s*([^%]+)% \/[a-zA-z0-9.]+, [a-zA-z0-9.]+\/s, (\w+)$)"); // Starting with rclone 1.39
-    QRegExp rxProgress3(
-        R"(^\* ([^:]+):\s*([^%]+%) \/([0-9.]+\w+), ([0-9.]*[a-zA-Z\/]+s)*,)"); // Starting with rclone 1.56
+    QRegularExpression rxSize(R"(^Transferred:\s+(\S+ \S+) \(([^)]+)\)$)"); // Until rclone 1.42
+    QRegularExpression rxSize2(R"(^Transferred:\s+([0-9.]+)(\S)? / (\S+) (\S+), ([0-9%-]+), (\S+ \S+), (\S+) (\S+)$)"); // Starting with rclone 1.43
+    QRegularExpression rxSize3(R"(^Transferred:\s+([0-9.]+ \w+) / ([0-9.]+ \w+), ([0-9%-]+), ([0-9.]+ \w+/s), \w+ (\S+)$)"); // Starting with rclone 1.57
+    QRegularExpression rxErrors(R"(^Errors:\s+(\d+)(.*)$)"); // captures also following variant: "Errors: 123 (bla bla bla)"
+    QRegularExpression rxChecks(R"(^Checks:\s+(\S+)$)"); // Until rclone 1.42
+    QRegularExpression rxChecks2(R"(^Checks:\s+(\S+) / (\S+), ([0-9%-]+)$)");   // Starting with rclone 1.43
+    QRegularExpression rxChecks3(R"(^Checks:\s+(\S+) / (\S+), ([0-9%-]+), Listed (\S+)$)"); // Starting with rclone 1.70
+    QRegularExpression rxTransferred(R"(^Transferred:\s+(\S+)$)"); // Until rclone 1.42
+    QRegularExpression rxTransferred2(R"(^Transferred:\s+(\d+) / (\d+), ([0-9%-]+)$)"); // Starting with rclone 1.43
+    QRegularExpression rxTime(R"(^Elapsed time:\s+(\S+)$)");
+    QRegularExpression rxProgress(R"(^\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+)$)"); // Until rclone 1.38
+    QRegularExpression rxProgress2(R"(\*([^:]+):\s*([^%]+)% /[a-zA-z0-9.]+, [a-zA-z0-9.]+/s, (\w+)$)"); // Starting with rclone 1.39
+    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*([^%]+%) /([0-9.]+\w+), ([0-9.]*[a-zA-Z/]+s)*,)"); // Starting with rclone 1.56
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
       if (++mLines == 10000) {
@@ -183,57 +174,81 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
         continue;
       }
 
-      if (rxSize.exactMatch(line)) {
-        ui.size->setText(rxSize.cap(1));
+      QRegularExpressionMatch match = rxSize.match(line);
+      if (match.hasMatch()) {
+        ui.size->setText(match.captured(1));
 
         ui.progress_info->setStyleSheet(
             "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + rxSize.cap(1) + ")");
+        ui.progress_info->setText("(" + match.captured(1) + ")");
 
-        ui.bandwidth->setText(rxSize.cap(2));
-      } else if (rxSize2.exactMatch(line)) {
-        ui.size->setText(rxSize2.cap(1) + " " + rxSize2.cap(2) + "B" + ", " +
-                         rxSize2.cap(5));
-        ui.bandwidth->setText(rxSize2.cap(6));
-        ui.eta->setText(rxSize2.cap(8));
-        updateFinishInfo(rxSize2.cap(8));
-        ui.totalsize->setText(rxSize2.cap(3) + " " + rxSize2.cap(4));
+        ui.bandwidth->setText(match.captured(2));
+      }
+      match = rxSize2.match(line);
+      if (match.hasMatch()) {
+        ui.size->setText(match.captured(1) + " " + match.captured(2) + "B" + ", " +
+                         match.captured(5));
+        ui.bandwidth->setText(match.captured(6));
+        ui.eta->setText(match.captured(8));
+        updateFinishInfo(match.captured(8));
+        ui.totalsize->setText(match.captured(3) + " " + match.captured(4));
         ui.progress_info->setStyleSheet(
             "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + rxSize2.cap(5) + ")");
-      } else if (rxSize3.exactMatch(line)) {
-        ui.size->setText(rxSize3.cap(1) + ", " + rxSize3.cap(3));
-        ui.bandwidth->setText(rxSize3.cap(4));
-        ui.eta->setText(rxSize3.cap(5));
-        updateFinishInfo(rxSize3.cap(5));
-        ui.totalsize->setText(rxSize3.cap(2));
+        ui.progress_info->setText("(" + match.captured(5) + ")");
+      }
+      match = rxSize3.match(line);
+      if (match.hasMatch()) {
+        ui.size->setText(match.captured(1) + ", " + match.captured(3));
+        ui.bandwidth->setText(match.captured(4));
+        ui.eta->setText(match.captured(5));
+        updateFinishInfo(match.captured(5));
+        ui.totalsize->setText(match.captured(2));
         ui.progress_info->setStyleSheet(
           "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + rxSize3.cap(3) + ")");
-      } else if (rxErrors.exactMatch(line)) {
-        ui.errors->setText(rxErrors.cap(1));
+        ui.progress_info->setText("(" + match.captured(3) + ")");
+      }
+      match = rxErrors.match(line);
+      if (match.hasMatch()) {
+        ui.errors->setText(match.captured(1));
 
-        if (!(rxErrors.cap(1).toInt() == 0)) {
+        if (!(match.captured(1).toInt() == 0)) {
           ui.progress_info->setStyleSheet(
               "QLabel { color: red; font-weight: bold;}");
           ui.errors->setStyleSheet(
               "QLineEdit { color: red; font-weight: normal;}");
         }
-      } else if (rxChecks.exactMatch(line)) {
-        ui.checks->setText(rxChecks.cap(1));
-      } else if (rxChecks2.exactMatch(line)) {
-        ui.checks->setText(rxChecks2.cap(1) + " / " + rxChecks2.cap(2) + ", " +
-                           rxChecks2.cap(3));
-      } else if (rxTransferred.exactMatch(line)) {
-        ui.transferred->setText(rxTransferred.cap(1));
-      } else if (rxTransferred2.exactMatch(line)) {
-        ui.transferred->setText(rxTransferred2.cap(1) + " / " +
-                                rxTransferred2.cap(2) + ", " +
-                                rxTransferred2.cap(3));
-      } else if (rxTime.exactMatch(line)) {
-        ui.elapsed->setText(rxTime.cap(1));
-      } else if (rxProgress.exactMatch(line)) {
-        QString name = rxProgress.cap(1).trimmed();
+      }
+      match = rxChecks.match(line);
+      if (match.hasMatch()) {
+        ui.checks->setText(match.captured(1));
+      }
+      match = rxChecks2.match(line);
+      if (match.hasMatch()) {
+        ui.checks->setText(match.captured(1) + " / " + match.captured(2) + ", " +
+                           match.captured(3));
+      }
+      match = rxChecks3.match(line);
+      if (match.hasMatch()) {
+        ui.checks->setText(match.captured(1) + " / " + match.captured(2) + ", " +
+                           match.captured(3) + ", Listed " + match.captured(4));
+      }
+      match = rxTransferred.match(line);
+      if (match.hasMatch()) {
+        ui.transferred->setText(match.captured(1));
+      }
+      match = rxTransferred2.match(line);
+      if (match.hasMatch()) {
+        ui.transferred->setText(match.captured(1) + " / " +
+                                match.captured(2) + ", " +
+                                match.captured(3));
+      }
+      match = rxTime.match(line);
+      if (match.hasMatch()) {
+        ui.elapsed->setText(match.captured(1));
+      }
+      match = rxProgress.match(line);
+      if (match.hasMatch()) {
+        QString name = match.captured(1).trimmed();
 
         auto it = mActive.find(name);
 
@@ -258,12 +273,14 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        bar->setValue(rxProgress.cap(2).toInt());
-        bar->setToolTip(rxProgress.cap(3));
+        bar->setValue(match.captured(2).toInt());
+        bar->setToolTip(match.captured(3));
 
         mUpdated.insert(label);
-      } else if (rxProgress2.exactMatch(line)) {
-        QString name = rxProgress2.cap(1).trimmed();
+      }
+      match = rxProgress2.match(line);
+      if (match.hasMatch()) {
+        QString name = match.captured(1).trimmed();
 
         auto it = mActive.find(name);
 
@@ -297,14 +314,16 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        int progressValue = rxProgress2.cap(2).toInt();
+        int progressValue = match.captured(2).toInt();
         bar->setValue(progressValue);
-        bar->setToolTip("File name: " + name + "\nFile stats" + rxProgress2.cap(0).mid(rxProgress2.cap(0).indexOf(':')));
-        bar->setFormat(rxProgress2.cap(0).mid(rxProgress2.cap(0).indexOf(':') + 2).trimmed());
+        bar->setToolTip("File name: " + name + "\nFile stats" + match.captured(0).mid(match.captured(0).indexOf(':')));
+        bar->setFormat(match.captured(0).mid(match.captured(0).indexOf(':') + 2).trimmed());
 
         mUpdated.insert(label);
-      } else if (rxProgress3.exactMatch(line)) {
-        QString name = rxProgress3.cap(1).trimmed();
+      }
+      match = rxProgress3.match(line);
+      if (match.hasMatch()) {
+        QString name = match.captured(1).trimmed();
 
         auto it = mActive.find(name);
 
@@ -338,10 +357,10 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        int progressValue = rxProgress3.cap(2).toInt();
+        int progressValue = match.captured(2).toInt();
         bar->setValue(progressValue);
-        bar->setToolTip("File name: " + name + "\nFile stats" + rxProgress3.cap(0).mid(rxProgress3.cap(0).indexOf(':')));
-        bar->setFormat(rxProgress3.cap(0).mid(rxProgress3.cap(0).indexOf(':') + 2).trimmed());
+        bar->setToolTip("File name: " + name + "\nFile stats" + match.captured(0).mid(match.captured(0).indexOf(':')));
+        bar->setFormat(match.captured(0).mid(match.captured(0).indexOf(':') + 2).trimmed());
 
         mUpdated.insert(label);
       }

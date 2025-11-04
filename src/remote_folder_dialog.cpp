@@ -2,6 +2,7 @@
 #include "global.h"
 #include "list_of_job_options.h"
 #include "utils.h"
+#include <QDialogButtonBox>
 
 RemoteFolderDialog::RemoteFolderDialog(
     bool isMove, bool isMultiSelect, QStringList includedList,
@@ -339,8 +340,8 @@ QStringList RemoteFolderDialog::getOptions() {
     for (auto line : ui.pte_textExtra->toPlainText().trimmed().split('\n')) {
       if (!line.isEmpty()) {
 
-        for (QString arg :
-             line.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+        QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+        for (QString arg : line.split(re)) {
           if (!arg.isEmpty()) {
             args << arg.replace("\"", "");
           }

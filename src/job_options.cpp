@@ -159,11 +159,9 @@ QStringList JobOptions::getOptions() const {
   if (!extra.isEmpty()) {
 
     for (auto line : extra.split('\n')) {
-      // split on spaces but not if inside quotes e.g. --option-1
-      // --option-2="arg1 arg2" --option-3 arg3 should generate "--option-1"
-      // "--option-2=\"arg1 arg2\"" "--option-3" "arg3"
-      for (QString arg :
-           line.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+      QRegularExpression re(R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
+
+      for (QString arg : line.split(re)) {
         if (!arg.isEmpty()) {
           list << arg.replace("\"", "");
         }

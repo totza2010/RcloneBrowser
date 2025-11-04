@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_preferences_dialog.h"
 
 class PreferencesDialog : public QDialog {

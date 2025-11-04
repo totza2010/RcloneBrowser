@@ -1,5 +1,7 @@
 #include "preferences_dialog.h"
 #include "utils.h"
+#include <QFileDialog>
+#include <QSystemTrayIcon>
 
 PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 

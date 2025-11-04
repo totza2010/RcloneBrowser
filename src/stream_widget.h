@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_stream_widget.h"
 
 class StreamWidget : public QWidget {

@@ -1,5 +1,6 @@
 #include "export_dialog.h"
 #include "utils.h"
+#include <QFileDialog>
 
 ExportDialog::ExportDialog(const QString &remote, const QDir &path,
                            QWidget *parent)

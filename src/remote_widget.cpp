@@ -12,6 +12,9 @@
 #include "remote_folder_dialog.h"
 #include "transfer_dialog.h"
 #include "utils.h"
+#include <QStringConverter>
+#include <QMenu>
+#include <QInputDialog>
 
 RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                            const QString &remoteType, QWidget *parent)
@@ -1325,7 +1328,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
         return;
       }
 
-      QRegExp re(R"(^\s*(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)");
+      QRegularExpression re(R"(^\s*(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)");
 
       QProcess *process = new QProcess;
       UseRclonePassword(process);
@@ -1353,15 +1356,19 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
       QObject::connect(progress, &ProgressDialog::outputAvailable, this,
                        [=](const QString &output) {
                          QTextStream out(file);
-                         out.setCodec("UTF-8");
+                         out.setEncoding(QStringConverter::Utf8);
 
                          for (const auto &line : output.split('\n')) {
 
                            QString lineTmp = line;
                            lineTmp.replace("\n", "");
 
-                           if (re.exactMatch(lineTmp)) {
-                             QStringList cap = re.capturedTexts();
+                              QRegularExpressionMatch match = re.match(lineTmp);
+                              if (match.hasMatch()) {
+                                  QStringList cap;
+                                  for (int i = 0; i <= re.captureCount(); ++i) {
+                                      cap << match.captured(i);
+                                  }
 
                              if (txt) {
                                out << "\"" << cap[3] << "\"" << '\n';
@@ -1644,7 +1651,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
       [=](const QDir &path, const QModelIndex &parent) {
         setRemoteMode(ui.cb_GoogleDriveMode->currentIndex(), remoteType);
 
-        qApp->setActiveWindow(this);
+        QWidget::activateWindow();
         QDir destPath = model->path(parent);
         QString dest = QFileInfo(path.path()).isDir()
                            ? destPath.filePath(path.dirName())

@@ -3,6 +3,11 @@
 #include "icon_cache.h"
 #include "utils.h"
 #include <algorithm>
+#include <QApplication>
+#include <QStyle>
+#include <QFileInfo>
+#include <QIcon>
+#include <QFontDatabase>
 
 namespace {
 static void advanceSpinner(QString &text) {
@@ -86,7 +91,7 @@ ItemModel::ItemModel(IconCache *icons, const QString &remote, QObject *parent)
           R"(^\s*[\d-]+ (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d) \s*[\d-]+ (.+)$)"),
       mRegExpFile(
           R"(^\s*(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)") {
-  QStyle *style = qApp->style();
+  QStyle *style = QApplication::style();
   mDriveIcon = style->standardIcon(QStyle::SP_DriveNetIcon);
   mFolderIcon = style->standardIcon(QStyle::SP_DirIcon);
   mFileIcon = style->standardIcon(QStyle::SP_FileIcon);
@@ -272,7 +277,7 @@ QVariant ItemModel::data(const QModelIndex &index, int role) const {
 
   if (role == Qt::TextAlignmentRole) {
     if (index.column() == 1) {
-      return Qt::AlignRight + Qt::AlignVCenter;
+      return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
     }
     return QVariant();
   }
@@ -516,15 +521,17 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
 
       QString line = lsd->readLine();
       line.replace("\n", "");
+      QRegularExpressionMatch match = mRegExpFolder.match(line);
 
-      if (mRegExpFolder.exactMatch(line)) {
-        QStringList cap = mRegExpFolder.capturedTexts();
+      if (match.hasMatch()) {
+        QString cap1 = match.captured(1);
+        QString cap2 = match.captured(2);
 
         Item *child = new Item();
         child->isFolder = true;
         child->parent = parent;
-        child->name = cap[2];
-        child->modified = cap[1];
+        child->name = cap2;
+        child->modified = cap1;
 
         cache->append(child);
       }
@@ -536,15 +543,18 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
 
       QString line = lsl->readLine();
       line.replace("\n", "");
+      QRegularExpressionMatch match = mRegExpFile.match(line);
 
-      if (mRegExpFile.exactMatch(line)) {
-        QStringList cap = mRegExpFile.capturedTexts();
+      if (match.hasMatch()) {
+          QString cap1 = match.captured(1);
+          QString cap2 = match.captured(2);
+          QString cap3 = match.captured(3);
 
         Item *child = new Item();
         child->parent = parent;
-        child->name = cap[3];
-        child->modified = cap[2];
-        child->size = cap[1].toULongLong();
+        child->name = cap3;
+        child->modified = cap2;
+        child->size = cap1.toULongLong();
 
         cache->append(child);
       }

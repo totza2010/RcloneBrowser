@@ -1,7 +1,6 @@
 #pragma once
 
 #include "item_model.h"
-#include "pch.h"
 #include "ui_remote_widget.h"
 
 QString setRemoteMode(int, QString);

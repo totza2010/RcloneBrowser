@@ -2,6 +2,8 @@
 #include "file_dialog.h"
 #include "list_of_job_options.h"
 #include "utils.h"
+#include <QFileDialog>
+#include <QToolTip>
 
 TransferDialog::TransferDialog(bool isDownload, bool isDrop,
                                const QString &remote, const QDir &path,

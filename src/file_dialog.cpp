@@ -1,5 +1,10 @@
 #include "file_dialog.h"
 #include "utils.h"
+#include <QToolButton>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QApplication>
+#include <QHeaderView>  
 
 /*
 

@@ -2,6 +2,7 @@
 #include "global.h"
 #include "list_of_job_options.h"
 #include "utils.h"
+#include <QFileDialog>
 
 MountDialog::MountDialog(const QString &remote, const QDir &path,
                          const QString &remoteType, const QString &remoteMode,
@@ -81,7 +82,7 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
 
   // used drives' letters
   QStringList disksUsed;
-  int firstDiskFreeIndex;
+  int firstDiskFreeIndex = 0;
 
   // initailize drive letters
   QStringList drivesList;
@@ -525,8 +526,9 @@ QStringList MountDialog::getOptions() {
     for (auto line : ui.textExtra->toPlainText().trimmed().split('\n')) {
       if (!line.isEmpty()) {
 
-        for (QString arg :
-             line.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+        QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+
+        for (QString arg : line.split(re)) {
           if (!arg.isEmpty()) {
             list << arg.replace("\"", "");
           }

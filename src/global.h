@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 class Global {
 public:
   // global variable to keep used RC ports

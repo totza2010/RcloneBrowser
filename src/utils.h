@@ -1,7 +1,5 @@
 #pragma once
 
-#include "pch.h"
-
 std::unique_ptr<QSettings> GetSettings();
 
 void ReadSettings(QSettings *settings, QObject *widget);

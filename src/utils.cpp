@@ -1,4 +1,10 @@
 #include "utils.h"
+#include <QRadioButton>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QLineEdit>
+#include <QPlainTextEdit>
 
 static QString gRclone;
 static QString gRcloneConf;
@@ -22,29 +28,22 @@ std::vector<std::string> split(const std::string &s, char d) {
 unsigned int compareVersion(std::string version1, std::string version2) {
   auto v1 = split(version1, '.');
   auto v2 = split(version2, '.');
-  unsigned int max = v1.size() > v2.size() ? v1.size() : v2.size();
-  // pad the shorter version string
-  if (v1.size() != max) {
-    for (unsigned int i = max - v1.size(); i--;) {
-      v1.push_back("0");
-    }
-  } else {
-    for (unsigned int i = max - v2.size(); i--;) {
-      v2.push_back("0");
-    }
-  }
+  unsigned int max = std::max(v1.size(), v2.size());
+
+  while (v1.size() < max) v1.push_back("0");
+  while (v2.size() < max) v2.push_back("0");
+
   for (unsigned int i = 0; i < max; i++) {
-    unsigned int n1 = stoi(v1[i]);
-    unsigned int n2 = stoi(v2[i]);
-    if (n1 > n2) {
-      // version1 is higher than version2
-      return 1;
-    } else if (n1 < n2) {
-      // version2 is higher than version1
-      return 2;
+    try {
+      unsigned int n1 = std::stoi(v1[i].empty() ? "0" : v1[i]);
+      unsigned int n2 = std::stoi(v2[i].empty() ? "0" : v2[i]);
+      if (n1 > n2) return 1;
+      if (n1 < n2) return 2;
+    } catch (const std::invalid_argument &) {
+      // fallback default
+      return 0;
     }
   }
-  // the same versions
   return 0;
 }
 
@@ -66,7 +65,7 @@ static QString GetIniFilename() {
   return appBundlePath.dir().filePath(appBundlePath.baseName() + ".ini");
 #else
 #ifdef Q_OS_WIN
-  QFileInfo applicationPath = qApp->applicationFilePath();
+  QFileInfo applicationPath(qApp->applicationFilePath());
   return applicationPath.dir().filePath(applicationPath.baseName() + ".ini");
 #else
   QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
@@ -93,7 +92,7 @@ bool IsPortableMode() {
     return true;
   }
 
-  if (QFileInfo(ini).exists()) {
+  if (QFileInfo(ini).exists(ini)) {
 
     return true;
   } else {
@@ -295,11 +294,9 @@ QStringList GetDefaultOptionsList(const QString &settingsOptions) {
   QStringList defaultOptionsList;
 
   if (!defaultOptions.isEmpty()) {
-    // split on spaces but not if inside quotes e.g. --option-1 --option-2="arg1
-    // arg2" --option-3 arg3 should generate "--option-1" "--option-2=\"arg1
-    // arg2\"" "--option-3" "arg3"
-    for (QString arg :
-         defaultOptions.split(QRegExp(" (?=[^\"]*(\"[^\"]*\"[^\"]*)*$)"))) {
+    QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
+
+    for (QString arg : defaultOptions.split(re)) {
       if (!arg.isEmpty()) {
         defaultOptionsList << arg.replace("\"", "");
       }
@@ -348,7 +345,7 @@ QDir GetConfigDir() {
   } else {
     // get data location folder from Qt  - OS dependend
     outputDir =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
   }
 
   // if (!outputDir.exists()) {

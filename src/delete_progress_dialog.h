@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "ui_delete_progress_dialog.h"
 
 class DeleteProgressDialog : public QDialog {

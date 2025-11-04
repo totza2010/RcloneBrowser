@@ -1,7 +1,5 @@
 #pragma once
 
-#include "pch.h"
-
 struct Item;
 
 class IconCache : public QObject {

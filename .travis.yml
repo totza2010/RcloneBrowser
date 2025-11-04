@@ -11,8 +11,8 @@ matrix:
       addons:
         apt:
           packages:
-            - qttools5-dev
-            - qtmultimedia5-dev
+            - qt6-base-dev
+            - qt6-multimedia-dev
 
       script:
         - mkdir build && cd build

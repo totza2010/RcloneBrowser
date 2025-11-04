@@ -1,11 +1,11 @@
 #pragma once
 #include "icon_cache.h"
 #include "job_options.h"
-#include "pch.h"
 #include "ui_main_window.h"
 #ifdef Q_OS_MACOS
 #include "mac_os_power_saving.h"
 #endif
+#include <QSystemTrayIcon>
 
 class JobWidget;
 
@@ -54,7 +54,7 @@ private slots:
 private:
   Ui::MainWindow ui;
 
-  QSystemTrayIcon mSystemTray;
+  QSystemTrayIcon *mSystemTray = nullptr;
   JobWidget *mLastFinished = nullptr;
 
   bool mAlwaysShowInTray;

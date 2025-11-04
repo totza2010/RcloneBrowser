@@ -58,21 +58,6 @@ int main(int argc, char *argv[]) {
   QLocale l(QLocale::English, QLocale::UnitedKingdom);
   QLocale::setDefault(l);
 
-#ifdef Q_OS_MACOS
-  qt_set_sequence_auto_mnemonic(true);
-#endif
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
-  static const char ENV_VAR_QT_DEVICE_PIXEL_RATIO[] = "QT_DEVICE_PIXEL_RATIO";
-  if (!qEnvironmentVariableIsSet(ENV_VAR_QT_DEVICE_PIXEL_RATIO) &&
-      !qEnvironmentVariableIsSet("QT_AUTO_SCREEN_SCALE_FACTOR") &&
-      !qEnvironmentVariableIsSet("QT_SCALE_FACTOR") &&
-      !qEnvironmentVariableIsSet("QT_SCREEN_SCALE_FACTORS")) {
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-  }
-#endif
-
   QApplication app(argc, argv);
 
   //  app.setApplicationDisplayName("Rclone Browser");
@@ -311,8 +296,8 @@ int main(int argc, char *argv[]) {
 #else
     // not macOS
 #ifdef Q_OS_WIN
-    applicationPath = qApp->applicationFilePath();
-    tmpDir = applicationPath.absolutePath();
+  QFileInfo applicationPath(qApp->applicationFilePath());
+  QString tmpDir = applicationPath.absolutePath();
 #else
     QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
     tmpDir = xdg_config_home + "/rclone-browser";
@@ -396,7 +381,8 @@ int main(int argc, char *argv[]) {
   // qDebug() << QString("main.cpp tmpDir:  " + tmpDir);
 
   // not most elegant as fixed name but in reality not big deal
-  QLockFile lockFile(tmpDir + "/.RcloneBrowser_4q6RgLs2RpbJA.lock");
+  char* lockLocalUserName = std::getenv("USER");
+  QLockFile lockFile(tmpDir + "/." + lockLocalUserName + "RcloneBrowser_4q6RgLs2RpbJA.lock");
 
   if (!lockFile.tryLock(100)) {
     // if already running display warning and quit
