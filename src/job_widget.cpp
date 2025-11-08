@@ -145,9 +145,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     QRegularExpression rxTransferred(R"(^Transferred:\s+(\S+)$)"); // Until rclone 1.42
     QRegularExpression rxTransferred2(R"(^Transferred:\s+(\d+) / (\d+), ([0-9%-]+)$)"); // Starting with rclone 1.43
     QRegularExpression rxTime(R"(^Elapsed time:\s+(\S+)$)");
-    QRegularExpression rxProgress(R"(^\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+)$)"); // Until rclone 1.38
-    QRegularExpression rxProgress2(R"(\*([^:]+):\s*([^%]+)% /[a-zA-z0-9.]+, [a-zA-z0-9.]+/s, (\w+)$)"); // Starting with rclone 1.39
-    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*(\d+)% /([\d.]+\w+),\s*([\d.]+\w+/s),\s*([\w-]+)$)"); // Starting with rclone 1.56
+    QRegularExpression rxProgress(R"(^\* ([^:]+):\s*(\d+)% /([\d.]+\w+),\s*([\d.]+\w+/s),\s*([\w-]+)$)"); // Starting with rclone 1.39 - 1.71.0
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
       if (++mLines == 10000) {
@@ -247,81 +245,6 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
         ui.elapsed->setText(match.captured(1));
       }
       match = rxProgress.match(line);
-      if (match.hasMatch()) {
-        QString name = match.captured(1).trimmed();
-
-        auto it = mActive.find(name);
-
-        QLabel *label;
-        QProgressBar *bar;
-        if (it == mActive.end()) {
-          label = new QLabel();
-          label->setText(name);
-
-          bar = new QProgressBar();
-          bar->setMinimum(0);
-          bar->setMaximum(100);
-          bar->setTextVisible(true);
-
-          label->setBuddy(bar);
-
-          ui.progress->addRow(label, bar);
-
-          mActive.insert(name, label);
-        } else {
-          label = it.value();
-          bar = static_cast<QProgressBar *>(label->buddy());
-        }
-
-        bar->setValue(match.captured(2).toInt());
-        bar->setToolTip(match.captured(3));
-
-        mUpdated.insert(label);
-      }
-      match = rxProgress2.match(line);
-      if (match.hasMatch()) {
-        QString name = match.captured(1).trimmed();
-
-        auto it = mActive.find(name);
-
-        QLabel *label;
-        QProgressBar *bar;
-        if (it == mActive.end()) {
-          label = new QLabel();
-
-          QString nameTrimmed;
-
-          if (name.length() > 47) {
-            nameTrimmed = name.left(25) + "..." + name.right(19);
-          } else {
-            nameTrimmed = name;
-          }
-
-          label->setText(nameTrimmed);
-
-          bar = new QProgressBar();
-          bar->setMinimum(0);
-          bar->setMaximum(100);
-          bar->setTextVisible(true);
-
-          label->setBuddy(bar);
-
-          ui.progress->addRow(label, bar);
-
-          mActive.insert(name, label);
-        } else {
-          label = it.value();
-          bar = static_cast<QProgressBar *>(label->buddy());
-        }
-
-        int progressValue = match.captured(2).toInt();
-        bar->setValue(progressValue);
-        bar->setToolTip("File name: " + name + "\nFile stats" + match.captured(0).mid(match.captured(0).indexOf(':')));
-        bar->setFormat(match.captured(0).mid(match.captured(0).indexOf(':') + 2).trimmed());
-
-        mUpdated.insert(label);
-      }
-      match = rxProgress3.match(line);
       if (match.hasMatch()) {
         QString path = match.captured(1).trimmed();
         QString percen = match.captured(2).trimmed();
