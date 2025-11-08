@@ -147,7 +147,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     QRegularExpression rxTime(R"(^Elapsed time:\s+(\S+)$)");
     QRegularExpression rxProgress(R"(^\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+)$)"); // Until rclone 1.38
     QRegularExpression rxProgress2(R"(\*([^:]+):\s*([^%]+)% /[a-zA-z0-9.]+, [a-zA-z0-9.]+/s, (\w+)$)"); // Starting with rclone 1.39
-    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*([^%]+)% /([0-9.]+\w+), ([0-9.]*[a-zA-Z/]+s)*,)"); // Starting with rclone 1.56
+    QRegularExpression rxProgress3(R"(^\* ([^:]+):\s*(\d+)% /([\d.]+\w+),\s*([\d.]+\w+/s),\s*([\w-]+)$)"); // Starting with rclone 1.56
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
       if (++mLines == 10000) {
@@ -323,24 +323,24 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
       }
       match = rxProgress3.match(line);
       if (match.hasMatch()) {
-        QString name = match.captured(1).trimmed();
+        QString path = match.captured(1).trimmed();
+        QString percen = match.captured(2).trimmed();
+        QString size = match.captured(3).trimmed();
+        QString speed = match.captured(4).trimmed();
+        QString eta = match.captured(5).trimmed();
+        int progressValue = percen.toInt();
+        QString stats = QString("%1%% of %2 @ %3, ETA %4").arg(percen, size, speed, eta);
 
-        auto it = mActive.find(name);
+        auto it = mActive.find(path);
 
         QLabel *label;
         QProgressBar *bar;
         if (it == mActive.end()) {
           label = new QLabel();
 
-          QString nameTrimmed;
+          QString name = fm.elidedText(path, Qt::ElideMiddle, 420);
 
-          if (name.length() > 47) {
-            nameTrimmed = name.left(25) + "..." + name.right(19);
-          } else {
-            nameTrimmed = name;
-          }
-
-          label->setText(nameTrimmed);
+          label->setText(name);
 
           bar = new QProgressBar();
           bar->setMinimum(0);
@@ -351,16 +351,16 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
           ui.progress->addRow(label, bar);
 
-          mActive.insert(name, label);
+          mActive.insert(path, label);
         } else {
           label = it.value();
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        int progressValue = match.captured(2).toInt();
         bar->setValue(progressValue);
-        bar->setToolTip("File name: " + name + "\nFile stats" + match.captured(0).mid(match.captured(0).indexOf(':')));
-        bar->setFormat(match.captured(0).mid(match.captured(0).indexOf(':') + 2).trimmed());
+        bar->setToolTip(QString("Path: %1\nStats: %2").arg(path, stats));
+        bar->setAlignment(Qt::AlignCenter);
+        bar->setFormat(stats);
 
         mUpdated.insert(label);
       }
