@@ -629,6 +629,11 @@ MainWindow::MainWindow() {
       settings->setValue("Settings/jobLastFinishedScriptRun",
                          dialog.getJobLastFinishedScriptRun());
 
+      settings->setValue("Settings/queueRcloneRepoUse",
+                         dialog.getQueueRcloneRepoUse());
+      settings->setValue("Settings/queueRcloneRepo",
+                         dialog.getQueueRcloneRepo());
+
       SetRclone(dialog.getRclone());
       SetRcloneConf(dialog.getRcloneConf());
       mFirstTime = true;
@@ -656,15 +661,38 @@ MainWindow::MainWindow() {
     QMessageBox::about(
         this, "Rclone Browser",
         QString(
-            R"(<h3>GUI for rclone, v)" RCLONE_BROWSER_VERSION "</h3>"
+            R"(
+            <div style="text-align:center; font-family:Segoe UI, sans-serif;">
+                <h2 style="margin-bottom:5px;">Rclone Browser</h2>
+                <p style="font-size:12pt; color:gray;">GUI for rclone, v)" RCLONE_BROWSER_VERSION R"(</p>
+                <hr style="margin:10px 0;" />
 
-            R"(<p>Copyright &copy; 2019-2020 <a href="https://github.com/totza2010/RcloneBrowser/blob/master/LICENSE">totza2010</a></p>)"
+                <p>Copyright &copy; 2019–2025 
+                    <a href="https://github.com/totza2010/RcloneBrowser/blob/master/LICENSE">
+                        totza2010
+                    </a>
+                </p>
 
-            R"(<p>Current development and maintenance<br /><a href="https://github.com/totza2010/RcloneBrowser">totza2010</a></p>)"
+                <p>Current development and maintenance:<br />
+                    <a href="https://github.com/totza2010/RcloneBrowser">
+                        https://github.com/totza2010/RcloneBrowser
+                    </a>
+                </p>
 
-            R"(<p>New features and fixes<br /><a href="https://github.com/totza2010/RcloneBrowser/graphs/contributors">contributors</a></p>)"
+                <p>New features and fixes by:<br />
+                    <a href="https://github.com/totza2010/RcloneBrowser/graphs/contributors">
+                        Contributors
+                    </a>
+                </p>
 
-            R"(<p>Original version<br /><a href="https://mmozeiko.github.io/RcloneBrowser">Martins Mozeiko</a></p>)"));
+                <p>Original version by:<br />
+                    <a href="https://mmozeiko.github.io/RcloneBrowser">
+                        Martins Mozeiko
+                    </a>
+                </p>
+            </div>
+            )"
+        ));
   });
   QObject::connect(ui.aboutQt, &QAction::triggered, qApp,
                    &QApplication::aboutQt);
@@ -2653,7 +2681,7 @@ void MainWindow::rcloneGetVersion() {
             settings->value("Settings/rcloneVersion").toString();
 
         // during first run the key might not exist yet
-        if (!(settings->contains("Settings/checkRcloneUpdates"))) {
+        if (!settings->contains("Settings/checkRcloneUpdates")) {
           // if checkRcloneUpdates does not exist create new key
           settings->setValue("Settings/checkRcloneUpdates", true);
         };
@@ -2663,67 +2691,68 @@ void MainWindow::rcloneGetVersion() {
 
         // if check updates enabled in settings
         if (checkRcloneUpdates) {
-          QString last_check;
-          QString current_date = QDate::currentDate().toString();
+          QDate last_check;
+          QDate current_date = QDate::currentDate();
 
-          if (!(settings->contains("Settings/lastRcloneUpdateCheck"))) {
+          if (!settings->contains("Settings/lastRcloneUpdateCheck")) {
             // if lastRcloneUpdateCheck does not exist create new key
             settings->setValue("Settings/lastRcloneUpdateCheck", current_date);
           } else { // read last check date
             last_check =
-                settings->value("Settings/lastRcloneUpdateCheck").toString();
+                QDate::fromString(settings->value("Settings/lastRcloneUpdateCheck").toString(), Qt::ISODate);
           };
 
           // dont check if already checked today (once per day only)
           if (!(last_check == current_date)) {
             // remmber when last checked
-            settings->setValue("Settings/lastRcloneUpdateCheck", current_date);
+            settings->setValue("Settings/lastRcloneUpdateCheck", current_date.toString(Qt::ISODate));
+            QString repo = settings->value("Settings/queueRcloneRepo", "rclone/rclone").toString();
 
             QString url =
-                "https://codeberg.org/api/v1/repos/teldrive/rclone/releases/latest";
+                QString("https://api.github.com/repos/%1/releases/latest").arg(repo);
             QNetworkAccessManager manager;
-            QNetworkReply *response = manager.get(QNetworkRequest(QUrl(url)));
-            QEventLoop event;
-            connect(response, SIGNAL(finished()), &event, SLOT(quit()));
-            event.exec();
-            QByteArray content = response->readAll();
-            QJsonParseError jsonError;
+            QNetworkReply *reply = manager.get(QNetworkRequest(QUrl(url)));
 
-            QJsonDocument document = QJsonDocument::fromJson(
-                content, &jsonError); // parse and capture the error flag
+            QEventLoop event;
+            QTimer timeoutTimer;
+            timeoutTimer.setSingleShot(true);
+
+            connect(&timeoutTimer, &QTimer::timeout, &event, &QEventLoop::quit);
+            connect(reply, &QNetworkReply::finished, &event, &QEventLoop::quit);
+
+            timeoutTimer.start(5000); // 5s timeout
+            event.exec();
+
+            if (reply->error() != QNetworkReply::NoError) {
+                qWarning() << "Failed to fetch release info:" << reply->errorString();
+                reply->deleteLater();
+                return;
+            }
+
+            QByteArray content = reply->readAll();
+            reply->deleteLater();
+
+            QJsonParseError jsonError;
+            QJsonDocument document = QJsonDocument::fromJson(content, &jsonError);
 
             if (jsonError.error == QJsonParseError::NoError) {
+              QString latestTag = document.object().value("tag_name").toString();
+              latestTag.replace("v", "");
+              latestTag.replace("-DEV", "");
+              latestTag = latestTag.trimmed();
 
-              if (document.object().contains("tag_name")) {
-
-                QJsonValue tag_name = document.object().value("tag_name");
-
-                QString rclone_latest_version_no = tag_name.toString(QString());
-
-                rclone_latest_version_no.replace("v", "");
-                rclone_latest_version_no.replace("-DEV", "");
-                rclone_latest_version_no = rclone_latest_version_no.trimmed();
-
-                // check if new version available and if yes display information
-                unsigned int result =
-                    compareVersion(rclone_latest_version_no.toStdString(),
-                                   rclone_version_no.toStdString());
-                // latest version is greater than current
-                if (result == 1) {
-
+              unsigned int result = compareVersion(latestTag.toStdString(),
+                                                  rclone_version_no.toStdString());
+              if (result == 1) {
                   QMessageBox::information(
-                      this, "",
+                      this, "Rclone Update",
                       QString(
-                          R"(<p>New rclone version is available</p>)"
-                          R"(<p>You have: v)" +
-                          rclone_version_no +
-                          "<br />"
-                          R"(New version: v)" +
-                          rclone_latest_version_no +
-                          "</p>"
-                          R"(<p>Visit rclone <a href="https://rclone.org/downloads/">downloads</a> page to upgrade</p>)"));
-                };
-              };
+                          "<p>New rclone version is available</p>"
+                          "<p>You have: v%1<br />New version: v%2</p>"
+                          "<p>Visit <a href=\"https://github.com/%3/releases/tag/v%2\">"
+                          "download page</a> to upgrade.</p>")
+                          .arg(rclone_version_no, latestTag, repo));
+              }
             };
           };
         };
@@ -2761,8 +2790,7 @@ void MainWindow::rcloneGetVersion() {
                                current_date);
 
             // get latest version available
-            QString url = "https://api.github.com/repos/totza2010/"
-                          "rclonebrowser/releases/latest";
+            QString url = "https://api.github.com/repos/totza2010/rclonebrowser/releases/latest";
             QNetworkAccessManager manager;
             QNetworkReply *response = manager.get(QNetworkRequest(QUrl(url)));
             QEventLoop event;

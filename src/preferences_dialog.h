@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui_preferences_dialog.h"
+#include <QTextEdit>
 
 class PreferencesDialog : public QDialog {
   Q_OBJECT
@@ -61,6 +62,18 @@ public:
   bool getJobStartScriptRun() const;
   bool getJobLastFinishedScriptRun() const;
 
+  bool getQueueRcloneRepoUse() const;
+  QString getQueueRcloneRepo() const;
+  QDialog *logDialog = nullptr;
+  QVBoxLayout *layout = nullptr;
+  QTextEdit *logEdit = nullptr;
+  QPushButton *okButton = nullptr;
+  
 private:
   Ui::PreferencesDialog ui;
+  void showRepoSummary(const QJsonObject &repoObj, const QJsonObject &releaseObj);
+  void checkRcloneRelease(const QString &repo, const QJsonObject &repoObj);
+  void checkRcloneCoreFiles(const QString &repo, const QString &branch, const QJsonObject &repoObj);
+  void checkRcloneRepo(const QString &repo);
+  void onRepoTestClicked(const QString &repo);
 };
