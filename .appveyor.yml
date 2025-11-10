@@ -20,7 +20,7 @@ environment:
 build_script:
   - mkdir build
   - cd build
-  - cmake -G "Visual Studio 16 2022" -A %BUILD_ARCH% -DCMAKE_CONFIGURATION_TYPES="Release" -DCMAKE_PREFIX_PATH=C:\Qt\6.9.3\%BUILD_MSVC% ..
+  - cmake -G "Visual Studio 17 2022" -A %BUILD_ARCH% -DCMAKE_CONFIGURATION_TYPES="Release" -DCMAKE_PREFIX_PATH=C:\Qt\6.9.3\%BUILD_MSVC% ..
   - cmake --build . --config Release
 
 artifacts:
