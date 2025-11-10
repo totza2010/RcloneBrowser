@@ -6,19 +6,49 @@ on:
       - 'v*'
   
 jobs:
+  prepare:
+    name: Prepare Build Info
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      commit: ${{ steps.vars.outputs.commit }}
+      version_commit: ${{ steps.vars.outputs.version_commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        run: |
+          FILE_VERSION=$(cat VERSION)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ VERSION file ($FILE_VERSION) does not match tag (${GITHUB_REF_NAME})"
+            exit 1
+          fi
+
+          COMMIT=$(git rev-parse --short HEAD)
+          VERSION_COMMIT="${GITHUB_REF_NAME}-${COMMIT}"
+
+          echo "✅ VERSION verified: ${GITHUB_REF_NAME}"
+          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
+          echo "version_commit=${VERSION_COMMIT}" >> $GITHUB_OUTPUT
+
   build_windows:
     name: Windows Build
     runs-on: windows-latest
+    needs: prepare
     
     steps:
       - uses: actions/checkout@v4
+      - name: Show Build Info
+        run: |
+          echo Version: ${{ needs.prepare.outputs.version }}
+          echo Commit: ${{ needs.prepare.outputs.commit }}
+          echo Version Commit: ${{ needs.prepare.outputs.version_commit }}
       - name: Install Development Tools
         run: |
           choco install visualstudio2022community visualstudio2022-workload-nativedesktop cmake 7zip innosetup -y
           choco install openssl --version=1.1.1.2100 -y
-          Remove-Item -Recurse -Force C:\Qt -ErrorAction SilentlyContinue
-          mkdir C:\Qt
-          pushd C:\Qt
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -30,7 +60,7 @@ jobs:
           modules: 'qtmultimedia'
       - name: Build & Package (via CMD script)
         shell: cmd
-        run: scripts\release_windows.cmd
+        run: scripts\release_windows.cmd ${{ needs.prepare.outputs.version_commit }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-portable
@@ -43,6 +73,7 @@ jobs:
   build_linux:
     name: Linux Build
     runs-on: ubuntu-latest
+    needs: prepare
     
     steps:
       - uses: actions/checkout@v4
@@ -52,20 +83,15 @@ jobs:
           sudo apt -y install git g++ cmake make qt6-base-dev qt6-multimedia-dev
       - name: Build Rclone Browser
         run: |
-          VERSION=$(cat VERSION)
-          COMMIT=$(git rev-parse --short HEAD)
-          VERSION_COMMIT="$VERSION-$COMMIT"
+          VERSION_COMMIT=${{ needs.prepare.outputs.version_commit }}
 
           mkdir -p build
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
-
-          # สร้าง release directory เหมือนกับ Windows build
           cd ..
           mkdir -p release/rclone-browser-${VERSION_COMMIT}-linux
-          cp README.md CHANGELOG.md LICENSE build/build/rclone-browser release/rclone-browser-${VERSION_COMMIT}-linux/
-          
+          cp README.md CHANGELOG.md LICENSE build/build/rclone-browser release/rclone-browser-${VERSION_COMMIT}-linux/          
       - uses: actions/upload-artifact@v4
         with:
          name: linux
@@ -74,7 +100,7 @@ jobs:
   create_release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build_windows, build_linux]
+    needs: [prepare, build_windows, build_linux]
     
     steps:
       - uses: actions/checkout@v4
@@ -91,19 +117,27 @@ jobs:
           
       - name: Get short commit
         run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-        
-      - uses: rickstaa/action-create-tag@v1
-        with:
-          tag: release-${{ env.SHORT_SHA }}
-          tag_exists_error: false
           
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "/tmp/artifacts/*.zip"
-          name: Rclone Browser Autobuild For Commit ${{ env.SHORT_SHA }}
-          omitBody: true
+          name: "Rclone Browser ${{ needs.prepare.outputs.version }}"
+          tag: ${{ needs.prepare.outputs.version }}
           generateReleaseNotes: true
-          prerelease: false
+          omitBody: true
           skipIfReleaseExists: true
-          tag: release-${{ env.SHORT_SHA }}
+          
+      - name: Trigger rclonebrowser-docker build
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          repository: totza2010/rclonebrowser-docker
+          event-type: build
+          client-payload: |
+            {
+              "ref": "${{ needs.prepare.outputs.version }}",
+              "repo": "totza2010/rclonebrowser",
+              "commit": "${{ needs.prepare.outputs.commit }}",
+              "release_url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.version }}"
+            }
         
