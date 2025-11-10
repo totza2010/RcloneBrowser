@@ -13,10 +13,6 @@ environment:
      BUILD_ARCH: x64
      BUILD_MSVC: msvc2022_64
 
-   - configuration: Win32
-     BUILD_ARCH: Win32
-     BUILD_MSVC: msvc2022
-
 build_script:
   - mkdir build
   - cd build

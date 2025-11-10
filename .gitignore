@@ -10,3 +10,7 @@ debian/rclone-browser*
 /release
 /bs0.cmd
 /src/*.autosave
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
