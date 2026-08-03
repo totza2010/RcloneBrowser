@@ -22,6 +22,23 @@ QStringList GetRemoteModeRcloneOptions();
 QStringList GetShowHidden();
 QStringList GetRcloneCmd(const QStringList &args);
 
+// Replaces the value of any credential-bearing argument with a placeholder.
+// Every path that shows, copies, logs or transmits a command line must go
+// through this: the free-form option fields let users pass backend tokens
+// such as --drive-token or --sftp-pass. See docs/ARCHITECTURE.md section 5.
+QStringList RedactArgs(const QStringList &args);
+
+// Random alphanumeric string for the per-mount rclone remote-control login.
+QString GenerateRcCredential(int length);
+
+// Passes the remote-control login through the environment instead of the
+// command line, where any local process could read it out of the process list.
+// rclone maps --rc-user/--rc-pass to RCLONE_RC_USER/RCLONE_RC_PASS, for both
+// the server ("rcd", "mount --rc") and the client ("rc").
+// Call after UseRclonePassword(), which replaces the whole environment.
+void UseRcCredentials(QProcess *process, const QString &user,
+                      const QString &pass);
+
 QDir GetConfigDir(void);
 
 unsigned int compareVersion(std::string, std::string);

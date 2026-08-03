@@ -15,7 +15,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   mArgs = GetRcloneCmd(args);
 
-  ui.showOutput->setToolTip(mArgs.join(" "));
+  ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
 
   ui.source->setText(source);
   ui.source->setCursorPosition(0);
@@ -130,9 +130,12 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(mArgs.join(" "));
+    clipboard->setText(RedactArgs(mArgs).join(" "));
   });
 
+  // CORE: (VIO-2, docs/ARCHITECTURE.md 3.3) การ parse output ของ rclone เป็น L0 แท้ๆ
+  // แต่ติดอยู่ใน widget -- ควรย้ายไป JobRunner (L0) พร้อมกับตอนเปลี่ยนไปใช้
+  // --use-json-log (แผน §3.5) เพื่อไม่ต้องเขียนส่วนนี้ใหม่สองรอบ
   QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
     // regex101.com great for testing regexp
     QRegularExpression rxSize(R"(^Transferred:\s+(\S+ \S+) \(([^)]+)\)$)"); // Until rclone 1.42

@@ -325,3 +325,56 @@ QStringList GetRcloneCmd(const QStringList &args) {
 
   return rcloneTransferCmd;
 }
+
+// TEST: (V-08) mount remote ที่ตั้ง RC port -> ตรวจว่า mount/unmount/mount script
+// ยังทำงานครบ และ command line ของ process rclone ไม่มี --rc-user/--rc-pass แล้ว
+QString GenerateRcCredential(int length) {
+  static const QString alphabet(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
+
+  QString out;
+  out.reserve(length);
+  for (int i = 0; i < length; ++i) {
+    // bounded() is uniform; the previous "generate() % length" was biased
+    // towards the first characters of the alphabet.
+    out.append(alphabet.at(QRandomGenerator::global()->bounded(
+        static_cast<int>(alphabet.length()))));
+  }
+  return out;
+}
+
+void UseRcCredentials(QProcess *process, const QString &user,
+                      const QString &pass) {
+  if (user.isEmpty() || pass.isEmpty()) {
+    return;
+  }
+  QProcessEnvironment env = process->processEnvironment();
+  if (env.isEmpty()) {
+    env = QProcessEnvironment::systemEnvironment();
+  }
+  env.insert("RCLONE_RC_USER", user);
+  env.insert("RCLONE_RC_PASS", pass);
+  process->setProcessEnvironment(env);
+}
+
+// TEST: (V-03) ใส่ "--drive-token=SECRET123" ในช่อง rclone options ของ transfer
+// dialog -> hover ปุ่ม output และกด copy ต้องเห็น "--drive-token=***" ทั้งสองทาง
+QStringList RedactArgs(const QStringList &args) {
+  // Matches "--rc-pass=secret", "--drive-token=...", "--sftp-key-pem=..." etc.
+  // Only the part up to and including '=' is kept.
+  static const QRegularExpression prefix(
+      R"(^(--[a-z0-9-]*(pass|passw|password|token|secret|key|auth|user)[a-z0-9-]*)=)",
+      QRegularExpression::CaseInsensitiveOption);
+
+  QStringList out;
+  out.reserve(args.size());
+  for (const QString &arg : args) {
+    QRegularExpressionMatch m = prefix.match(arg);
+    if (m.hasMatch()) {
+      out << m.captured(1) + "=***";
+    } else {
+      out << arg;
+    }
+  }
+  return out;
+}

@@ -17,7 +17,7 @@ StreamWidget::StreamWidget(QProcess *rclone, QProcess *player,
   mArgs.append(" | ");
   mArgs.append(stream);
 
-  ui.showOutput->setToolTip(mArgs.join(" "));
+  ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
 
   if (remote.length() > 140) {
     remoteTrimmed = remote.left(57) + "..." + remote.right(80);
@@ -78,7 +78,7 @@ StreamWidget::StreamWidget(QProcess *rclone, QProcess *player,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(mArgs.join(" "));
+    clipboard->setText(RedactArgs(mArgs).join(" "));
   });
 
   QObject::connect(

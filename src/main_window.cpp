@@ -3897,39 +3897,9 @@ void MainWindow::runItem(JobOptionsListWidgetItem *item,
       args << "--rc-addr";
       args << "localhost:" + jo->mountRcPort;
 
-      // generate random username and password
-      const QString possibleCharacters(
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
-
-      QString rcUser;
-      for (int i = 0; i < 10; ++i) {
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 1)
-        int index = QRandomGenerator::global()->generate() %
-                    possibleCharacters.length();
-#else
-        int index = qrand() % possibleCharacters.length();
-#endif
-        QChar nextChar = possibleCharacters.at(index);
-        rcUser.append(nextChar);
-      }
-
-      QString rcPass;
-      for (int i = 0; i < 22; ++i) {
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 1)
-        int index = QRandomGenerator::global()->generate() %
-                    possibleCharacters.length();
-#else
-        int index = qrand() % possibleCharacters.length();
-#endif
-
-        QChar nextChar = possibleCharacters.at(index);
-        rcPass.append(nextChar);
-      }
-
-      args << "--rc-user=" + rcUser;
-      args << "--rc-pass=" + rcPass;
+      // The remote-control login is generated in addNewMount() and handed to
+      // rclone through the environment, so it never appears in the argument
+      // list (and therefore never in a saved task).
     }
     if (jo->remoteType == "drive") {
       if (jo->remoteMode == "shared") {
@@ -4673,8 +4643,19 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
 
   argsFinal << GetRcloneConf();
 
-  auto widget =
-      new MountWidget(mount, remote, folder, argsFinal, script, uniqueId, info);
+  // Generate the remote-control login here rather than while building the
+  // arguments, so it is never written into a saved task and never reaches the
+  // command line. MountWidget needs it for the mount script and for the
+  // "core/quit" unmount call.
+  QString rcUser;
+  QString rcPass;
+  if (argsFinal.contains("--rc")) {
+    rcUser = GenerateRcCredential(10);
+    rcPass = GenerateRcCredential(22);
+  }
+
+  auto widget = new MountWidget(mount, remote, folder, argsFinal, script,
+                                uniqueId, info, rcUser, rcPass);
 
   auto line = new QFrame();
   line->setFrameShape(QFrame::HLine);
@@ -4734,6 +4715,7 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
   });
 
   UseRclonePassword(mount);
+  UseRcCredentials(mount, rcUser, rcPass);
   mount->start(GetRclone(), argsFinal, QIODevice::ReadOnly);
 
   ui.buttonStopAllJobs->setEnabled(mTransferJobCount != 0);

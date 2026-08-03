@@ -9,7 +9,8 @@ public:
   MountWidget(QProcess *process, const QString &remote, const QString &folder,
               const QStringList &args, const QString &script,
               const QString &uniqueID, const QString &info,
-              QWidget *parent = nullptr);
+              const QString &rcUser = QString(),
+              const QString &rcPass = QString(), QWidget *parent = nullptr);
   ~MountWidget();
   bool isRunning = true;
   QDateTime getStartDateTime();
@@ -35,6 +36,10 @@ private:
 
   QString mUnmountingError = "0";
   QString mRcPort = "0";
+  // Held in memory only -- never written to the argument list, a saved task,
+  // or a log. See docs/ARCHITECTURE.md section 5.
+  QString mRcUser;
+  QString mRcPass;
   QStringList mArgs;
   QString mUniqueID = "";
 

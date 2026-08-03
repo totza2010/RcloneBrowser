@@ -712,7 +712,7 @@
             </size>
            </property>
            <property name="toolTip">
-            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;--rc --rc-addr localhost:$controlPort&lt;/p&gt;&lt;p&gt;--rc-user and --rc-pass values are random generated&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;--rc --rc-addr localhost:$controlPort&lt;/p&gt;&lt;p&gt;A random login is generated per mount and passed to rclone through the environment (RCLONE_RC_USER / RCLONE_RC_PASS), not on the command line&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
            <property name="maxLength">
             <number>5</number>

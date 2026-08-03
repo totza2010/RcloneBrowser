@@ -5,19 +5,26 @@
 MountWidget::MountWidget(QProcess *process, const QString &remote,
                          const QString &folder, const QStringList &args,
                          const QString &script, const QString &uniqueID,
-                         const QString &info, QWidget *parent)
+                         const QString &info, const QString &rcUser,
+                         const QString &rcPass, QWidget *parent)
     : QWidget(parent), mProcess(process) {
   ui.setupUi(this);
 
   updateStartInfo();
 
   mUniqueID = uniqueID;
+  mRcUser = rcUser;
+  mRcPass = rcPass;
   QProcess *mScriptProcess = new QProcess();
 
   mArgs.append(QDir::toNativeSeparators(GetRclone()));
   mArgs.append(args);
 
-  ui.showOutput->setToolTip(mArgs.join(" "));
+  // SECURITY: (docs/ARCHITECTURE.md 5) the remote-control login no longer
+  // reaches mArgs, but users can still put backend tokens in the free-form
+  // option fields. Any new sink for arguments -- log files, API responses,
+  // diagnostics -- must go through RedactArgs() as well.
+  ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
 
   QString screenInfo;
   if (info == "") {
@@ -180,7 +187,7 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(mArgs.join(" "));
+    clipboard->setText(RedactArgs(mArgs).join(" "));
   });
 
   QObject::connect(
@@ -253,20 +260,8 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
         sargs << GetRclone();
         sargs << mRcPort;
 
-        QString user;
-        QString password;
-        int index;
-
-        index = mArgs.indexOf(QRegularExpression("^--rc-user\\S+"));
-        user = mArgs.at(index);
-        user.replace("--rc-user=", "");
-
-        index = mArgs.indexOf(QRegularExpression("^--rc-pass\\S+"));
-        password = mArgs.at(index);
-        password.replace("--rc-pass=", "");
-
-        sargs << user;
-        sargs << password;
+        sargs << mRcUser;
+        sargs << mRcPass;
         sargs << folder;
 
         mScriptProcess->start(QDir::toNativeSeparators(script), sargs,
@@ -375,22 +370,13 @@ void MountWidget::cancel() {
   // requires rlone version at least 1.50
   unmountArgs << "core/quit";
 
-  // get RC parameters from mArgs
-  int index = 0;
-  QString user;
-  QString password;
-
   unmountArgs << "--rc-addr";
 
   unmountArgs << "localhost:" + mRcPort;
 
-  index = mArgs.indexOf(QRegularExpression("^--rc-user\\S+"));
-  user = mArgs.at(index);
-
-  index = mArgs.indexOf(QRegularExpression("^--rc-pass\\S+"));
-  password = mArgs.at(index);
-
-  unmountArgs << user << password;
+  // The login goes through the environment, same as the mount process itself,
+  // so it does not show up in the process list of this short-lived client.
+  UseRcCredentials(pUnmount, mRcUser, mRcPass);
 
   //  UseRclonePassword(pUnmount);
   pUnmount->start(GetRclone(), unmountArgs, QIODevice::ReadOnly);
