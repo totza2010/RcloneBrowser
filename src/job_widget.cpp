@@ -58,6 +58,11 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   ui.output->setFont(font);
   ui.output->setVisible(false);
+  // Keep the last 10000 lines instead of wiping the whole view once that many
+  // have been seen -- a long transfer used to lose its entire output.
+  // TEST: (V-04) copy โฟลเดอร์ที่มีไฟล์ >10,000 ไฟล์ ด้วย -v แล้วกางช่อง output
+  // ระหว่างงานวิ่ง: ต้องไม่มีจังหวะที่ช่องว่างเปล่า และเลื่อนขึ้นไปต้องยังเห็นบรรทัดเก่า
+  ui.output->setMaximumBlockCount(10000);
 
   QString iconsColour = settings->value("Settings/iconsColour").toString();
 
@@ -151,10 +156,6 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     QRegularExpression rxProgress(R"(^\* ([^:]+):\s*(\d+)% /([\d.]+\w+),\s*([\d.]+\w+/s),\s*([\w-]+)$)"); // Starting with rclone 1.39 - 1.71.0
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
-      if (++mLines == 10000) {
-        ui.output->clear();
-        mLines = 1;
-      }
       ui.output->appendPlainText(line);
 
       if (line.isEmpty()) {

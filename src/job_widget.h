@@ -31,7 +31,6 @@ private:
   Ui::JobWidget ui;
 
   QProcess *mProcess;
-  int mLines = 0;
 
   QStringList mArgs;
   QHash<QString, QLabel *> mActive;
