@@ -1,6 +1,7 @@
 #pragma once
 #include "icon_cache.h"
 #include "job_options.h"
+#include "job_options_item.h"
 #include "ui_main_window.h"
 #ifdef Q_OS_MACOS
 #include "mac_os_power_saving.h"

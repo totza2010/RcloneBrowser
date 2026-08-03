@@ -2,6 +2,7 @@
 #include "file_dialog.h"
 #include "list_of_job_options.h"
 #include "utils.h"
+#include "widget_settings.h"
 #include <QToolTip>
 
 TransferDialog::TransferDialog(bool isDownload, bool isDrop,

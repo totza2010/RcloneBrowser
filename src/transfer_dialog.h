@@ -1,6 +1,7 @@
 #pragma once
 
 #include "job_options.h"
+#include "widget_settings.h"
 #include "ui_transfer_dialog.h"
 
 class TransferDialog : public QDialog {

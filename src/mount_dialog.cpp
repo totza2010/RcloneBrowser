@@ -2,6 +2,7 @@
 #include "global.h"
 #include "list_of_job_options.h"
 #include "utils.h"
+#include "widget_settings.h"
 #include <QFileDialog>
 
 MountDialog::MountDialog(const QString &remote, const QDir &path,

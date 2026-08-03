@@ -1,5 +1,9 @@
 #pragma once
-#include <QListWidget>
+// Core (L0/L1): must not depend on QtWidgets -- see docs/ARCHITECTURE.md.
+// The QListWidgetItem adapter lives in job_options_item.h.
+#include <QDateTime>
+#include <QString>
+#include <QStringList>
 #include <qexception.h>
 #include <quuid.h>
 
@@ -103,21 +107,6 @@ public:
    * based on the version for reading in the new field(s)
    */
   static const qint32 classVersion;
-};
-
-class JobOptionsListWidgetItem : public QListWidgetItem {
-public:
-  JobOptionsListWidgetItem(JobOptions *jo, const QIcon &icon,
-                           const QString &text, const QString &requestId)
-      : QListWidgetItem(icon, text), mJobData(jo), mRequestId(requestId) {}
-
-  void SetData(JobOptions *jo) { mJobData = jo; }
-  JobOptions *GetData() { return mJobData; }
-  QString GetRequestId() { return mRequestId; }
-
-private:
-  JobOptions *mJobData;
-  QString mRequestId;
 };
 
 class SerializationException : public QException {

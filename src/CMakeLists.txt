@@ -69,6 +69,8 @@ set(OTHER
   pch.h
   utils.h
   job_options.h
+  job_options_item.h
+  widget_settings.h
   global.h
   qcronfield.h
   qcronnode.h
@@ -92,6 +94,7 @@ set(SOURCE
   icon_cache.cpp
   item_model.cpp
   utils.cpp
+  widget_settings.cpp
   job_options.cpp
   list_of_job_options.cpp
   qcron.cpp

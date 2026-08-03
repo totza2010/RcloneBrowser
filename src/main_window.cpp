@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "job_options.h"
+#include "job_options_item.h"
 #include "job_widget.h"
 #include "list_of_job_options.h"
 #include "mount_dialog.h"
@@ -3699,6 +3700,10 @@ void MainWindow::listTasks() {
 
 } // MainWindow::listTasks()
 
+// LAYER: (VIO-1, docs/ARCHITECTURE.md 3.3) หัวใจของการแยก core -- ฟังก์ชันนี้ประกอบ
+// rclone args ของทุก operation (L0) ปนกับการสร้าง widget และอ่านค่าจาก UI (L3)
+// เป้าหมาย: แยกส่วนประกอบ args ออกเป็น JobArgsBuilder (L0) แล้วให้ JobEngine (L1)
+// เรียกใช้ โดยไม่ต้องมี JobOptionsListWidgetItem
 void MainWindow::runItem(JobOptionsListWidgetItem *item,
                          const QString &transferMode, const QString &requestId,
                          bool dryrun) {

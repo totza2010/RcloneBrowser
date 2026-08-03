@@ -1,6 +1,7 @@
 #pragma once
 
 #include "job_options.h"
+#include "widget_settings.h"
 #include "ui_mount_dialog.h"
 
 class MountDialog : public QDialog {

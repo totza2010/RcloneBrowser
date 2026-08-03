@@ -1,9 +1,10 @@
 #pragma once
 
-std::unique_ptr<QSettings> GetSettings();
+// Core (L0): rclone invocation and settings access -- see docs/ARCHITECTURE.md.
+// Must not declare or depend on anything from QtWidgets. The recursive
+// QSettings <-> widget binding lives in widget_settings.h.
 
-void ReadSettings(QSettings *settings, QObject *widget);
-void WriteSettings(QSettings *settings, QObject *widget);
+std::unique_ptr<QSettings> GetSettings();
 
 bool IsPortableMode();
 
