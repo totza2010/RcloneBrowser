@@ -576,6 +576,8 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
   mLocalRcloneLsProcessCount++;
   mRcloneLsProcessCountMutex.unlock();
 
+  // CORE: (VIO-4, docs/ARCHITECTURE.md 3.2) การ list remote เป็น L0 และ Web UI ก็ต้องใช้
+  // -- ตอนเปลี่ยน lsd+lsl เป็น lsjson (แผน §3.4) ให้แยกส่วนเรียก rclone ออกจาก model
   lsd->start(GetRclone(),
              QStringList() << "lsd" << GetRcloneConf()
                            << GetRemoteModeRcloneOptions() << GetShowHidden()

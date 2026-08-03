@@ -1,0 +1,103 @@
+name: CI
+
+# build.yml only fires on v* tags, so nothing checked ordinary pushes. This
+# workflow builds on every push and pull request instead -- no packaging, no
+# release, just "does it still compile and are the layer boundaries intact".
+on:
+  # A branches filter already excludes tag pushes, so v* tags stay with build.yml.
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: '6.9.3'
+
+jobs:
+  layers:
+    name: Layer boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check core/GUI separation
+        run: python scripts/check_layers.py --check
+
+  build-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install g++ cmake ninja-build \
+            qt6-base-dev qt6-multimedia-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+
+  # Proves the Multimedia OPTIONAL_COMPONENTS path still compiles. Without this
+  # the fallback only gets exercised when someone hits it for real.
+  build-linux-no-multimedia:
+    name: Build (Linux, no Multimedia)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies without Multimedia
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install g++ cmake ninja-build qt6-base-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Fail if Multimedia was picked up anyway
+        run: |
+          if grep -q "Qt6Multimedia_DIR:PATH=Qt6Multimedia_DIR-NOTFOUND" build/CMakeCache.txt; then
+            echo "Multimedia correctly absent - the fallback path is under test"
+          else
+            echo "::warning::Qt6 Multimedia was found; this job is not testing the fallback"
+          fi
+      - name: Build
+        run: cmake --build build --parallel
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Verify binary hardening
+        shell: pwsh
+        run: |
+          $dumpbin = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+                     Select-Object -First 1
+          if (-not $dumpbin) {
+            $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+                       Select-Object -First 1
+          }
+          $headers = & $dumpbin.FullName /headers build\build\Release\RcloneBrowser.exe
+          $required = @('Dynamic base', 'NX compatible', 'Control Flow Guard', 'CET compatible')
+          $missing = $required | Where-Object { -not ($headers -match [regex]::Escape($_)) }
+          if ($missing) {
+            Write-Error "Missing hardening flags: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "All hardening flags present."
