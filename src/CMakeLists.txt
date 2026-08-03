@@ -69,6 +69,7 @@ set(MOC
   icon_cache.h
   list_of_job_options.h
   item_model.h
+  rclone_capabilities.h
   qcron.h
   scheduler_widget.h
   hours_spinbox.h
@@ -106,6 +107,7 @@ set(SOURCE
   preferences_dialog.cpp
   icon_cache.cpp
   item_model.cpp
+  rclone_capabilities.cpp
   utils.cpp
   widget_settings.cpp
   job_options.cpp

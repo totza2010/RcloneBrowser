@@ -1,6 +1,7 @@
 #pragma once
 
 #include "item_model.h"
+#include "rclone_capabilities.h"
 #include "ui_remote_widget.h"
 
 QString setRemoteMode(int, QString);
@@ -45,6 +46,11 @@ private:
   bool mButtonToolsState = false;
 
   QString mRemoteType;
+  QString mRemote;
+
+  // Greys out the actions this backend cannot serve. Safe to call more than
+  // once; does nothing while the capabilities are still unknown.
+  void applyCapabilities(const RcloneCapabilities &caps);
 
   ItemModel *model;
   QModelIndex mRootIndex;

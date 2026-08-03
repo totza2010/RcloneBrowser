@@ -27,6 +27,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
   bool isLocal = remoteType == "local";
   bool isGoogle = remoteType == "drive";
   mRemoteType = remoteType;
+  mRemote = remote;
 
   QString root = isLocal ? "/" : QString();
 
@@ -85,6 +86,8 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
   // hide cb_GoogleDriveMode and Dedupe button for non Google remotes
   if (!isGoogle) {
     ui.cb_GoogleDriveMode->hide();
+    // Provisional: applyCapabilities() shows this again if the backend
+    // actually supports duplicate files.
     ui.buttonDedupe->hide();
   }
 
@@ -1770,6 +1773,63 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     QTimer::singleShot(0, this, SLOT(switchRemoteType()));
   });
+
+  // Ask the backend what it actually supports and grey out the actions it
+  // cannot serve, instead of letting the user press a button and read a raw
+  // rclone error. The query is asynchronous and everything stays enabled
+  // until it lands, so a slow or failing probe never hides a working button.
+  auto &registry = RcloneCapabilityRegistry::instance();
+  QObject::connect(&registry, &RcloneCapabilityRegistry::capabilitiesChanged,
+                   this,
+                   [this](const QString &r, const RcloneCapabilities &caps) {
+                     if (r == mRemote) {
+                       applyCapabilities(caps);
+                     }
+                   });
+  const RcloneCapabilities cached = registry.get(mRemote);
+  if (cached.known) {
+    applyCapabilities(cached);
+  }
+}
+
+void RemoteWidget::applyCapabilities(const RcloneCapabilities &caps) {
+  if (!caps.known) {
+    return;
+  }
+
+  ui.link->setEnabled(caps.publicLink);
+  ui.getInfo->setEnabled(caps.about);
+  ui.cleanup->setEnabled(caps.cleanUp);
+  ui.actionDedupe->setEnabled(caps.duplicateFiles);
+
+  // The dedupe button used to be hidden for anything that was not Google
+  // Drive. Now that the backend answers for itself, show it whenever the
+  // backend really supports duplicate files.
+  ui.buttonDedupe->setVisible(caps.duplicateFiles);
+
+  if (!caps.publicLink) {
+    ui.link->setStatusTip("Public links are not supported by this backend");
+  }
+  if (!caps.about) {
+    ui.getInfo->setStatusTip("This backend does not report storage usage");
+  }
+  if (!caps.cleanUp) {
+    ui.cleanup->setStatusTip("This backend has nothing to clean up");
+  }
+  if (!caps.duplicateFiles) {
+    ui.actionDedupe->setStatusTip(
+        "This backend cannot hold duplicate files, so there is nothing to "
+        "deduplicate");
+  }
+
+  if (!caps.canHash()) {
+    // rclone check compares hashes; with none available it can only compare
+    // sizes, which is a much weaker guarantee. Say so rather than silently
+    // reporting everything as matching.
+    ui.actionCheck->setStatusTip(
+        "Check remote's integrity - this backend provides no hashes, so only "
+        "file sizes can be compared");
+  }
 }
 
 RemoteWidget::~RemoteWidget() {}
