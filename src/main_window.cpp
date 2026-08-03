@@ -4261,6 +4261,7 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
 #endif
 #endif
         }
+#ifdef RB_HAVE_MULTIMEDIA
         QMediaPlayer *mPlayer = nullptr;
 
         if (mSoundNotif) {
@@ -4271,6 +4272,7 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
             mPlayer->setLoops(1);
             mPlayer->play();
         }
+#endif
 
         --mTransferJobCount;
 

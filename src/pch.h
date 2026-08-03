@@ -7,8 +7,10 @@
 #include <QtCore>
 #include <QtDebug>
 #include <QtGui>
-#include <QtMultimedia>
 #include <QtNetwork>
+#ifdef RB_HAVE_MULTIMEDIA
+#include <QtMultimedia>
+#endif
 #include <QMessageBox>
 #include <QPushButton>
 

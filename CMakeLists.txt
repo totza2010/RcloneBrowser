@@ -1,10 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
-project(rclone-browser VERSION 1.0 LANGUAGES CXX)
 
 if(WIN32)
+  # Match Qt's prebuilt MSVC libraries (/MD) and avoid LNK4098 CRT conflicts.
+  # Must be set before project() for the policy to take effect.
+  cmake_policy(SET CMP0091 NEW)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
   # link automatically to qtmain.lib on Windows
   cmake_policy(SET CMP0020 NEW)
 endif()
+
+project(rclone-browser VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,12 +18,18 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "This project supports only 64-bit Windows builds.")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+# Multimedia is only used for the optional finished-transfer notification
+# sound, and is not packaged by every distribution. Treat it as optional so
+# the app still builds on Qt kits that do not ship it.
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS Multimedia)
 
 if(APPLE)
   # macOS extras if needed
   find_library(COCOA_LIB Cocoa REQUIRED)
   find_library(IOKKIT_LIB IOKit REQUIRED)
+  find_library(USER_NOTIFICATIONS_LIB UserNotifications REQUIRED)
+  find_library(UNIFORM_TYPE_IDENTIFIERS_LIB UniformTypeIdentifiers REQUIRED)
 endif()
 
 if(WIN32)
@@ -27,11 +38,24 @@ if(WIN32)
   add_definitions("-D_UNICODE -DUNICODE -D_SCL_SECURE_NO_DEPRECATE -D_CRT_SECURE_NO_DEPRECATE")
 
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} /GF /Gy /GS- /GR /GL")
+  # Was "${CMAKE_CXX_FLAGS} ... /GS-": it expanded the wrong variable (so the
+  # base flags were duplicated into the Release flags) and it disabled stack
+  # buffer overrun detection. /GS is on, plus Control Flow Guard.
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GF /Gy /GS /GR /GL /guard:cf")
 
-  set(CMAKE_EXE_LINKER_FLAGS "/INCREMENTAL:NO")
+  set(CMAKE_EXE_LINKER_FLAGS "/INCREMENTAL:NO /DYNAMICBASE /NXCOMPAT")
   set(CMAKE_EXE_LINKER_FLAGS_DEBUG "/DEBUG")
-  set(CMAKE_EXE_LINKER_FLAGS_RELEASE "/LTCG /OPT:ICF /OPT:REF")
+  # /guard:cf must be passed to the linker too, or the compiler metadata is
+  # dropped. /CETCOMPAT opts into Intel CET shadow stacks.
+  set(CMAKE_EXE_LINKER_FLAGS_RELEASE "/LTCG /OPT:ICF /OPT:REF /guard:cf /CETCOMPAT")
+else()
+  # OpenSSF-recommended hardening for GCC/Clang builds (Linux, macOS, BSD).
+  add_compile_options(-fstack-protector-strong)
+  if(NOT APPLE)
+    add_compile_options(-fcf-protection=full)
+    add_link_options(-Wl,-z,relro,-z,now)
+  endif()
+  add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=3>)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")

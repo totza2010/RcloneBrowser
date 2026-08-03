@@ -15,11 +15,24 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 # ---- Qt6 Components ----
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS Multimedia)
+
+if(Qt6Multimedia_FOUND)
+    set(RB_MULTIMEDIA_LIB Qt6::Multimedia)
+    message(STATUS "Qt6 Multimedia found - transfer notification sound enabled")
+else()
+    set(RB_MULTIMEDIA_LIB "")
+    message(STATUS "Qt6 Multimedia not found - building without notification sound")
+endif()
 
 if(APPLE)
     find_library(COCOA_LIB Cocoa REQUIRED)
     find_library(IOKKIT_LIB IOKit REQUIRED)
+    # Required by mac_os_notifications.mm on macOS 11+; linking failed silently
+    # without these.
+    find_library(USER_NOTIFICATIONS_LIB UserNotifications REQUIRED)
+    find_library(UNIFORM_TYPE_IDENTIFIERS_LIB UniformTypeIdentifiers REQUIRED)
 endif()
 
 set(UI
@@ -119,13 +132,17 @@ set(QRC resources.qrc)
 
 add_definitions(-DRCLONE_BROWSER_VERSION="${RCLONE_BROWSER_VERSION}")
 
+if(Qt6Multimedia_FOUND)
+  add_definitions(-DRB_HAVE_MULTIMEDIA)
+endif()
+
 # ---- Output target ----
 if(WIN32)
   add_executable(RcloneBrowser WIN32 ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC})
   target_link_libraries(RcloneBrowser PRIVATE
       Qt6::Widgets
       Qt6::Network
-      Qt6::Multimedia
+      ${RB_MULTIMEDIA_LIB}
   )
   target_precompile_headers(RcloneBrowser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
 elseif(APPLE)
@@ -134,9 +151,11 @@ elseif(APPLE)
   target_link_libraries(rclone-browser PRIVATE
       Qt6::Widgets
       Qt6::Network
-      Qt6::Multimedia
+      ${RB_MULTIMEDIA_LIB}
       ${COCOA_LIB}
       ${IOKKIT_LIB}
+      ${USER_NOTIFICATIONS_LIB}
+      ${UNIFORM_TYPE_IDENTIFIERS_LIB}
   )
   set_target_properties(rclone-browser PROPERTIES
       MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
@@ -147,7 +166,7 @@ else()
   target_link_libraries(rclone-browser PRIVATE
       Qt6::Widgets
       Qt6::Network
-      Qt6::Multimedia
+      ${RB_MULTIMEDIA_LIB}
   )
 
   install(TARGETS rclone-browser RUNTIME DESTINATION bin)
