@@ -82,8 +82,11 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           modules: qtmultimedia
+      # No -G: the hosted image's Visual Studio version moves (it no longer
+      # carries 2022), and nothing here needs a particular one. Letting CMake
+      # pick whatever is installed keeps this working across image updates.
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -A x64
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
@@ -91,12 +94,10 @@ jobs:
       - name: Verify binary hardening
         shell: pwsh
         run: |
-          $dumpbin = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
-                     Select-Object -First 1
-          if (-not $dumpbin) {
-            $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
-                       Select-Object -First 1
-          }
+          # Any edition, any year -- see the note on the configure step.
+          $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+                     Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dumpbin) { Write-Error "dumpbin not found"; exit 1 }
           $headers = & $dumpbin.FullName /headers build\build\Release\RcloneBrowser.exe
           $required = @('Dynamic base', 'NX compatible', 'Control Flow Guard', 'CET compatible')
           $missing = $required | Where-Object { -not ($headers -match [regex]::Escape($_)) }

@@ -6,7 +6,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
 #include <QTest>
+
+#include <memory>
 
 // The task file is a QDataStream of JobOptions written field by field, with
 // no field names. Reordering or inserting a field silently shifts everything
@@ -20,18 +23,38 @@ class TestTaskStore : public QObject {
   Q_OBJECT
 
 private:
-  // Portable mode keys off "<executable base name>.ini" sitting next to the
-  // executable, so writing one here redirects the store into the build tree.
+  // Portable mode is detected differently per platform, and the store follows
+  // the same split, so the redirection has to match:
+  //
+  //   Windows/macOS  "<executable base name>.ini" next to the executable
+  //   elsewhere      "$XDG_CONFIG_HOME/rclone-browser/rclone-browser.ini"
+  //
+  // Writing the marker in the wrong place leaves portable mode off, and the
+  // store would then read and rewrite the real user task file.
   static QString appDir() {
+#ifdef Q_OS_WIN
     return QCoreApplication::applicationDirPath();
+#elif defined(Q_OS_MACOS)
+    return QCoreApplication::applicationDirPath();
+#else
+    return QDir(QString::fromLocal8Bit(qgetenv("XDG_CONFIG_HOME")))
+        .filePath("rclone-browser");
+#endif
   }
+
   static QString iniPath() {
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
     return QDir(appDir()).filePath(
         QFileInfo(QCoreApplication::applicationFilePath()).baseName() + ".ini");
+#else
+    return QDir(appDir()).filePath("rclone-browser.ini");
+#endif
   }
   static QString taskFilePath() {
     return QDir(appDir()).filePath("tasks.bin");
   }
+
+  std::unique_ptr<QTemporaryDir> mScratch;
 
   // QDataStream writes QString as UTF-16 big-endian. Decoding the file with
   // QString::fromUtf16 would read it in host order and silently produce
@@ -57,6 +80,15 @@ private:
 
 private slots:
   void initTestCase() {
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+    // Point XDG_CONFIG_HOME at a scratch directory before anything reads it,
+    // so neither the marker nor the task file lands in the real configuration.
+    mScratch.reset(new QTemporaryDir);
+    QVERIFY(mScratch->isValid());
+    qputenv("XDG_CONFIG_HOME", mScratch->path().toLocal8Bit());
+    QVERIFY(QDir().mkpath(appDir()));
+#endif
+
     QFile ini(iniPath());
     QVERIFY2(ini.open(QIODevice::WriteOnly | QIODevice::Truncate),
              qPrintable(ini.errorString()));
