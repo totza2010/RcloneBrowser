@@ -76,6 +76,41 @@ private slots:
     QCOMPARE(RedactArgs({"--rc-pass=a=b=c"}).at(0),
              QStringLiteral("--rc-pass=***"));
   }
+
+  // At -vv rclone prints the values it read out of the environment, so the
+  // remote-control password appears in the job output verbatim.
+  void redactsCredentialsEchoedInOutput() {
+    const QString line =
+        R"(2026/08/04 22:41:35 DEBUG : Setting --rc-pass "sw8Kd2" from environment variable RCLONE_RC_PASS="sw8Kd2")";
+    const QString out = RedactOutputLine(line, "abc123", "sw8Kd2");
+
+    QVERIFY(!out.contains(QStringLiteral("sw8Kd2")));
+    QVERIFY(out.contains(QStringLiteral("***")));
+    // The rest of the line has to survive or the log becomes unreadable.
+    QVERIFY(out.contains(QStringLiteral("RCLONE_RC_PASS")));
+    QVERIFY(out.contains(QStringLiteral("DEBUG")));
+  }
+
+  void redactsUserAndPasswordOnTheSameLine() {
+    const QString out =
+        RedactOutputLine(R"(Setting rc_user="abc123" rc_pass="sw8Kd2")",
+                         "abc123", "sw8Kd2");
+    QVERIFY(!out.contains(QStringLiteral("abc123")));
+    QVERIFY(!out.contains(QStringLiteral("sw8Kd2")));
+  }
+
+  // A short user name can occur inside the password; replacing the shorter
+  // one first would leave a fragment of the longer behind.
+  void redactsOverlappingCredentials() {
+    const QString out = RedactOutputLine("user=ab pass=xxabxx", "ab", "xxabxx");
+    QVERIFY(!out.contains(QStringLiteral("xxabxx")));
+  }
+
+  void leavesOutputAloneWithoutCredentials() {
+    const QString line = "2026/08/04 NOTICE: Serving remote control on "
+                         "http://127.0.0.1:5555/";
+    QCOMPARE(RedactOutputLine(line, QString(), QString()), line);
+  }
 };
 
 QTEST_MAIN(TestRedactArgs)

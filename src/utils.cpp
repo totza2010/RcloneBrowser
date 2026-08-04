@@ -326,6 +326,31 @@ QStringList GetRcloneCmd(const QStringList &args) {
   return rcloneTransferCmd;
 }
 
+// TEST: (V-12) รัน transfer ด้วย -vv แล้วดูช่อง output: บรรทัด
+// 'Setting --rc-pass "..." from environment variable RCLONE_RC_PASS="..."'
+// ต้องแสดงเป็น *** ทั้งสองที่ ห้ามเห็นค่าจริง
+QString RedactOutputLine(const QString &line, const QString &rcUser,
+                         const QString &rcPass) {
+  QString out = line;
+  // Longest first: a short user name can be a substring of the password.
+  if (rcPass.length() >= rcUser.length()) {
+    if (!rcPass.isEmpty()) {
+      out.replace(rcPass, QStringLiteral("***"));
+    }
+    if (!rcUser.isEmpty()) {
+      out.replace(rcUser, QStringLiteral("***"));
+    }
+  } else {
+    if (!rcUser.isEmpty()) {
+      out.replace(rcUser, QStringLiteral("***"));
+    }
+    if (!rcPass.isEmpty()) {
+      out.replace(rcPass, QStringLiteral("***"));
+    }
+  }
+  return out;
+}
+
 // TEST: (V-08) mount remote ที่ตั้ง RC port -> ตรวจว่า mount/unmount/mount script
 // ยังทำงานครบ และ command line ของ process rclone ไม่มี --rc-user/--rc-pass แล้ว
 QString GenerateRcCredential(int length) {

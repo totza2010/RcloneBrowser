@@ -42,6 +42,12 @@ QStringList GetRcloneCmd(const QStringList &args);
 // such as --drive-token or --sftp-pass. See docs/ARCHITECTURE.md section 5.
 QStringList RedactArgs(const QStringList &args);
 
+// Masks a credential wherever it appears in a line of rclone output. At -vv
+// rclone echoes the values it picked up from the environment, including the
+// remote-control password, so the raw line cannot be shown or logged as-is.
+QString RedactOutputLine(const QString &line, const QString &rcUser,
+                         const QString &rcPass);
+
 // Random alphanumeric string for the per-mount rclone remote-control login.
 QString GenerateRcCredential(int length);
 
