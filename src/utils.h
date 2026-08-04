@@ -3,6 +3,20 @@
 // Core (L0): rclone invocation and settings access -- see docs/ARCHITECTURE.md.
 // Must not declare or depend on anything from QtWidgets. The recursive
 // QSettings <-> widget binding lives in widget_settings.h.
+//
+// Self-contained on purpose: the GUI build force-includes pch.h into every
+// translation unit, which used to hide the missing includes here. The tests
+// link rbcore without that header.
+
+#include <QDir>
+#include <QSettings>
+#include <QString>
+#include <QStringList>
+
+#include <memory>
+#include <string>
+
+class QProcess;
 
 std::unique_ptr<QSettings> GetSettings();
 

@@ -35,6 +35,38 @@ if(APPLE)
     find_library(UNIFORM_TYPE_IDENTIFIERS_LIB UniformTypeIdentifiers REQUIRED)
 endif()
 
+# ---- rbcore: everything that must build without QtWidgets ----
+# Kept as a separate target so the boundary is enforced by the linker rather
+# than by convention, and so the tests can exercise it without a GUI.
+# See docs/ARCHITECTURE.md.
+set(CORE_SOURCE
+  utils.cpp
+  job_options.cpp
+  list_of_job_options.cpp
+  rclone_capabilities.cpp
+  qcron.cpp
+  qcronfield.cpp
+  qcronnode.cpp
+)
+
+set(CORE_HEADER
+  utils.h
+  job_options.h
+  list_of_job_options.h
+  rclone_capabilities.h
+  qcron.h
+  qcronfield.h
+  qcronnode.h
+  global.h
+  pch_core.h
+)
+
+add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER})
+# No Qt6::Widgets and no Qt6::Gui here. That omission is the contract.
+target_link_libraries(rbcore PUBLIC Qt6::Core Qt6::Network)
+target_include_directories(rbcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_precompile_headers(rbcore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch_core.h")
+
 set(UI
   main_window.ui
   remote_widget.ui
@@ -67,10 +99,7 @@ set(MOC
   stream_widget.h
   preferences_dialog.h
   icon_cache.h
-  list_of_job_options.h
   item_model.h
-  rclone_capabilities.h
-  qcron.h
   scheduler_widget.h
   hours_spinbox.h
   minutes_spinbox.h
@@ -82,13 +111,8 @@ set(MOC
 
 set(OTHER
   pch.h
-  utils.h
-  job_options.h
   job_options_item.h
   widget_settings.h
-  global.h
-  qcronfield.h
-  qcronnode.h
 )
 
 set(SOURCE
@@ -108,14 +132,7 @@ set(SOURCE
   preferences_dialog.cpp
   icon_cache.cpp
   item_model.cpp
-  rclone_capabilities.cpp
-  utils.cpp
   widget_settings.cpp
-  job_options.cpp
-  list_of_job_options.cpp
-  qcron.cpp
-  qcronfield.cpp
-  qcronnode.cpp
   scheduler_widget.cpp
   hours_spinbox.cpp
   minutes_spinbox.cpp
@@ -144,6 +161,7 @@ endif()
 if(WIN32)
   add_executable(RcloneBrowser WIN32 ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC})
   target_link_libraries(RcloneBrowser PRIVATE
+      rbcore
       Qt6::Widgets
       Qt6::Network
       ${RB_MULTIMEDIA_LIB}
@@ -153,6 +171,7 @@ elseif(APPLE)
   set_source_files_properties(icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
   add_executable(rclone-browser MACOSX_BUNDLE ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC} icon.icns)
   target_link_libraries(rclone-browser PRIVATE
+      rbcore
       Qt6::Widgets
       Qt6::Network
       ${RB_MULTIMEDIA_LIB}
@@ -168,6 +187,7 @@ elseif(APPLE)
 else()
   add_executable(rclone-browser ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC})
   target_link_libraries(rclone-browser PRIVATE
+      rbcore
       Qt6::Widgets
       Qt6::Network
       ${RB_MULTIMEDIA_LIB}

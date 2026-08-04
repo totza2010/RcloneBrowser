@@ -22,12 +22,23 @@
 | §3.3 RC credential ไป env + `bounded()` | ✅ **เสร็จ** | แก้ VIO-3 ไปด้วย · V-08 **PASS** |
 | §3.6 Capability registry | ✅ **เสร็จ** | `rclone_capabilities.*` (L0) — รอทดสอบ (V-09) |
 | §6.6 Mount script editor ในหน้าต่าง | ✅ **เสร็จ** | `script_editor_dialog.*` (L3) — รอทดสอบ (V-10) |
-| แยก `pch_core.h` | ⬜ ยังไม่ทำ | |
+| แยก `pch_core.h` | ✅ **เสร็จ** | QtCore + QtNetwork เท่านั้น |
+| **สร้าง `rbcore` static lib + QTest** | ✅ **เสร็จ** | ลิงก์แค่ `Qt6::Core` `Qt6::Network` — linker บังคับขอบเขตแล้ว |
 | แยก `item_model` | ⬜ ยังไม่ทำ | รอ §3.4 (lsjson) |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 26/66** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 27/67** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+
+### `rbcore` มีจริงแล้ว
+ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์แค่ `Qt6::Core` และ
+`Qt6::Network` — **ขอบเขตชั้นถูกบังคับด้วย linker แล้ว ไม่ใช่แค่ข้อตกลง**
+ถ้าใครดึง widget เข้า core จะ build ไม่ผ่านทันที ไม่ต้องรอ `-DNO_GUI=ON`
+
+```bash
+cmake --build build --config Release          # rbcore + GUI + tests
+ctest --test-dir build -C Release --output-on-failure
+```
 
 ---
 
@@ -54,7 +65,7 @@
 
 ### กฎที่ห้ามละเมิด
 
-1. **L0/L1 ห้าม `#include` อะไรก็ตามจาก QtWidgets/QtGui** — เกณฑ์วัดคือ `cmake -DNO_GUI=ON` ต้องคอมไพล์และลิงก์ผ่าน
+1. **L0/L1 ห้าม `#include` อะไรก็ตามจาก QtWidgets/QtGui** — บังคับด้วย target `rbcore` ที่ไม่ลิงก์ `Qt6::Widgets` · ปลายทางคือ `cmake -DNO_GUI=ON` build ทั้งแอปได้
 2. **L0/L1 ห้ามเปิด dialog หรือ `QMessageBox`** — ต้องคืน error กลับขึ้นไปให้ client ตัดสินใจแทน
 3. **L3 ห้ามสร้าง rclone args เอง** — ต้องเรียกผ่าน L0 เท่านั้น (ตอนนี้ยังละเมิดอยู่ ดู §4)
 4. **การสื่อสารขึ้นบน ใช้ signal เท่านั้น** — L1 ห้ามรู้จักชนิดของ client
@@ -104,10 +115,11 @@ python scripts/check_layers.py
 ```
 
 > ⚠️ **ข้อจำกัดของสคริปต์:** เป็นการตรวจระดับ `#include` เท่านั้น และ `src/pch.h`
-> ดึง `<QtGui>` เข้าทั้งโปรเจกต์ ทำให้บางไฟล์ "ดูสะอาด" ทั้งที่ลิงก์ไม่ผ่านจริง
-> **ตัวตัดสินจริงคือ `-DNO_GUI=ON`** สคริปต์นี้ใช้ติดตามความคืบหน้าเท่านั้น
+> ยังดึง `<QtGui>` เข้าทุกไฟล์ของ target GUI ทำให้บางไฟล์ "ดูสะอาด" ทั้งที่ยังลิงก์ไม่ผ่าน
+> **ตัวตัดสินจริงคือการ build target `rbcore`** ซึ่งลิงก์แค่ Qt Core/Network
+> สคริปต์นี้ใช้ติดตามความคืบหน้าของไฟล์ที่*ยังไม่ได้*ย้ายเข้า `rbcore`
 
-### 3.1 🟢 ปลอด GUI แล้ว — พร้อมเข้า `rbcore` ตอน E2
+### 3.1 🟢 อยู่ใน `rbcore` แล้ว (ลิงก์ Qt Core/Network เท่านั้น)
 
 | ไฟล์ | บรรทัด | บทบาทเป้าหมาย | หมายเหตุ |
 |---|---|---|---|
@@ -120,7 +132,7 @@ python scripts/check_layers.py
 | `utils.h/.cpp` | 327 | L0 — rclone invocation | ✅ **แยกแล้ว** |
 | `rclone_capabilities.h/.cpp` | 120 | L0 — ถาม backend ว่าทำอะไรได้ | ✅ **เขียนใหม่เป็น core ตั้งแต่ต้น** |
 
-รวม **~1,675 บรรทัดที่ยกเข้า core ได้ทันที**
+รวม **~1,795 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 3 ชุด (`tests/`)
 
 ### 3.2 🟡 แยกได้ด้วยงานเล็ก
 
@@ -128,7 +140,7 @@ python scripts/check_layers.py
 |---|---|---|---|
 | ~~`job_options.h:2`~~ | ~~`#include <QListWidget>`~~ | ย้าย `JobOptionsListWidgetItem` ไป [`job_options_item.h`](../src/job_options_item.h) | ✅ **เสร็จ** |
 | ~~`utils.cpp`~~ | ~~widget include 6 ตัว~~ | ย้าย `ReadSettings`/`WriteSettings` ไป [`widget_settings.cpp`](../src/widget_settings.cpp) | ✅ **เสร็จ** |
-| [`src/pch.h`](../src/pch.h) | ดึง `<QtGui>` `<QMessageBox>` `<QPushButton>` ให้ทั้งโปรเจกต์ | ทำ `pch_core.h` แยกสำหรับ target `rbcore` | ⬜ ~1 ชม. |
+| ~~`src/pch.h`~~ | ~~ดึง `<QtGui>` ให้ทั้งโปรเจกต์~~ | [`pch_core.h`](../src/pch_core.h) สำหรับ `rbcore` | ✅ **เสร็จ** |
 | [`item_model.cpp`](../src/item_model.cpp) | `QApplication` `QStyle` (ใช้ทำไอคอน) | โครง model เป็น L0/L1 ได้ ส่วนไอคอนเป็น L3 — **Web UI ต้องใช้ listing นี้ด้วย** จึงคุ้มที่จะแยก | ⬜ ~1 วัน (ทำพร้อม §3.4) |
 
 ### 3.3 🔴 ต้องผ่าจริง (งานหลักของ E2)
