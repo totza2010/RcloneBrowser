@@ -135,7 +135,7 @@ python scripts/check_layers.py
 | `job_stats.h/.cpp` | 230 | L0 — แปลง `core/stats` เป็นตัวเลข | ✅ **ใหม่** |
 | `rc_client.h/.cpp` | 130 | L0 — poll RC ของ job แบบ async | ✅ **ใหม่** |
 
-รวม **~1,795 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 3 ชุด (`tests/`)
+รวม **~1,795 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 5 ชุด (`tests/`)
 
 ### 3.2 🟡 แยกได้ด้วยงานเล็ก
 

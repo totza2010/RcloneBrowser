@@ -118,8 +118,9 @@ marker: `job_widget.cpp` (ใกล้ `setMaximumBlockCount`)
 | Scheduler → ตั้งเวลา → เด้งทำงานตามกำหนด | | | |
 | โหมด portable (มีไฟล์ `.ini` ข้าง exe) → ยังอ่านค่าจาก ini | | | |
 
-> ⚠️ `list_of_job_options` ยังใช้ `QDataStream` แบบ binary (`tasks.bin`) — ถ้า task เดิม
-> โหลดไม่ขึ้นหลังอัปเดต ให้ระบุว่า `FAIL` ทันที นี่เป็นความเสี่ยงหลักของรอบนี้
+> ✅ **ข้อ `tasks.bin` อัตโนมัติแล้ว** — `tests/test_task_store.cpp` โหลด golden file v8
+> แล้วตรวจ 30 ฟิลด์ทีละตัว รวมถึง persist/forget แล้วอ่านไฟล์ซ้ำ
+> รันด้วย `ctest --test-dir build -C Release` · ที่เหลือในตารางยังต้องทดสอบด้วยมือ
 
 ---
 
