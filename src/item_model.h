@@ -15,7 +15,7 @@ struct Item {
     }
   }
 
-  bool isLoading() const { return state == Loading1 || state == Loading2; }
+  bool isLoading() const { return state == Loading; }
 
   int num() const {
     Q_ASSERT(parent);
@@ -24,7 +24,9 @@ struct Item {
 
   Item *parent = nullptr;
 
-  enum State { Unknown, Loading1, Loading2, Ready, Special, LoadingIcon };
+  // Loading was once two states, one per listing process. A single lsjson
+  // call replaced both.
+  enum State { Unknown, Loading, Ready, Special, LoadingIcon };
 
   State state = Unknown;
   bool isFolder = false;
@@ -98,8 +100,6 @@ private:
   int mSortColumn;
   Qt::SortOrder mSortOrder;
 
-  QRegularExpression mRegExpFolder;
-  QRegularExpression mRegExpFile;
 
   QMutex mRcloneLsProcessCountMutex;
 
@@ -109,6 +109,6 @@ private:
   void sortRecursive(Item *item, const ItemSorter &sorter);
   void sort(const QModelIndex &parent, Item *item);
 
-  // rclone lsl/lsd processes count;
+  // rclone listing processes count;
   int mLocalRcloneLsProcessCount = 0;
 };

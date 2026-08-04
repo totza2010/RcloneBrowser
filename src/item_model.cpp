@@ -1,4 +1,5 @@
 #include "item_model.h"
+#include "lsjson_parser.h"
 #include "global.h"
 #include "icon_cache.h"
 #include "utils.h"
@@ -83,11 +84,7 @@ private:
 
 ItemModel::ItemModel(IconCache *icons, const QString &remote, QObject *parent)
     : QAbstractItemModel(parent), mRemote(remote),
-      mFixedFont(QFontDatabase::systemFont(QFontDatabase::FixedFont)),
-      mRegExpFolder(
-          R"(^\s*[\d-]+ (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d) \s*[\d-]+ (.+)$)"),
-      mRegExpFile(
-          R"(^\s*(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)") {
+      mFixedFont(QFontDatabase::systemFont(QFontDatabase::FixedFont)) {
   QStyle *style = QApplication::style();
   mDriveIcon = style->standardIcon(QStyle::SP_DriveNetIcon);
   mFolderIcon = style->standardIcon(QStyle::SP_DirIcon);
@@ -392,9 +389,14 @@ Item *ItemModel::get(const QModelIndex &index) const {
 }
 
 void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
-  auto lsd = new QProcess(this);
-  auto lsl = new QProcess(this);
+  // One "rclone lsjson" answers for both files and directories. This used to
+  // be two processes, lsd and lsl, each scraped with its own regular
+  // expression -- twice the round trips on a backend where a listing is a
+  // network call, which is most of them.
+  auto ls = new QProcess(this);
+  ls->setProcessChannelMode(QProcess::SeparateChannels);
 
+  auto parser = new LsjsonParser();
   auto cache = new QVector<Item *>();
 
   Item *loading = new Item();
@@ -422,11 +424,9 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     }
     mRcloneLsProcessCountMutex.unlock();
 
-    parent->state =
-        parent->state == Item::Loading1 ? Item::Loading2 : Item::Ready;
-    if (parent->state != Item::Ready) {
-      return;
-    }
+    // A single listing process, so there is no second stage to wait for.
+    parent->state = Item::Ready;
+    delete parser;
 
     timer->stop();
     timer->deleteLater();
@@ -504,93 +504,45 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     }
   };
 
-  QObject::connect(lsd,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, rcloneFinished);
-  QObject::connect(lsl,
+  QObject::connect(ls,
                    static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
                        &QProcess::finished),
                    this, rcloneFinished);
 
-  QObject::connect(lsd, &QProcess::readyRead, this, [=]() {
-    while (lsd->canReadLine()) {
-
-      QString line = lsd->readLine();
-      line.replace("\n", "");
-      QRegularExpressionMatch match = mRegExpFolder.match(line);
-
-      if (match.hasMatch()) {
-        QString cap1 = match.captured(1);
-        QString cap2 = match.captured(2);
-
-        Item *child = new Item();
-        child->isFolder = true;
-        child->parent = parent;
-        child->name = cap2;
-        child->modified = cap1;
-
-        cache->append(child);
-      }
+  QObject::connect(ls, &QProcess::readyReadStandardOutput, this, [=]() {
+    for (const LsjsonEntry &entry : parser->feed(ls->readAllStandardOutput())) {
+      Item *child = new Item();
+      child->parent = parent;
+      child->name = entry.name;
+      child->isFolder = entry.isDir;
+      child->modified = entry.modifiedText();
+      // Directories report -1, and so do backends that cannot size an entry.
+      child->size = entry.size > 0 ? static_cast<quint64>(entry.size) : 0;
+      cache->append(child);
     }
   });
 
-  QObject::connect(lsl, &QProcess::readyRead, this, [=]() {
-    while (lsl->canReadLine()) {
-
-      QString line = lsl->readLine();
-      line.replace("\n", "");
-      QRegularExpressionMatch match = mRegExpFile.match(line);
-
-      if (match.hasMatch()) {
-          QString cap1 = match.captured(1);
-          QString cap2 = match.captured(2);
-          QString cap3 = match.captured(3);
-
-        Item *child = new Item();
-        child->parent = parent;
-        child->name = cap3;
-        child->modified = cap2;
-        child->size = cap1.toULongLong();
-
-        cache->append(child);
-      }
-    }
-  });
-
-  parent->state = Item::Loading1;
+  parent->state = Item::Loading;
 
   emit beginInsertRows(parentIndex, 0, 0);
   parent->childs.prepend(loading);
   emit endInsertRows();
 
   timer->start(100);
-  UseRclonePassword(lsd);
-  UseRclonePassword(lsl);
+  UseRclonePassword(ls);
 
-  // keep track of number of lsl and lsd rclone processes
+  // keep track of number of listing rclone processes
   mRcloneLsProcessCountMutex.lock();
   global.rcloneLsProcessCount++;
-  global.rcloneLsProcessCount++;
-  mLocalRcloneLsProcessCount++;
   mLocalRcloneLsProcessCount++;
   mRcloneLsProcessCountMutex.unlock();
 
-  // CORE: (VIO-4, docs/ARCHITECTURE.md 3.2) การ list remote เป็น L0 และ Web UI ก็ต้องใช้
-  // -- ตอนเปลี่ยน lsd+lsl เป็น lsjson (แผน §3.4) ให้แยกส่วนเรียก rclone ออกจาก model
-  lsd->start(GetRclone(),
-             QStringList() << "lsd" << GetRcloneConf()
-                           << GetRemoteModeRcloneOptions() << GetShowHidden()
-                           << GetDefaultOptionsList("defaultRcloneOptions")
-                           << mRemote + ":" + parent->path.path(),
-             QIODevice::ReadOnly);
-  lsl->start(
-      GetRclone(),
-      QStringList() << "lsl" << GetRcloneConf() << GetRemoteModeRcloneOptions()
-                    << GetShowHidden() << "--max-depth"
-                    << "1" << GetDefaultOptionsList("defaultRcloneOptions")
-                    << mRemote + ":" + parent->path.path(),
-      QIODevice::ReadOnly);
+  ls->start(GetRclone(),
+            QStringList() << "lsjson" << GetRcloneConf()
+                          << GetRemoteModeRcloneOptions() << GetShowHidden()
+                          << GetDefaultOptionsList("defaultRcloneOptions")
+                          << mRemote + ":" + parent->path.path(),
+            QIODevice::ReadOnly);
 }
 
 void ItemModel::sortRecursive(Item *item, const ItemSorter &sorter) {

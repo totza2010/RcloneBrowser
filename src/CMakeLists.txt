@@ -45,6 +45,7 @@ set(CORE_SOURCE
   list_of_job_options.cpp
   rclone_capabilities.cpp
   job_stats.cpp
+  lsjson_parser.cpp
   rc_client.cpp
   qcron.cpp
   qcronfield.cpp
@@ -57,6 +58,7 @@ set(CORE_HEADER
   list_of_job_options.h
   rclone_capabilities.h
   job_stats.h
+  lsjson_parser.h
   rc_client.h
   qcron.h
   qcronfield.h
