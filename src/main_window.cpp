@@ -4232,8 +4232,19 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
   QProcess *transfer = new QProcess(this);
   transfer->setProcessChannelMode(QProcess::MergedChannels);
 
-  auto widget = new JobWidget(transfer, message, args, source, dest, uniqueId,
-                              transferMode, requestId);
+  // Turn on the remote control so JobWidget can read progress from
+  // core/stats rather than scraping the human-readable output. Port 0 lets
+  // rclone pick a free one and announce it, which avoids reserving a port
+  // that something else could take before rclone binds it.
+  QStringList transferArgs = args;
+  const QString rcUser = GenerateRcCredential(10);
+  const QString rcPass = GenerateRcCredential(22);
+  transferArgs << "--rc"
+               << "--rc-addr=localhost:0";
+
+  auto widget = new JobWidget(transfer, message, transferArgs, source, dest,
+                              uniqueId, transferMode, requestId, rcUser,
+                              rcPass);
 
   auto line = new QFrame();
   line->setFrameShape(QFrame::HLine);
@@ -4571,7 +4582,9 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
   ui.buttonCleanNotRunning->setEnabled(mJobCount != (ui.jobs->count() - 2) / 2);
 
   UseRclonePassword(transfer);
-  transfer->start(GetRclone(), args + GetRcloneConf(), QIODevice::ReadOnly);
+  UseRcCredentials(transfer, rcUser, rcPass);
+  transfer->start(GetRclone(), transferArgs + GetRcloneConf(),
+                  QIODevice::ReadOnly);
 
   ui.buttonStopAllJobs->setEnabled(mTransferJobCount != 0);
   ui.buttonCleanNotRunning->setEnabled(mJobCount != (ui.jobs->count() - 2) / 2);

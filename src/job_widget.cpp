@@ -7,11 +7,31 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
                      const QStringList &args, const QString &source,
                      const QString &dest, const QString &uniqueID,
                      const QString &transferMode, const QString &requestId,
+                     const QString &rcUser, const QString &rcPass,
                      QWidget *parent)
     : QWidget(parent), mProcess(process) {
   ui.setupUi(this);
 
   updateStartInfo();
+
+  mRcUser = rcUser;
+  mRcPass = rcPass;
+  if (!rcUser.isEmpty() && !rcPass.isEmpty()) {
+    mRc = new RcClient(this);
+    QObject::connect(mRc, &RcClient::statsReceived, this,
+                     &JobWidget::applyStats);
+    // The job itself is unaffected -- it is only the figures on the card that
+    // stop updating. Say so rather than leaving a card frozen at zero.
+    QObject::connect(mRc, &RcClient::unavailable, this, [this]() {
+      ui.progress_info->setStyleSheet(
+          "QLabel { color: orange; font-weight: bold;}");
+      ui.progress_info->setText("(no progress info)");
+      ui.progress_info->setToolTip(
+          "rclone's remote control did not respond, so progress cannot be "
+          "reported. The transfer itself is unaffected; see the output for "
+          "details.");
+    });
+  }
 
   mArgs = GetRcloneCmd(args);
 
@@ -138,159 +158,28 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
     clipboard->setText(RedactArgs(mArgs).join(" "));
   });
 
-  // CORE: (VIO-2, docs/ARCHITECTURE.md 3.3) การ parse output ของ rclone เป็น L0 แท้ๆ
-  // แต่ติดอยู่ใน widget -- ควรย้ายไป JobRunner (L0) พร้อมกับตอนเปลี่ยนไปใช้
-  // --use-json-log (แผน §3.5) เพื่อไม่ต้องเขียนส่วนนี้ใหม่สองรอบ
   QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
-    // regex101.com great for testing regexp
-    QRegularExpression rxSize(R"(^Transferred:\s+(\S+ \S+) \(([^)]+)\)$)"); // Until rclone 1.42
-    QRegularExpression rxSize2(R"(^Transferred:\s+([0-9.]+)(\S)? / (\S+) (\S+), ([0-9%-]+), (\S+ \S+), (\S+) (\S+)$)"); // Starting with rclone 1.43
-    QRegularExpression rxSize3(R"(^Transferred:\s+([0-9.]+ \w+) / ([0-9.]+ \w+), ([0-9%-]+), ([0-9.]+ \w+/s), \w+ (\S+)$)"); // Starting with rclone 1.57
-    QRegularExpression rxErrors(R"(^Errors:\s+(\d+)(.*)$)"); // captures also following variant: "Errors: 123 (bla bla bla)"
-    QRegularExpression rxChecks(R"(^Checks:\s+(\S+)$)"); // Until rclone 1.42
-    QRegularExpression rxChecks2(R"(^Checks:\s+(\S+) / (\S+), ([0-9%-]+)$)");   // Starting with rclone 1.43
-    QRegularExpression rxChecks3(R"(^Checks:\s+(\S+) / (\S+), ([0-9%-]+), Listed (\S+)$)"); // Starting with rclone 1.70
-    QRegularExpression rxTransferred(R"(^Transferred:\s+(\S+)$)"); // Until rclone 1.42
-    QRegularExpression rxTransferred2(R"(^Transferred:\s+(\d+) / (\d+), ([0-9%-]+)$)"); // Starting with rclone 1.43
-    QRegularExpression rxTime(R"(^Elapsed time:\s+(\S+)$)");
-    QRegularExpression rxProgress(R"(^\* ([^:]+):\s*(\d+)% /([\d.]+\w+),\s*([\d.]+\w+/s),\s*([\w-]+)$)"); // Starting with rclone 1.39 - 1.71.0
     while (mProcess->canReadLine()) {
-      QString line = mProcess->readLine().trimmed();
-      ui.output->appendPlainText(line);
+      const QString line = QString(mProcess->readLine()).trimmed();
 
-      if (line.isEmpty()) {
-        for (auto it = mActive.begin(), eit = mActive.end(); it != eit;
-             /* empty */) {
-          auto label = it.value();
-          if (mUpdated.contains(label)) {
-            ++it;
-          } else {
-            it = mActive.erase(it);
-            ui.progress->removeWidget(label->buddy());
-            ui.progress->removeWidget(label);
-            delete label->buddy();
-            delete label;
-          }
+      // rclone announces the port it settled on. This is the only thing the
+      // job card still takes from the output; every figure on the card comes
+      // from core/stats instead.
+      if (mRc && !mRc->isRunning()) {
+        if (const quint16 port = ParseRcServingPort(line)) {
+          mRc->start(port, mRcUser, mRcPass);
         }
-        mUpdated.clear();
+      }
+
+      // Our own polling would otherwise dominate the log at -vv and above.
+      if (IsRcPollingNoise(line)) {
         continue;
       }
 
-      QRegularExpressionMatch match = rxSize.match(line);
-      if (match.hasMatch()) {
-        ui.size->setText(match.captured(1));
-
-        ui.progress_info->setStyleSheet(
-            "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + match.captured(1) + ")");
-
-        ui.bandwidth->setText(match.captured(2));
-      }
-      match = rxSize2.match(line);
-      if (match.hasMatch()) {
-        ui.size->setText(match.captured(1) + " " + match.captured(2) + "B" + ", " +
-                         match.captured(5));
-        ui.bandwidth->setText(match.captured(6));
-        ui.eta->setText(match.captured(8));
-        updateFinishInfo(match.captured(8));
-        ui.totalsize->setText(match.captured(3) + " " + match.captured(4));
-        ui.progress_info->setStyleSheet(
-            "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + match.captured(5) + ")");
-      }
-      match = rxSize3.match(line);
-      if (match.hasMatch()) {
-        ui.size->setText(match.captured(1) + ", " + match.captured(3));
-        ui.bandwidth->setText(match.captured(4));
-        ui.eta->setText(match.captured(5));
-        updateFinishInfo(match.captured(5));
-        ui.totalsize->setText(match.captured(2));
-        ui.progress_info->setStyleSheet(
-          "QLabel { color: green; font-weight: bold;}");
-        ui.progress_info->setText("(" + match.captured(3) + ")");
-      }
-      match = rxErrors.match(line);
-      if (match.hasMatch()) {
-        ui.errors->setText(match.captured(1));
-
-        if (!(match.captured(1).toInt() == 0)) {
-          ui.progress_info->setStyleSheet(
-              "QLabel { color: red; font-weight: bold;}");
-          ui.errors->setStyleSheet(
-              "QLineEdit { color: red; font-weight: normal;}");
-        }
-      }
-      match = rxChecks.match(line);
-      if (match.hasMatch()) {
-        ui.checks->setText(match.captured(1));
-      }
-      match = rxChecks2.match(line);
-      if (match.hasMatch()) {
-        ui.checks->setText(match.captured(1) + " / " + match.captured(2) + ", " +
-                           match.captured(3));
-      }
-      match = rxChecks3.match(line);
-      if (match.hasMatch()) {
-        ui.checks->setText(match.captured(1) + " / " + match.captured(2) + ", " +
-                           match.captured(3) + ", Listed " + match.captured(4));
-      }
-      match = rxTransferred.match(line);
-      if (match.hasMatch()) {
-        ui.transferred->setText(match.captured(1));
-      }
-      match = rxTransferred2.match(line);
-      if (match.hasMatch()) {
-        ui.transferred->setText(match.captured(1) + " / " +
-                                match.captured(2) + ", " +
-                                match.captured(3));
-      }
-      match = rxTime.match(line);
-      if (match.hasMatch()) {
-        ui.elapsed->setText(match.captured(1));
-      }
-      match = rxProgress.match(line);
-      if (match.hasMatch()) {
-        QString path = match.captured(1).trimmed();
-        QString percen = match.captured(2).trimmed();
-        QString size = match.captured(3).trimmed();
-        QString speed = match.captured(4).trimmed();
-        QString eta = match.captured(5).trimmed();
-        int progressValue = percen.toInt();
-        QString stats = QString("%1%% of %2 @ %3, ETA %4").arg(percen, size, speed, eta);
-
-        auto it = mActive.find(path);
-
-        QLabel *label;
-        QProgressBar *bar;
-        if (it == mActive.end()) {
-          label = new QLabel();
-
-          QString name = fm.elidedText(path, Qt::ElideMiddle, 420);
-
-          label->setText(name);
-
-          bar = new QProgressBar();
-          bar->setMinimum(0);
-          bar->setMaximum(100);
-          bar->setTextVisible(true);
-
-          label->setBuddy(bar);
-
-          ui.progress->addRow(label, bar);
-
-          mActive.insert(path, label);
-        } else {
-          label = it.value();
-          bar = static_cast<QProgressBar *>(label->buddy());
-        }
-
-        bar->setValue(progressValue);
-        bar->setToolTip(QString("Path: %1\nStats: %2").arg(path, stats));
-        bar->setAlignment(Qt::AlignCenter);
-        bar->setFormat(stats);
-
-        mUpdated.insert(label);
-      }
+      // SECURITY: at -vv rclone echoes the remote-control password it read
+      // out of the environment. Never let that reach the output pane, the
+      // clipboard, or a log file (docs/ARCHITECTURE.md section 5).
+      ui.output->appendPlainText(RedactOutputLine(line, mRcUser, mRcPass));
     }
   });
 
@@ -299,6 +188,9 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
       static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
           &QProcess::finished),
       this, [=](int status, QProcess::ExitStatus) {
+        if (mRc) {
+          mRc->stop();
+        }
         mProcess->deleteLater();
         for (auto label : mActive) {
           ui.progress->removeWidget(label->buddy());
@@ -346,7 +238,94 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
   ui.showDetails->setText("  Running");
 }
 
-JobWidget::~JobWidget() {}
+JobWidget::~JobWidget() {
+  if (mRc) {
+    mRc->stop();
+  }
+}
+
+void JobWidget::applyStats(const JobStats &stats) {
+  ui.size->setText(stats.sizeText());
+  ui.totalsize->setText(FormatBytes(stats.totalBytes));
+  ui.bandwidth->setText(stats.speedText());
+  ui.eta->setText(stats.etaText());
+  ui.checks->setText(stats.checksText());
+  ui.transferred->setText(stats.transfersText());
+  ui.elapsed->setText(stats.elapsedText());
+
+  if (stats.errors > 0) {
+    ui.errors->setStyleSheet("QLabel { color: red; font-weight: bold;}");
+    ui.errors->setText(QString::number(stats.errors));
+  }
+
+  ui.progress_info->setStyleSheet("QLabel { color: green; font-weight: bold;}");
+  ui.progress_info->setText(QStringLiteral("(%1%)").arg(stats.percent()));
+
+  if (stats.etaSeconds >= 0) {
+    updateFinishInfo(stats.etaSeconds);
+  }
+
+  updateTransferBars(stats);
+}
+
+void JobWidget::updateTransferBars(const JobStats &stats) {
+  QFontMetrics fm(ui.output->font());
+  QSet<QLabel *> seen;
+
+  for (const JobTransferItem &item : stats.transferring) {
+    QLabel *label = nullptr;
+    QProgressBar *bar = nullptr;
+
+    auto it = mActive.find(item.name);
+    if (it == mActive.end()) {
+      label = new QLabel();
+      label->setText(fm.elidedText(item.name, Qt::ElideMiddle, 420));
+
+      bar = new QProgressBar();
+      bar->setMinimum(0);
+      bar->setMaximum(100);
+      bar->setTextVisible(true);
+      label->setBuddy(bar);
+
+      ui.progress->addRow(label, bar);
+      mActive.insert(item.name, label);
+    } else {
+      label = it.value();
+      bar = static_cast<QProgressBar *>(label->buddy());
+    }
+
+    const QString summary =
+        QStringLiteral("%1% of %2 @ %3, ETA %4")
+            .arg(item.percentage)
+            .arg(item.size >= 0 ? FormatBytes(item.size)
+                                : QStringLiteral("unknown size"))
+            .arg(item.speedText(), item.etaText());
+
+    bar->setValue(item.percentage);
+    bar->setAlignment(Qt::AlignCenter);
+    bar->setFormat(summary);
+    bar->setToolTip(
+        QStringLiteral("Path: %1\nStats: %2").arg(item.name, summary));
+
+    seen.insert(label);
+  }
+
+  // core/stats lists exactly what is in flight, so anything missing from this
+  // reading has finished. The output-parsing path had to infer that from a
+  // blank line instead.
+  for (auto it = mActive.begin(); it != mActive.end();) {
+    QLabel *label = it.value();
+    if (seen.contains(label)) {
+      ++it;
+      continue;
+    }
+    it = mActive.erase(it);
+    ui.progress->removeWidget(label->buddy());
+    ui.progress->removeWidget(label);
+    delete label->buddy();
+    delete label;
+  }
+}
 
 void JobWidget::showDetails() { ui.showDetails->setChecked(true); }
 
@@ -357,6 +336,10 @@ void JobWidget::cancel() {
 
   mJobFinalStatus = "stopped";
   mStatus = "2_transfer_stopped";
+
+  if (mRc) {
+    mRc->stop();
+  }
 
   mProcess->kill();
   mProcess->waitForFinished();
@@ -383,8 +366,7 @@ void JobWidget::updateStartInfo() {
       QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
 }
 
-void JobWidget::updateFinishInfo(const QString &ETA) {
-  qint64 etaSeconds = ETA.isEmpty() ? 0 : parseETAtoSeconds(ETA);
+void JobWidget::updateFinishInfo(qint64 etaSeconds) {
   QString finishText = (etaSeconds > 0) ? "Finished (ETA):  " : "Finished:  ";
 
   ui.le_FinishInfo->setText(

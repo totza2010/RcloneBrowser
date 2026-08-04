@@ -269,6 +269,73 @@ marker: `script_editor_dialog.cpp`
 
 ---
 
+## รอบที่ 3 — Progress จาก RC API (2026-08-03)
+
+### V-11 · progress อ่านจาก `core/stats` แทน regex
+
+marker: `job_stats.h` · fixture: [`tests/fixtures/core_stats_active.json`](../tests/fixtures/core_stats_active.json)
+
+transfer job จะเปิด `--rc --rc-addr=localhost:0` แล้ว `JobWidget` อ่านตัวเลขจาก RC
+ส่วน regex เดิมยังอยู่เป็น fallback
+
+1. Copy โฟลเดอร์ใหญ่ (หลาย GB, หลายไฟล์) ไป/จาก remote
+2. กางการ์ด job ดูค่าระหว่างวิ่ง
+3. กางช่อง output ดูบรรทัด `Serving remote control on http://127.0.0.1:PORT/`
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | Size / Total size ขยับตามจริง | | | |
+| 2 | Speed ขยับตามจริง | | | |
+| 3 | ETA แสดงเวลา ไม่ใช่ `-` ค้าง (หลัง rclone ประเมินได้) | | | |
+| 4 | Checks / Transferred ขยับ | | | |
+| 5 | Elapsed เดินตามเวลาจริง | | | |
+| 6 | **% ไม่เกิน 100 ตลอดงาน** (บั๊กเดิมที่เคยแก้ซ้ำๆ) | | | |
+| 7 | แถบ progress รายไฟล์ขึ้นครบตามจำนวนไฟล์ที่วิ่งพร้อมกัน (`--transfers`) | | | |
+| 8 | ไฟล์ที่ทรานเฟอร์เสร็จ แถบหายไปเอง ไม่ค้าง | | | |
+| 9 | กด Cancel แล้วงานหยุด ไม่มี process ค้าง | | | |
+| 10 | teldrive: ค่าที่รายงานสมเหตุสมผล (backend ไม่มี hash และอาจไม่รู้ขนาดล่วงหน้า) | | | |
+
+**ช่อง output ต้องเป็น log จริง ไม่ใช่ stat:**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 11 | ช่อง output **ไม่มี** บล็อก `Transferred: ... / Elapsed time: ... / Transferring:` โผล่ทุกวินาทีอีกแล้ว | PASS | totza2010 / 2026-08-04 | |
+| 12 | ใส่ `-vv` หรือ `-vvv` ในช่อง rclone options → เห็น DEBUG log จริงไหลมา ไม่ถูก stat กลบ | PASS | totza2010 / 2026-08-04 | เห็น `Uploading segment`, `quickxor ... OK`, `Copied (new)` ครบ |
+| 12b | log ของ polling ตัวเอง (`rc: "core/stats"`) ถูกกรองออก ไม่ท่วม `-vvv` | PASS | totza2010 / 2026-08-04 | รอบแรก **FAIL** — poll ทุก 0.5 วิ ทำให้ท่วม แก้ด้วย `IsRcPollingNoise()` + poll 1 วิ · ยืนยันซ้ำกับงาน 4 ไฟล์พร้อมกันไป teldrive |
+
+**กรณี RC เปิดไม่ได้ (ไม่มี fallback แล้ว):**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 13 | ทำให้ RC ต่อไม่ติด → การ์ดขึ้น **"(no progress info)"** สีส้ม พร้อม tooltip อธิบาย | | | |
+| 14 | ในกรณีนั้น **งานยังทำงานต่อจนจบตามปกติ** (ตรวจไฟล์ปลายทาง) | | | |
+
+> ⚠️ regex ถูกลบทั้งหมดแล้ว ถ้า RC ล้ม จะไม่มีตัวเลข progress — แต่งานต้องไม่พัง
+> `RcClient` ยอมแพ้หลังต่อไม่ติด 6 ครั้งติดแล้วส่ง `unavailable`
+
+---
+
+### V-12 · credential ไม่โผล่ในช่อง output ตอน `-vv`
+
+marker: `utils.cpp` (ฟังก์ชัน `RedactOutputLine`)
+
+**พบตอนทดสอบ `--stats 0` กับ `-vv`** — rclone พิมพ์ค่าที่อ่านจาก environment ออกมาตรงๆ:
+
+```
+DEBUG : Setting --rc-pass "sw8Kd2" from environment variable RCLONE_RC_PASS="sw8Kd2"
+```
+
+1. รัน transfer โดยใส่ `-vv` ในช่อง rclone options
+2. กางช่อง output หาบรรทัด `RCLONE_RC_PASS` / `RCLONE_RC_USER`
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | บรรทัดนั้นแสดง `***` แทนค่าจริง **ทั้งสองตำแหน่งในบรรทัด** | PASS | totza2010 / 2026-08-04 | `Setting --rc-pass "***" from environment variable RCLONE_RC_PASS="***"` |
+| 2 | ส่วนที่เหลือของบรรทัดยังอ่านได้ (`DEBUG`, `RCLONE_RC_PASS`) | PASS | totza2010 / 2026-08-04 | |
+| 3 | บรรทัด log อื่นไม่ถูกแก้ | PASS | totza2010 / 2026-08-04 | |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

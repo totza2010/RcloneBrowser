@@ -208,14 +208,21 @@ QStringList JobOptions::getOptions() const {
     }
   }
 
-  // always verbose
-  list << "--verbose";
-
+  // Progress comes from the remote control (core/stats), so rclone no longer
+  // has to print the periodic stats block for anything to parse. Turning it
+  // off leaves the job output free for actual log lines -- previously the
+  // forced "--stats 1s" buried them under a seven-line report every second.
+  //
+  // --stats 0 only stops the printing; the figures are still collected and
+  // still served over the remote control.
   list << "--stats"
-       << "1s";
-
-  list << "--stats-file-name-length"
        << "0";
+
+  // -v as a baseline so the output pane shows what was copied. rclone
+  // accumulates verbosity rather than letting the last flag win, so a user
+  // who puts -vv or -vvv in the extra options still gets that level; verified
+  // that "-vvv --verbose" and "--verbose -vvv" both come out at DEBUG.
+  list << "--verbose";
 
   if (dryRun) {
     list << "--dry-run";

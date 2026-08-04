@@ -1,0 +1,61 @@
+{
+	"bytes": 63721472,
+	"checks": 0,
+	"deletedDirs": 0,
+	"deletes": 0,
+	"elapsedTime": 4.9942994,
+	"errors": 0,
+	"eta": 24,
+	"fatalError": false,
+	"listed": 6,
+	"renames": 0,
+	"retryError": false,
+	"serverSideCopies": 0,
+	"serverSideCopyBytes": 0,
+	"serverSideMoveBytes": 0,
+	"serverSideMoves": 0,
+	"speed": 12801024,
+	"totalBytes": 377487360,
+	"totalChecks": 0,
+	"totalTransfers": 3,
+	"transferTime": 4.9896683,
+	"transferring": [
+		{
+			"bytes": 21688320,
+			"dstFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_dst",
+			"eta": 9,
+			"group": "global_stats",
+			"name": "file1.bin",
+			"percentage": 34,
+			"size": 62914560,
+			"speed": 4353713.616951804,
+			"speedAvg": 4396204.771137968,
+			"srcFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_src"
+		},
+		{
+			"bytes": 20901888,
+			"dstFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_dst",
+			"eta": 10,
+			"group": "global_stats",
+			"name": "file2.bin",
+			"percentage": 33,
+			"size": 62914560,
+			"speed": 4199671.73187056,
+			"speedAvg": 4183509.1036001155,
+			"srcFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_src"
+		},
+		{
+			"bytes": 21131264,
+			"dstFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_dst",
+			"eta": 9,
+			"group": "global_stats",
+			"name": "file3.bin",
+			"percentage": 33,
+			"size": 62914560,
+			"speed": 4245758.664456245,
+			"speedAvg": 4240779.020484579,
+			"srcFs": "//?/C:/Users/T14_TH~1/AppData/Local/Temp/rb_stats_src"
+		}
+	],
+	"transfers": 0
+}

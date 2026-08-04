@@ -1,5 +1,7 @@
 #pragma once
 
+#include "job_stats.h"
+#include "rc_client.h"
 #include "ui_job_widget.h"
 
 class JobWidget : public QWidget {
@@ -9,7 +11,8 @@ public:
   JobWidget(QProcess *process, const QString &info, const QStringList &args,
             const QString &source, const QString &dest, const QString &uniqueID,
             const QString &transferMode, const QString &requestId,
-            QWidget *parent = nullptr);
+            const QString &rcUser = QString(),
+            const QString &rcPass = QString(), QWidget *parent = nullptr);
   ~JobWidget();
 
   void showDetails();
@@ -32,9 +35,17 @@ private:
 
   QProcess *mProcess;
 
+  // Every figure on the card comes from rclone's remote control. Nothing is
+  // read out of the printed output any more except the line announcing which
+  // port the control ended up on.
+  RcClient *mRc = nullptr;
+  QString mRcUser;
+  QString mRcPass;
+  void applyStats(const JobStats &stats);
+  void updateTransferBars(const JobStats &stats);
+
   QStringList mArgs;
   QHash<QString, QLabel *> mActive;
-  QSet<QLabel *> mUpdated;
 
   QString mUniqueID = "";
   QString mTransferMode = "";
@@ -46,24 +57,5 @@ private:
 
   QDateTime mStartDateTime = QDateTime::currentDateTime();
   void updateStartInfo();
-  void updateFinishInfo(const QString &ETA = "");
-  qint64 parseETAtoSeconds(const QString &eta) {
-    QRegularExpression re("(\\d+)([ywdhms])");
-    QRegularExpressionMatchIterator i = re.globalMatch(eta);
-
-    qint64 totalSeconds = 0;
-    while (i.hasNext()) {
-        QRegularExpressionMatch match = i.next();
-        qint64 value = match.captured(1).toLongLong();
-        QString unit = match.captured(2);
-
-        if (unit == "y") totalSeconds += value * 365 * 24 * 3600;  // ปี → วินาที
-        if (unit == "w") totalSeconds += value * 7 * 24 * 3600;    // สัปดาห์
-        if (unit == "d") totalSeconds += value * 24 * 3600;        // วัน
-        if (unit == "h") totalSeconds += value * 3600;            // ชั่วโมง
-        if (unit == "m") totalSeconds += value * 60;              // นาที
-        if (unit == "s") totalSeconds += value;                   // วินาที
-    }
-    return totalSeconds;
-  }
+  void updateFinishInfo(qint64 etaSeconds = 0);
 };

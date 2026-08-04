@@ -24,6 +24,7 @@
 | §6.6 Mount script editor ในหน้าต่าง | ✅ **เสร็จ** | `script_editor_dialog.*` (L3) — รอทดสอบ (V-10) |
 | แยก `pch_core.h` | ✅ **เสร็จ** | QtCore + QtNetwork เท่านั้น |
 | **สร้าง `rbcore` static lib + QTest** | ✅ **เสร็จ** | ลิงก์แค่ `Qt6::Core` `Qt6::Network` — linker บังคับขอบเขตแล้ว |
+| §3.5 progress จาก RC API แทน regex | ✅ **เสร็จ** | `job_stats.*` + `rc_client.*` (L0) · **ลบ regex ครบ 10 ตัว** — รอทดสอบ (V-11, V-12) |
 | แยก `item_model` | ⬜ ยังไม่ทำ | รอ §3.4 (lsjson) |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
@@ -131,6 +132,8 @@ python scripts/check_layers.py
 | `job_options.h/.cpp` | 355 | L1 — นิยาม task | ✅ **แยกแล้ว** |
 | `utils.h/.cpp` | 327 | L0 — rclone invocation | ✅ **แยกแล้ว** |
 | `rclone_capabilities.h/.cpp` | 120 | L0 — ถาม backend ว่าทำอะไรได้ | ✅ **เขียนใหม่เป็น core ตั้งแต่ต้น** |
+| `job_stats.h/.cpp` | 230 | L0 — แปลง `core/stats` เป็นตัวเลข | ✅ **ใหม่** |
+| `rc_client.h/.cpp` | 130 | L0 — poll RC ของ job แบบ async | ✅ **ใหม่** |
 
 รวม **~1,795 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 3 ชุด (`tests/`)
 
@@ -163,7 +166,7 @@ python scripts/check_layers.py
 | # | จุด | อาการ | แก้ตอน |
 |---|---|---|---|
 | VIO-1 | `main_window.cpp:3880-3900` | L3 สร้าง rclone args เอง (ส่วนสุ่ม RC credential ย้ายออกไป `addNewMount()` แล้ว) | E2 |
-| VIO-2 | `job_widget.cpp:136-260` | L3 ทำหน้าที่ parse output ของ process | §3.5 + E2 |
+| ~~VIO-2~~ | ~~`job_widget.cpp`~~ | ~~L3 ทำหน้าที่ parse output~~ | ✅ **แก้แล้ว** — regex ทั้ง 10 ตัวถูกลบ เหลือแค่อ่านบรรทัดประกาศ port |
 | ~~VIO-3~~ | ~~`mount_widget.cpp`~~ | ~~L3 อ่าน credential กลับจาก args ด้วย regex~~ | ✅ **แก้แล้ว** — credential ส่งผ่าน constructor และ env |
 | VIO-4 | `item_model.cpp:579-591` | สร้าง args ของ `lsd`/`lsl` ในชั้น model | §3.4 (เปลี่ยนเป็น `lsjson`) |
 | VIO-5 | ทั่วทั้งโค้ด | error จาก rclone แสดงด้วย `QMessageBox` ทันทีในจุดที่เกิด → headless จะค้าง | E2 |
