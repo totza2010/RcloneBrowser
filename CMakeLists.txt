@@ -37,7 +37,11 @@ if(WIN32)
 
   add_definitions("-D_UNICODE -DUNICODE -D_SCL_SECURE_NO_DEPRECATE -D_CRT_SECURE_NO_DEPRECATE")
 
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
+  # Without this MSVC reads sources in the system code page, which on a
+  # non-Latin locale mangles any non-ASCII byte -- including the ones in the
+  # comments in this tree. The symptom is a translation unit that compiles to
+  # something subtly wrong rather than an error.
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /utf-8")
   # Was "${CMAKE_CXX_FLAGS} ... /GS-": it expanded the wrong variable (so the
   # base flags were duplicated into the Release flags) and it disabled stack
   # buffer overrun detection. /GS is on, plus Control Flow Guard.
