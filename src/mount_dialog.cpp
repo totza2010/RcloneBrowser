@@ -1,6 +1,7 @@
 #include "mount_dialog.h"
 #include "global.h"
 #include "list_of_job_options.h"
+#include "script_editor_dialog.h"
 #include "utils.h"
 #include "widget_settings.h"
 #include <QFileDialog>
@@ -216,6 +217,25 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
         ui.le_rcPort->text().trimmed().isEmpty()) {
       ui.le_rcPort->setText("0");
     }
+  });
+
+  QObject::connect(ui.tb_mountScriptEdit, &QPushButton::clicked, this, [=]() {
+    ScriptEditorDialog editor(ui.le_mountScript->text().trimmed(),
+                              ui.taskName->text().trimmed(), this);
+    if (editor.exec() != QDialog::Accepted) {
+      return;
+    }
+
+    // Same defaulting as the browse button: a post mount script needs the
+    // remote control port, so pick one for the user rather than making them
+    // discover the requirement from the validation error.
+#if !defined(Q_OS_WIN)
+    if (ui.le_rcPort->text().isEmpty()) {
+      ui.le_rcPort->setText("0");
+    }
+#endif
+
+    ui.le_mountScript->setText(editor.scriptPath());
   });
 
   QObject::connect(ui.tb_mountScriptBrowse, &QPushButton::clicked, this, [=]() {

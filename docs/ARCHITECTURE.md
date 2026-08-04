@@ -21,6 +21,7 @@
 | CI build-check บน push/PR | ✅ **เสร็จ** | `.github/workflows/ci.yml` — ยังรอทดสอบจริง (V-07) |
 | §3.3 RC credential ไป env + `bounded()` | ✅ **เสร็จ** | แก้ VIO-3 ไปด้วย · V-08 **PASS** |
 | §3.6 Capability registry | ✅ **เสร็จ** | `rclone_capabilities.*` (L0) — รอทดสอบ (V-09) |
+| §6.6 Mount script editor ในหน้าต่าง | ✅ **เสร็จ** | `script_editor_dialog.*` (L3) — รอทดสอบ (V-10) |
 | แยก `pch_core.h` | ⬜ ยังไม่ทำ | |
 | แยก `item_model` | ⬜ ยังไม่ทำ | รอ §3.4 (lsjson) |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |

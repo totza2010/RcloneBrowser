@@ -661,6 +661,16 @@
           </widget>
          </item>
          <item>
+          <widget class="QToolButton" name="tb_mountScriptEdit">
+           <property name="toolTip">
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:13pt;&quot;&gt;Write the script here&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Opens an editor. The script is saved next to the rclone-browser configuration and made executable for you.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+           </property>
+           <property name="text">
+            <string>Edit...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QToolButton" name="tb_mountScriptBrowse">
            <property name="toolTip">
             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:13pt;&quot;&gt;Browse for script&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
