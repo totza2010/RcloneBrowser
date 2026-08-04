@@ -17,3 +17,11 @@ rb_add_test(test_rclone_capabilities)
 rb_add_test(test_redact_args)
 rb_add_test(test_utils)
 rb_add_test(test_job_stats)
+rb_add_test(test_task_store)
+
+# Not registered as a test: run by hand to regenerate the golden task file
+# after JobOptions changes shape. See the comment at the top of the source.
+add_executable(make_task_fixture EXCLUDE_FROM_ALL make_task_fixture.cpp)
+target_link_libraries(make_task_fixture PRIVATE rbcore)
+target_compile_definitions(make_task_fixture PRIVATE
+    RB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

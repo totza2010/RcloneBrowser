@@ -1,0 +1,104 @@
+// Regenerates tests/fixtures/tasks_v8.bin, the golden task file that
+// test_task_store reads.
+//
+// Not part of the test run. Build and run it by hand when JobOptions gains a
+// field and classVersion goes up, then keep the old fixture as well so the
+// previous format stays covered:
+//
+//   cmake --build build --config Release --target make_task_fixture
+//   ./build/build/Release/make_task_fixture
+//
+// The values are invented on purpose. An earlier version of this fixture was
+// going to be a copy of a real task file, which would have put someone's
+// remote names and local paths into the repository.
+
+#include "job_options.h"
+#include "list_of_job_options.h"
+#include "utils.h"
+
+#include <QCoreApplication>
+#include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+
+int main(int argc, char *argv[]) {
+  QCoreApplication app(argc, argv);
+
+  const QString appDir = QCoreApplication::applicationDirPath();
+  const QString iniPath =
+      QDir(appDir).filePath(
+          QFileInfo(QCoreApplication::applicationFilePath()).baseName() +
+          ".ini");
+  const QString taskPath = QDir(appDir).filePath("tasks.bin");
+
+  // Portable mode keeps this out of the real user configuration.
+  QFile ini(iniPath);
+  if (!ini.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    qCritical() << "cannot write" << iniPath;
+    return 1;
+  }
+  ini.close();
+  if (!IsPortableMode()) {
+    qCritical() << "portable mode did not take effect";
+    return 1;
+  }
+  QFile::remove(taskPath);
+
+  ListOfJobOptions *store = ListOfJobOptions::getInstance();
+
+  auto *copy = new JobOptions(false);
+  copy->description = "nightly photos";
+  copy->operation = JobOptions::Copy;
+  copy->jobType = JobOptions::Upload;
+  copy->source = "C:/src/photos";
+  copy->dest = "remote:backup/photos";
+  copy->isFolder = true;
+  copy->transfers = "4";
+  copy->checkers = "8";
+  copy->bandwidth = "1M";
+  copy->connectTimeout = "60s";
+  copy->idleTimeout = "300s";
+  copy->retries = "3";
+  copy->lowLevelRetries = "10";
+  copy->skipNewer = true;
+  copy->skipExisting = false;
+  copy->deleteExcluded = false;
+  copy->excluded = "*.tmp";
+  copy->extra = "--fast-list";
+  copy->remoteType = "teldrive";
+  copy->remoteMode = "main";
+  copy->uniqueId = QUuid("{11111111-1111-1111-1111-111111111111}");
+  store->Persist(copy);
+
+  auto *mount = new JobOptions(false);
+  mount->description = "mount media";
+  mount->operation = JobOptions::Mount;
+  mount->jobType = JobOptions::Download;
+  mount->source = "remote:media";
+  mount->dest = "R:";
+  mount->isFolder = true;
+  mount->mountReadOnly = true;
+  mount->mountCacheLevel = JobOptions::Writes;
+  mount->mountAutoStart = true;
+  mount->mountRcPort = "5572";
+  mount->mountScript = "/opt/scripts/after-mount.sh";
+  mount->remoteType = "teldrive";
+  mount->remoteMode = "main";
+  mount->uniqueId = QUuid("{22222222-2222-2222-2222-222222222222}");
+  store->Persist(mount);
+
+  const QString target =
+      QStringLiteral(RB_FIXTURES_DIR "/tasks_v8.bin");
+  QFile::remove(target);
+  if (!QFile::copy(taskPath, target)) {
+    qCritical() << "cannot copy" << taskPath << "to" << target;
+    return 1;
+  }
+
+  QFile::remove(iniPath);
+  QFile::remove(taskPath);
+
+  qInfo() << "wrote" << target << QFileInfo(target).size() << "bytes";
+  return 0;
+}
