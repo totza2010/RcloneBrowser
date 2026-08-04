@@ -151,14 +151,13 @@ python scripts/check_layers.py --check
 
 | job | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
 |---|---|---|---|
-| Layer boundaries | | | |
-| Build (Linux) | | | |
-| Build (Linux, no Multimedia) | | | |
-| Build (Windows) + ตรวจ hardening | | | |
-| build.yml ไม่ถูก trigger | | | |
+| Layer boundaries | PASS | totza2010 / 2026-08-04 | |
+| Build (Linux) + ctest | PASS | totza2010 / 2026-08-04 | รอบแรก **FAIL** — `test_task_store` ไม่เข้า portable mode บน Linux |
+| Build (Linux, no Multimedia) | PASS | totza2010 / 2026-08-04 | ผ่านตั้งแต่รอบแรก |
+| Build (Windows) + ctest + ตรวจ hardening | PASS | totza2010 / 2026-08-04 | รอบแรก **FAIL** — runner ไม่มี VS 2022 แล้ว |
+| build.yml ไม่ถูก trigger | PASS | totza2010 / 2026-08-04 | มีแต่ workflow `CI` ขึ้นมา |
 
-> ⚠️ ยังไม่เคยรันจริงบน GitHub — job Linux ทั้งสองตัวและ path ของ `dumpbin`
-> บน runner ตรวจได้จากเครื่องนี้ไม่ได้ ถ้า fail รอบแรกให้บันทึก error ไว้ตรงนี้
+**รอบที่ 2 ผ่านครบทั้ง 4 job** — run `30930106541` บน branch `modernize/rc-progress-and-hardening`
 
 ---
 

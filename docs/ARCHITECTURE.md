@@ -18,7 +18,7 @@
 | `RedactArgs()` + อุดจุดรั่ว 6 จุด | ✅ **เสร็จ** | ดู §5 |
 | แก้ log หายทุก 10,000 บรรทัด | ✅ **เสร็จ** | เปลี่ยนเป็น ring buffer |
 | P0 build hardening | ✅ **เสร็จ** | ยืนยันด้วย `dumpbin` แล้ว |
-| CI build-check บน push/PR | ✅ **เสร็จ** | `.github/workflows/ci.yml` — ยังรอทดสอบจริง (V-07) |
+| CI build-check บน push/PR | ✅ **เสร็จ** | `.github/workflows/ci.yml` · V-07 **PASS** — 4 job เขียวบน GitHub |
 | §3.3 RC credential ไป env + `bounded()` | ✅ **เสร็จ** | แก้ VIO-3 ไปด้วย · V-08 **PASS** |
 | §3.6 Capability registry | ✅ **เสร็จ** | `rclone_capabilities.*` (L0) — รอทดสอบ (V-09) |
 | §6.6 Mount script editor ในหน้าต่าง | ✅ **เสร็จ** | `script_editor_dialog.*` (L3) — รอทดสอบ (V-10) |
