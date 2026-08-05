@@ -7,7 +7,7 @@
 > เป้าหมายสุดท้าย: โมเดลแบบ qBittorrent — core ตัวเดียว มี 2 หน้าตา
 > `RcloneBrowser` (Qt GUI) และ `rclone-browser-nox` (headless + Web UI)
 >
-> อัปเดตล่าสุด: 2026-08-03
+> อัปเดตล่าสุด: 2026-08-05
 
 ## สถานะความคืบหน้า
 
@@ -28,10 +28,11 @@
 | §3.4 listing ด้วย `lsjson` | ✅ **เสร็จ** | `lsjson_parser.*` (L0) · ลบ regex 2 ตัวสุดท้าย · ทดสอบมือแล้ว |
 | §6.1 log เป็นไฟล์ | ✅ **เสร็จ** | `job_log.*` (L0) · ทดสอบมือแล้ว · ⚠️ **ค้าง: ทบทวนรูปแบบชื่อไฟล์อีกครั้งช่วงท้าย** |
 | §6.2 ย้าย Dockerfile เข้า repo | ✅ **เสร็จ** | `docker/` — build จริงผ่าน · noVNC ยังอยู่จนกว่าจะถึง E4 |
+| §6.7 การแสดงผลการ์ด job | ✅ **เสร็จ** | `JobPhase` + `progressText()` ใน `job_stats.*` (L0) · ทดสอบ 15 เคส · **รอทดสอบมือ (V-13)** |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 27/67** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 35/75** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
 ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์แค่ `Qt6::Core` และ
@@ -134,12 +135,12 @@ python scripts/check_layers.py
 | `job_options.h/.cpp` | 355 | L1 — นิยาม task | ✅ **แยกแล้ว** |
 | `utils.h/.cpp` | 327 | L0 — rclone invocation | ✅ **แยกแล้ว** |
 | `rclone_capabilities.h/.cpp` | 120 | L0 — ถาม backend ว่าทำอะไรได้ | ✅ **เขียนใหม่เป็น core ตั้งแต่ต้น** |
-| `job_stats.h/.cpp` | 230 | L0 — แปลง `core/stats` เป็นตัวเลข | ✅ **ใหม่** |
+| `job_stats.h/.cpp` | 396 | L0 — แปลง `core/stats` เป็นตัวเลข | ✅ **ใหม่** |
 | `rc_client.h/.cpp` | 130 | L0 — poll RC ของ job แบบ async | ✅ **ใหม่** |
 | `lsjson_parser.h/.cpp` | 190 | L0 — streaming parser ของ `lsjson` | ✅ **ใหม่** |
 | `job_log.h/.cpp` | 190 | L0 — เขียน log ของ job ลงไฟล์ | ✅ **ใหม่** |
 
-รวม **~1,985 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 6 ชุด (`tests/`)
+รวม **~2,150 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 7 ชุด (`tests/`)
 
 ### 3.2 🟡 แยกได้ด้วยงานเล็ก
 
@@ -236,3 +237,22 @@ cmake -S . -B build-nox -DNO_GUI=ON && cmake --build build-nox
 - แผนพัฒนาเต็ม: `RcloneBrowser-Dev-Plan-v2.md` (§6.3 คือส่วนของงานนี้)
 - สคริปต์ตรวจ: [`scripts/check_layers.py`](../scripts/check_layers.py)
 - โมเดลอ้างอิง: qBittorrent — `qbittorrent` / `qbittorrent-nox` ใช้ core เดียวกัน
+
+### รีโปที่ต้องดูตอนทำ E3/E4 (Web UI)
+
+| repo | อะไร | ทำไมเกี่ยว |
+|---|---|---|
+| [tgdrive/rclone](https://github.com/tgdrive/rclone) | fork ที่มี backend `teldrive` | ต้นทางของ binary ใน `docker/Dockerfile` (`RCLONE_REPO`) — จุดต่างหลักของ fork นี้ |
+| [rclone/rclone](https://github.com/rclone/rclone) | ต้นทาง upstream | flavour `mainline` ใน matrix ของ `docker.yml` · เอกสาร rc API อยู่ที่นี่ |
+| [rclone/rclone-webui-react](https://github.com/rclone/rclone-webui-react) | Web UI ตัวเก่าของ rclone (React/CRA, MIT, ~1.6k★) | ตัวที่ `rclone rcd --rc-web-gui` เสิร์ฟอยู่ทุกวันนี้ — prior art ที่ผู้ใช้คุ้นมือแล้ว |
+| [rclone/rclone-web](https://github.com/rclone/rclone-web) | Web UI ตัวใหม่ (TypeScript + Vite + Playwright, MIT) | ยังเล็ก (~20★) แต่ stack ทันสมัยกว่า และเป็นทิศทางที่ upstream กำลังไป |
+
+**ข้อสำคัญที่ต้องแยกให้ออกก่อนเริ่ม E3:** ทั้งสองตัวคุยกับ **rc API ของ rclone เอง** (`localhost:5572`)
+ไม่ได้คุยกับ RcloneBrowser — มันจึงไม่มีคิวงาน ไม่มี scheduler ไม่มี task ที่บันทึกไว้ ซึ่งคือ
+ของที่ L1 ของเราถืออยู่ทั้งหมด ดังนั้น
+
+- **ห้ามคิดว่าเอามาใช้แทน E3/E4 ได้เลย** — API คนละชั้น
+- แต่ใช้เป็นแบบของ UX ได้ตรงๆ (หน้า browse remote, หน้า transfer ที่กำลังวิ่ง)
+- และเป็นหลักฐานว่า rc API พอสำหรับงาน browse/transfer จริง — สิ่งที่เราต้องเพิ่มคือชั้นคิว/สถานะงานเท่านั้น
+- ทางเลือกที่ถูกที่สุดของ E4: เสิร์ฟ `rclone-web` ควบไปกับ API ของเรา แล้วเขียนเฉพาะหน้า "งานที่กำลังทำ"
+  เอง แทนที่จะเขียน Web UI ทั้งก้อน — ประเมินตอนถึง E3 ว่าคุ้มกว่าเขียนเองไหม

@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QRegularExpression>
 
 #include <algorithm>
@@ -42,11 +43,62 @@ QString FormatSeconds(qint64 seconds) {
   return QStringLiteral("%1s").arg(s);
 }
 
+QString FormatEta(qint64 seconds) {
+  if (seconds < 0) {
+    return QStringLiteral("-");
+  }
+  if (seconds < 60) {
+    return QStringLiteral("%1s").arg(seconds);
+  }
+  if (seconds < 3600) {
+    return QStringLiteral("%1m %2s").arg(seconds / 60).arg(seconds % 60);
+  }
+  if (seconds < 86400) {
+    return QStringLiteral("%1h %2m")
+        .arg(seconds / 3600)
+        .arg((seconds % 3600) / 60);
+  }
+  return QStringLiteral("%1d %2h")
+      .arg(seconds / 86400)
+      .arg((seconds % 86400) / 3600);
+}
+
+QString JoinProgressParts(const QStringList &parts) {
+  // Wide enough to read as a break rather than as punctuation inside a figure.
+  return parts.join(QStringLiteral("  ·  "));
+}
+
 QString JobTransferItem::speedText() const {
   return FormatBytes(static_cast<qint64>(speed)) + QStringLiteral("/s");
 }
 
-QString JobTransferItem::etaText() const { return FormatSeconds(etaSeconds); }
+QString JobTransferItem::etaText() const { return FormatEta(etaSeconds); }
+
+QStringList JobTransferItem::progressParts() const {
+  QStringList parts;
+
+  if (size >= 0) {
+    parts << QStringLiteral("%1%").arg(percentage);
+    parts << FormatBytes(bytes) + QStringLiteral(" / ") + FormatBytes(size);
+  } else {
+    // No size to divide by, so percentage and ETA would both be made up.
+    // The byte count is the only figure that is actually known.
+    parts << FormatBytes(bytes);
+  }
+
+  if (speed > 0) {
+    parts << speedText();
+  }
+  if (size >= 0 && etaSeconds >= 0) {
+    parts << FormatEta(etaSeconds) + QStringLiteral(" left");
+  }
+
+  return parts;
+}
+
+QString JobTransferItem::progressText() const {
+  return JoinProgressParts(progressParts());
+}
 
 int JobStats::percent() const {
   if (totalBytes <= 0) {
@@ -64,7 +116,7 @@ QString JobStats::speedText() const {
   return FormatBytes(static_cast<qint64>(speed)) + QStringLiteral("/s");
 }
 
-QString JobStats::etaText() const { return FormatSeconds(etaSeconds); }
+QString JobStats::etaText() const { return FormatEta(etaSeconds); }
 
 QString JobStats::checksText() const {
   return QStringLiteral("%1 / %2").arg(checks).arg(totalChecks);
@@ -76,6 +128,66 @@ QString JobStats::transfersText() const {
 
 QString JobStats::elapsedText() const {
   return FormatSeconds(static_cast<qint64>(elapsedSeconds));
+}
+
+JobPhase JobStats::phase() const {
+  if (totalBytes > 0) {
+    // Everything counted has moved, but the process is still up: rclone is
+    // setting modification times, removing what the sync deleted and closing
+    // the backends. The card would otherwise sit at 100% looking stuck.
+    if (bytes >= totalBytes &&
+        (totalTransfers == 0 || transfers >= totalTransfers)) {
+      return JobPhase::Finishing;
+    }
+    return JobPhase::Transferring;
+  }
+
+  // No total yet. rclone is still walking the source, or the job has nothing
+  // to do at all.
+  if (listed > 0 || checks > 0 || totalChecks > 0 || transfers > 0) {
+    return JobPhase::Scanning;
+  }
+  return JobPhase::Starting;
+}
+
+QString JobStats::phaseText() const {
+  switch (phase()) {
+  case JobPhase::Starting:
+    return QStringLiteral("Starting");
+  case JobPhase::Scanning:
+    // "listed" is only reported by newer rclone; without it the word alone
+    // still beats a percentage that has nothing behind it.
+    if (listed > 0) {
+      return QStringLiteral("Scanning — %1 listed")
+          .arg(QLocale::system().toString(listed));
+    }
+    return QStringLiteral("Scanning");
+  case JobPhase::Finishing:
+    return QStringLiteral("Finishing");
+  case JobPhase::Transferring:
+    break;
+  }
+  return QString();
+}
+
+QStringList JobStats::progressParts() const {
+  QStringList parts;
+
+  parts << QStringLiteral("%1%").arg(percent());
+  parts << sizeText();
+
+  if (speed > 0) {
+    parts << speedText();
+  }
+  if (etaSeconds >= 0) {
+    parts << FormatEta(etaSeconds) + QStringLiteral(" left");
+  }
+
+  return parts;
+}
+
+QString JobStats::progressText() const {
+  return JoinProgressParts(progressParts());
 }
 
 JobStats JobStats::fromCoreStats(const QByteArray &json) {

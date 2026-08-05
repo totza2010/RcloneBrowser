@@ -55,6 +55,15 @@ private slots:
     QCOMPARE(stats.percent(), 0);
   }
 
+  // The "Remaining" field on the card reads etaText(). It showed
+  // "447h42m7s" on a slow upload, which is a number nobody can parse at a
+  // glance and which changed every second.
+  void etaTextIsRounded() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 1, "totalBytes": 100, "eta": 1611727})");
+    QCOMPARE(stats.etaText(), QStringLiteral("18d 15h"));
+  }
+
   // eta is null until rclone can estimate one, and stays null on backends
   // with no total. It must not read as "0 seconds remaining".
   void nullEtaBecomesUnknown() {
@@ -207,6 +216,149 @@ private slots:
     QFETCH(qint64, seconds);
     QFETCH(QString, expected);
     QCOMPARE(FormatSeconds(seconds), expected);
+  }
+
+  // An estimate is not known to the second. Reporting one that way made the
+  // figure jitter every poll without telling the reader anything.
+  void formatEta_data() {
+    QTest::addColumn<qint64>("seconds");
+    QTest::addColumn<QString>("expected");
+
+    QTest::newRow("seconds") << Q_INT64_C(45) << "45s";
+    QTest::newRow("under a minute") << Q_INT64_C(59) << "59s";
+    QTest::newRow("exactly a minute") << Q_INT64_C(60) << "1m 0s";
+    QTest::newRow("minutes") << Q_INT64_C(303) << "5m 3s";
+    QTest::newRow("hours drop seconds") << Q_INT64_C(7530) << "2h 5m";
+    QTest::newRow("days drop minutes") << Q_INT64_C(273600) << "3d 4h";
+    QTest::newRow("unknown") << Q_INT64_C(-1) << "-";
+  }
+
+  void formatEta() {
+    QFETCH(qint64, seconds);
+    QFETCH(QString, expected);
+    QCOMPARE(FormatEta(seconds), expected);
+  }
+
+  // The phase decides whether the card shows a percentage at all. Getting it
+  // wrong is what made the bar sit at 0% and then jump once rclone finished
+  // counting.
+  void phaseIsStartingBeforeAnythingIsCounted() {
+    const JobStats stats = JobStats::fromCoreStats(R"({"bytes": 0})");
+    QCOMPARE(stats.phase(), JobPhase::Starting);
+    QCOMPARE(stats.phaseText(), QStringLiteral("Starting"));
+  }
+
+  void phaseIsScanningWhileListing() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 0, "totalBytes": 0, "listed": 1204, "checks": 12})");
+    QCOMPARE(stats.phase(), JobPhase::Scanning);
+    QVERIFY(stats.phaseText().startsWith(QStringLiteral("Scanning")));
+    QVERIFY(stats.phaseText().contains(QStringLiteral("1")));
+  }
+
+  // Older rclone reports no "listed" field. The word alone still beats a
+  // percentage with nothing behind it.
+  void phaseIsScanningWithoutAListedCount() {
+    const JobStats stats =
+        JobStats::fromCoreStats(R"({"bytes": 0, "totalChecks": 40})");
+    QCOMPARE(stats.phase(), JobPhase::Scanning);
+    QCOMPARE(stats.phaseText(), QStringLiteral("Scanning"));
+  }
+
+  void phaseIsTransferringOnceThereIsATotal() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 500, "totalBytes": 1000, "transfers": 1,
+            "totalTransfers": 4})");
+    QCOMPARE(stats.phase(), JobPhase::Transferring);
+    // Nothing in words: the bar is already saying it.
+    QVERIFY(stats.phaseText().isEmpty());
+  }
+
+  // Everything counted has moved but rclone is still up, setting modification
+  // times and closing backends. Without this the card reads 100% and looks
+  // hung.
+  void phaseIsFinishingAfterTheLastByte() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 1000, "totalBytes": 1000, "transfers": 4,
+            "totalTransfers": 4})");
+    QCOMPARE(stats.phase(), JobPhase::Finishing);
+    QCOMPARE(stats.phaseText(), QStringLiteral("Finishing"));
+  }
+
+  // rclone can report more bytes than it estimated; that must not read as
+  // still transferring after the count is met.
+  void phaseIsFinishingWhenBytesOvershoot() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 1200, "totalBytes": 1000, "transfers": 2,
+            "totalTransfers": 2})");
+    QCOMPARE(stats.phase(), JobPhase::Finishing);
+  }
+
+  // A narrow bar drops whole figures from the end rather than eliding through
+  // the middle of one. The percentage has to survive every time.
+  void progressPartsAreOrderedSoTheEndCanBeDropped() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 524288, "totalBytes": 1048576, "speed": 1048576,
+            "eta": 303})");
+    const QStringList parts = stats.progressParts();
+    QCOMPARE(parts.size(), 4);
+    QCOMPARE(parts.at(0), QStringLiteral("50%"));
+    QVERIFY(parts.last().endsWith(QStringLiteral("left")));
+    QCOMPARE(JoinProgressParts(parts), stats.progressText());
+  }
+
+  void progressTextCarriesEveryKnownFigure() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 524288, "totalBytes": 1048576, "speed": 1048576,
+            "eta": 303})");
+    const QString text = stats.progressText();
+    QVERIFY2(text.contains(QStringLiteral("50%")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("512.0 KiB")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("1.00 MiB/s")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("5m 3s left")), qPrintable(text));
+  }
+
+  // A speed of zero and a null eta are what rclone reports before it knows,
+  // not measurements. Printing them as "0 B/s" and "-" reads as a stalled
+  // transfer.
+  void progressTextLeavesOutWhatIsNotKnownYet() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 0, "totalBytes": 1000, "speed": 0, "eta": null})");
+    const QString text = stats.progressText();
+    QVERIFY2(!text.contains(QStringLiteral("/s")), qPrintable(text));
+    QVERIFY2(!text.contains(QStringLiteral("left")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("0%")), qPrintable(text));
+  }
+
+  void transferItemTextShowsPercentageWhenSized() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 1, "transferring": [{"name": "a.bin", "bytes": 524288,
+            "size": 1048576, "percentage": 50, "speed": 1048576, "eta": 45}]})");
+    QCOMPARE(stats.transferring.size(), 1);
+    const QString text = stats.transferring.at(0).progressText();
+    QVERIFY2(text.contains(QStringLiteral("50%")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("512.0 KiB / 1.00 MiB")),
+             qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("45s left")), qPrintable(text));
+  }
+
+  // teldrive and other backends that cannot size a file up front. rclone still
+  // sends percentage 0, and the old card drew a 0% bar reading "0% of unknown
+  // size" for the whole upload.
+  void transferItemTextOmitsInventedFiguresWhenUnsized() {
+    const JobStats stats = JobStats::fromCoreStats(
+        R"({"bytes": 1, "transferring": [{"name": "a.bin", "bytes": 524288,
+            "percentage": 0, "speed": 1048576}]})");
+    QCOMPARE(stats.transferring.size(), 1);
+    const JobTransferItem &item = stats.transferring.at(0);
+    QCOMPARE(item.size, Q_INT64_C(-1));
+
+    const QString text = item.progressText();
+    QVERIFY2(!text.contains(QLatin1Char('%')), qPrintable(text));
+    QVERIFY2(!text.contains(QStringLiteral("left")), qPrintable(text));
+    QVERIFY2(!text.contains(QStringLiteral("unknown")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("512.0 KiB")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("1.00 MiB/s")), qPrintable(text));
   }
 };
 

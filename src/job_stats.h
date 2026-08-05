@@ -11,6 +11,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 // One file currently being transferred, from the "transferring" array.
 struct JobTransferItem {
@@ -23,6 +24,27 @@ struct JobTransferItem {
 
   QString speedText() const;
   QString etaText() const;
+
+  // The figures describing this file, most important first.
+  //
+  // Backends that cannot size a file up front get no percentage and no ETA,
+  // because both would be invented. They get the byte count instead, which is
+  // the only thing actually known.
+  QStringList progressParts() const;
+  QString progressText() const;
+};
+
+// What a job is doing right now, as far as core/stats can tell.
+//
+// rclone reports no phase of its own, so this is inferred. The distinction
+// that matters on screen is whether a percentage means anything yet: until
+// rclone has finished counting, totalBytes is zero and every percentage is a
+// fiction. That is what left the card reading 0% for a while and then jumping.
+enum class JobPhase {
+  Starting,     // nothing counted yet
+  Scanning,     // listing and checking; no total to measure against
+  Transferring, // a total is known and bytes are moving
+  Finishing,    // everything counted has moved; rclone is closing up
 };
 
 // TEST: (V-11) รัน copy งานใหญ่ -> แถบ progress, speed, ETA, checks, transfers
@@ -60,6 +82,21 @@ struct JobStats {
   QString transfersText() const; // "3 / 9"
   QString elapsedText() const;
 
+  JobPhase phase() const;
+
+  // What to say about the phase in words. Empty while transferring, where the
+  // bar already says it better than a label can.
+  QString phaseText() const;
+
+  // The figures for the overall bar, most important first:
+  // "42%", "1.2 GiB / 4.5 GiB", "3.4 MiB/s", "2m 3s left"
+  //
+  // Parts rclone cannot report yet are left out rather than shown as "-".
+  // Kept as a list so a client with a narrow bar can drop from the end
+  // instead of eliding through the middle of a figure.
+  QStringList progressParts() const;
+  QString progressText() const;
+
   static JobStats fromCoreStats(const QByteArray &json);
 };
 
@@ -81,4 +118,15 @@ bool IsRcPollingNoise(const QString &line);
 
 // Shared formatting so the widget and any future client agree.
 QString FormatBytes(qint64 bytes);
+
+// Exact, for a stopwatch: "1h5m3s". The seconds have to keep ticking or an
+// elapsed counter looks stopped.
 QString FormatSeconds(qint64 seconds);
+
+// Rounded, for an estimate: "45s", "5m 3s", "2h 5m", "3d 4h". An ETA of two
+// hours is not known to the second, and printing it that way only makes the
+// figure jitter. Long jobs used to read "447h42m7s".
+QString FormatEta(qint64 seconds);
+
+// Joins the parts of a progress line with the separator both bars use.
+QString JoinProgressParts(const QStringList &parts);
