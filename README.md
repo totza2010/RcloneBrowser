@@ -162,6 +162,18 @@ And I totally agree with above. I want to provide binary which works across as m
 
 If for whatever reason you are not happy or your system is not covered with provided binaries you can easily build Rclone Browser for yourself. Especially on Unix-like systems it is very easy. Please see below step by step instructions for major operating systems. I have tested all of them and you can have your own Linux distribution Rclone Browser running in no time  - it takes 8 min on Raspberry Pi 3B+, on modern desktop it can be less than a minute.
 
+Development
+-----------
+
+This fork's development notes live in [`docs/`](docs/README.md) — the plan and its
+current state, the layer architecture, the verification checklist, and how to set
+a machine up to build it. The container image has its own guide in
+[`docker/README.md`](docker/README.md).
+
+The build instructions below are inherited from upstream and describe Qt 5. This
+fork requires Qt 6; see [`docs/DEV-SETUP.md`](docs/DEV-SETUP.md) for what is
+actually used to build it today.
+
 Build instructions
 ------------------
 

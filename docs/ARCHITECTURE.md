@@ -237,7 +237,7 @@ cmake -S . -B build-nox -DNO_GUI=ON && cmake --build build-nox
 
 ## 7. อ้างอิง
 
-- แผนพัฒนาเต็ม: `RcloneBrowser-Dev-Plan-v2.md` (§6.3 คือส่วนของงานนี้)
+- แผนพัฒนาเต็ม: [`PLAN.md`](PLAN.md) (§6.3 คือส่วนของงานนี้) · ดัชนีเอกสาร: [`README.md`](README.md)
 - สคริปต์ตรวจ: [`scripts/check_layers.py`](../scripts/check_layers.py)
 - โมเดลอ้างอิง: qBittorrent — `qbittorrent` / `qbittorrent-nox` ใช้ core เดียวกัน
 
