@@ -59,7 +59,16 @@ else()
     add_compile_options(-fcf-protection=full)
     add_link_options(-Wl,-z,relro,-z,now)
   endif()
-  add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=3>)
+  # Some toolchains, Alpine's among them, already define _FORTIFY_SOURCE (at
+  # level 2). Defining it again warns once per translation unit, which on this
+  # project buries the rest of the build output. Undefining first raises the
+  # level quietly.
+  #
+  # Only outside Debug: the checks need optimisation, and at -O0 the compiler
+  # says so instead.
+  add_compile_options(
+      $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+      $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=3>)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
