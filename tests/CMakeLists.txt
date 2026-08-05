@@ -14,6 +14,7 @@ function(rb_add_test name)
 endfunction()
 
 rb_add_test(test_rclone_capabilities)
+rb_add_test(test_rclone_flags)
 rb_add_test(test_redact_args)
 rb_add_test(test_utils)
 rb_add_test(test_job_stats)

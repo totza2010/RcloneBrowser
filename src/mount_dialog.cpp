@@ -1,4 +1,5 @@
 #include "mount_dialog.h"
+#include "completers.h"
 #include "global.h"
 #include "list_of_job_options.h"
 #include "script_editor_dialog.h"
@@ -15,6 +16,14 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
 
   mRemoteMode = remoteMode;
   mRemoteType = remoteType;
+
+  InstallRcloneFlagCompleter(ui.textExtra);
+
+  // The mount point and its base are directories on this machine. The Windows
+  // field takes a drive letter as often as a path, so it is left alone.
+  InstallPathCompleter(ui.le_mountBase, PathKind::Directory);
+  InstallPathCompleter(ui.le_mountPointNotWin, PathKind::Directory);
+  InstallPathCompleter(ui.le_mountScript, PathKind::AnyFile);
 
   auto settings = GetSettings();
 

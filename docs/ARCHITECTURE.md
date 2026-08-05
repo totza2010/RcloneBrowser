@@ -7,7 +7,7 @@
 > เป้าหมายสุดท้าย: โมเดลแบบ qBittorrent — core ตัวเดียว มี 2 หน้าตา
 > `RcloneBrowser` (Qt GUI) และ `rclone-browser-nox` (headless + Web UI)
 >
-> อัปเดตล่าสุด: 2026-08-05
+> อัปเดตล่าสุด: 2026-08-06
 
 ## สถานะความคืบหน้า
 
@@ -29,10 +29,12 @@
 | §6.1 log เป็นไฟล์ | ✅ **เสร็จ** | `job_log.*` (L0) · ทดสอบมือแล้ว · ⚠️ **ค้าง: ทบทวนรูปแบบชื่อไฟล์อีกครั้งช่วงท้าย** |
 | §6.2 ย้าย Dockerfile เข้า repo | ✅ **เสร็จ** | `docker/` — build จริงผ่าน · noVNC ยังอยู่จนกว่าจะถึง E4 |
 | §6.7 การแสดงผลการ์ด job | ✅ **เสร็จ** | `JobPhase` + `progressText()` ใน `job_stats.*` (L0) · ทดสอบ 15 เคส · **รอทดสอบมือ (V-13)** |
+| §6.4 autocomplete | ✅ **เสร็จ** | `rclone_flags.*` (L0) ถาม `rclone help flags` จริง · `completers.*` (L3) · ครอบ Preferences + Transfer + Mount dialog · ⬜ ยังไม่ทำ: เติมชื่อ remote · **รอทดสอบมือ (V-14, V-15)** |
+| ตรวจ repo ของ rclone เอง (เอาช่องกรอกออก) | ✅ **เสร็จ** | `DetectRcloneRepo()` — binary ไม่ได้บอก repo (module path เหมือนกันทั้งสอง fork) จึงดูจาก backend · ยืนยันกับ binary จริง 3 ตัวแล้ว · **รอทดสอบมือ (V-16)** |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 35/75** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 38/79** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
 ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์แค่ `Qt6::Core` และ
@@ -139,8 +141,9 @@ python scripts/check_layers.py
 | `rc_client.h/.cpp` | 130 | L0 — poll RC ของ job แบบ async | ✅ **ใหม่** |
 | `lsjson_parser.h/.cpp` | 190 | L0 — streaming parser ของ `lsjson` | ✅ **ใหม่** |
 | `job_log.h/.cpp` | 190 | L0 — เขียน log ของ job ลงไฟล์ | ✅ **ใหม่** |
+| `rclone_flags.h/.cpp` | 195 | L0 — อ่าน flag ที่ rclone ตัวนี้รับจริง | ✅ **ใหม่** |
 
-รวม **~2,150 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 7 ชุด (`tests/`)
+รวม **~2,345 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 8 ชุด (`tests/`)
 
 ### 3.2 🟡 แยกได้ด้วยงานเล็ก
 

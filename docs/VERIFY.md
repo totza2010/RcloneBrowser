@@ -386,6 +386,146 @@ marker: `job_widget.cpp` (`applyStats`) · L0: `JobStats::phase()` / `progressTe
 
 ---
 
+## รอบที่ 5 — autocomplete ในหน้า Preferences (2026-08-05)
+
+### V-14 · ช่อง options เติมชื่อ flag ให้เอง จาก rclone ตัวจริง
+
+marker: `rclone_flags.cpp` (`ParseRcloneHelpFlags`) · L3: `completers.cpp`
+fixture: [`tests/fixtures/rclone_help_flags.txt`](../tests/fixtures/rclone_help_flags.txt)
+
+รายการ flag **ไม่ได้ฝังไว้ในโค้ด** แต่ถามจาก `rclone help flags` ของ binary ที่ตั้งค่าไว้
+ตอนเปิด Preferences ครั้งแรก แล้วจำไว้ทั้ง session — build ของ teldrive จึงมี
+`--teldrive-*` ส่วน mainline ไม่มี โดยที่โค้ดไม่ต้องรู้จักทั้งคู่
+
+ช่องที่ได้ flag completion: **Default rclone options · Default download options ·
+Default upload options · Mount options**
+ช่องที่ได้ path completion: **rclone · rclone.conf · default download dir · default upload dir**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | พิมพ์ `--tr` ในช่อง options → ขึ้นรายการมี `--transfers` พร้อมคำอธิบาย | | | |
+| 2 | **พิมพ์ `--tel` → เห็น flag ของ teldrive** (ยืนยันว่าถามจาก binary จริง) | | | |
+| 3 | พิมพ์ `chunk` ต่อจาก `--` → เจอทั้ง `--teldrive-chunk-size` และ `--drive-chunk-size` (ค้นแบบ contains) | | | |
+| 4 | เลือก flag แบบ **boolean** (`--dry-run`) → ได้ชื่อ flag + เว้นวรรค ไม่มี `=` | | | |
+| 5 | เลือก flag ที่**ต้องมีค่า** (`--transfers`) → ได้ `--transfers=` และเคอร์เซอร์อยู่ท้าย พร้อมพิมพ์ค่าต่อ | | | |
+| 6 | มี flag อยู่ก่อนแล้ว (`--transfers=8 --ch`) → เติมเฉพาะคำหลัง ตัวแรกไม่ถูกแตะ | | | |
+| 7 | กำลังพิมพ์**ค่า** (`--transfers=`) → รายการไม่โผล่มากวน | | | |
+| 8 | ปุ่มลูกศรขึ้น/ลง + Enter เลือกได้ · Esc ปิดรายการ | | | |
+| 9 | เปลี่ยน path ของ rclone ใน Preferences เป็น binary อีกตัว → OK → เปิด Preferences ใหม่ → **รายการ flag เปลี่ยนตาม** | | | |
+| 10 | ตั้ง path rclone เป็นค่าที่ใช้ไม่ได้ → **ไม่มีรายการขึ้น และไม่มี error เด้ง** (ไม่ควรเดารายการเอง) | | | |
+
+**path completion:**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 11 | ช่อง download/upload dir พิมพ์ path บางส่วน → เติมโฟลเดอร์ให้ **และไม่เสนอไฟล์** | | | |
+| 12 | ช่อง rclone / rclone.conf เสนอทั้งไฟล์และโฟลเดอร์ | | | |
+| 13 | ปุ่ม Browse ยังทำงานเหมือนเดิมทุกช่อง | | | |
+
+**ยังไม่ทำ:** เติม **ชื่อ remote** ในช่อง source/destination
+
+> การ parse `rclone help flags` มี unit test 11 ชุด และตรวจกับ output จริงทั้ง 1,078 flag
+> แล้วว่าอ่านได้ครบ 0 บรรทัดที่หลุด — ข้อ 1–13 ข้างบนคือส่วนที่ test แตะไม่ถึง
+
+---
+
+### V-15 · completion ใน Transfer dialog และ Mount dialog
+
+marker: `completers.cpp` (`PopupCommitFilter`)
+
+ช่อง extra options ของสองหน้านี้เป็น **`QPlainTextEdit`** ไม่ใช่ช่องบรรทัดเดียวแบบ
+Preferences จึงเขียนตัวจัดการแยก และมีพฤติกรรมหนึ่งที่ต่างกันจริง:
+
+> **Enter ในช่องหลายบรรทัดใช้ไม่ได้ถ้าไม่ทำอะไรเพิ่ม** — QCompleter ส่งปุ่มให้ตัว editor
+> ก่อนเสมอ และ `QPlainTextEdit` รับ Return ไปขึ้นบรรทัดใหม่ ปุ่มจึงถูกกินหมด
+> ส่วน `QLineEdit` ไม่รับ Return ช่องบรรทัดเดียวเลยทำงานได้เอง
+>
+> วัดจริงด้วยโปรแกรมทดลอง ไม่ได้เดา:
+> ```
+> QLineEdit        enter -> activated=1
+> QPlainTextEdit   enter -> activated=0     <- ปุ่มหาย
+> QPlainTextEdit   enter -> activated=1     <- หลังใส่ event filter
+>   + filter
+> ```
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | Transfer dialog → แท็บ options → พิมพ์ `--tr` → ขึ้นรายการ | | | |
+| 2 | **รายการโผล่ข้างเคอร์เซอร์** ไม่ใช่ใต้กล่องทั้งกล่อง | | | |
+| 3 | **กด Enter แล้วเลือกได้จริง** (ข้อที่พังถ้าไม่มี filter) | | | |
+| 4 | กด Tab เลือกได้เหมือน Enter | | | |
+| 5 | คลิกเมาส์เลือกได้ | | | |
+| 6 | ลูกศรขึ้น/ลง เลื่อนในรายการ **ไม่ใช่เลื่อนเคอร์เซอร์ในข้อความ** | | | |
+| 7 | Esc ปิดรายการ และ**ไม่**ขึ้นบรรทัดใหม่ | | | |
+| 8 | เลือกแล้ว รายการไม่เด้งกลับมาเอง (ไม่วนลูป) | | | |
+| 9 | flag คนละบรรทัด (`--dry-run` ขึ้นบรรทัดใหม่ `--tr`) → เติมเฉพาะบรรทัดที่เคอร์เซอร์อยู่ | | | |
+| 10 | Mount dialog → ช่อง extra options → ทำงานเหมือนกันทุกข้อ | | | |
+
+**path completion ในสองหน้านี้:**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 11 | Upload → ช่อง **source** เติม path ในเครื่อง · ช่อง dest (remote) ไม่ถูกแตะ | | | |
+| 12 | Download → ช่อง **dest** เติม path ในเครื่อง (เฉพาะโฟลเดอร์) · ช่อง source ไม่ถูกแตะ | | | |
+| 13 | Mount dialog → mount base / mount point (ไม่ใช่ Windows) เติมเฉพาะโฟลเดอร์ | | | |
+| 14 | Mount dialog → ช่อง mount script เติม path ได้ และปุ่ม Edit... ยังทำงาน | | | |
+| 15 | ปุ่ม Browse ทุกปุ่มในสองหน้านี้ยังทำงานเหมือนเดิม | | | |
+
+> ข้อ 11/12 จงใจไม่ใส่ completion ให้ฝั่ง remote — filesystem completer จะเสนอโฟลเดอร์
+> ในเครื่องซึ่งไม่เกี่ยวอะไรกับ remote เลย
+
+---
+
+### V-16 · ตรวจ repo ของ rclone เอง (เอาช่องกรอกออกแล้ว)
+
+marker: `rclone_flags.h` (`DetectRcloneRepo`)
+
+ช่อง **Custom Rclone Repo** พร้อมปุ่ม Check และ checkbox ถูกเอาออกทั้งหมด
+แท็บ Misc เหลือแค่บรรทัดบอกว่าตรวจเจออะไร
+
+**ข้อเท็จจริงที่วัดมาแล้ว: binary ไม่ได้บอกว่ามาจาก repo ไหน**
+
+| ที่ลองอ่าน | mainline v1.75.0 | tgdrive v1.73.1 | ใช้แยกได้ไหม |
+|---|---|---|---|
+| `rclone version` | `rclone v1.75.0` + 7 บรรทัด | `rclone v1.73.1` + 7 บรรทัดเหมือนกัน | ❌ ไม่มีชื่อ repo · เลขเวอร์ชันตามต้นน้ำ |
+| Go module path ใน binary | `github.com/rclone/rclone` | `github.com/rclone/rclone` | ❌ **tgdrive ไม่ได้เปลี่ยนชื่อ module** |
+| `vcs.*` build settings | ไม่มี | ไม่มี | ❌ |
+| **backend ที่มีในตัว** | ไม่มี `teldrive` | **มี `teldrive`** | ✅ |
+
+จึงดูจาก**ความสามารถ**แทน: มี flag `--teldrive-*` → `tgdrive/rclone` · ไม่มี → `rclone/rclone`
+ใช้รายการ flag ชุดเดียวกับที่ดึงมาทำ completion ไม่มีการเรียก rclone เพิ่ม
+
+**ทดสอบด้วยเครื่องแล้ว** — รัน `ParseRcloneHelpFlags` + `DetectRcloneRepo` ตัวจริงกับ binary จริง 3 ตัว:
+
+```
+.installer/bin/rclone.exe (v1.72.1)     flags=1065  teldrive=12  -> tgdrive/rclone
+tg/rclone-v1.73.1/rclone.exe            flags=1092  teldrive=13  -> tgdrive/rclone
+mainline/rclone-v1.75.0/rclone.exe      flags=1129  teldrive=0   -> rclone/rclone
+C:/nonexistent/rclone.exe               flags=0     teldrive=0   -> (unknown)
+```
+
+> รวมถึงข้อที่น่าสนใจ: rclone ที่ลงในเครื่องอยู่ **เป็น build ของ tgdrive** ทั้งที่รายงานตัวเองว่าเป็น
+> `github.com/rclone/rclone v1.72.1` — ซึ่งเป็นเหตุผลว่าทำไมอ่าน module path ไม่ได้
+
+**นี่คือการอนุมาน ไม่ใช่การอ่านค่า** — fork ที่ไม่ได้เพิ่ม backend อะไรเลยจะถูกมองเป็น upstream
+ถ้าเจอกรณีแบบนั้น ให้เพิ่มแถวใน `kForkMarkers` แทนการเอาช่องกรอกกลับมา
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | แท็บ Misc → กลุ่ม Advanced เหลือบรรทัดเดียว **ไม่มีช่องให้กรอก ไม่มีปุ่ม Check** | | | |
+| 2 | บรรทัดนั้นขึ้น `tgdrive/rclone` (ลิงก์กดได้) + บอกว่าเพราะ build นี้มี teldrive backend | | | |
+| 3 | เปลี่ยน path rclone ไปที่ build ของ mainline → OK → เปิด Preferences ใหม่ → ได้ `rclone/rclone` | | | |
+| 4 | ตั้ง path rclone เป็นค่าที่ใช้ไม่ได้ → ขึ้นว่าอ่านไม่ได้ · **ไม่เดาเป็น `rclone/rclone`** | | | |
+| 5 | การแจ้งเตือนอัปเดต rclone ชี้ไป repo ที่ถูก (ลบ `Settings/lastRcloneUpdateCheck` แล้วเปิดใหม่) | | | |
+| 6 | หน้าต่าง Preferences ยังจัดวางปกติ ไม่มีที่ว่างค้างจากของที่เอาออก | | | |
+| 7 | ค่าเดิมใน `Settings/queueRcloneRepo` ที่เคยกรอกไว้ ถูกเมินเฉยๆ ไม่ทำให้พัง | | | |
+
+> ข้อ 5: ค่าที่ตรวจได้มาจากการถาม rclone ตอนเปิดโปรแกรม ถ้ายังไม่ได้คำตอบ
+> **จะข้ามการเช็คอัปเดตรอบนั้นไปเลย** ไม่ใช่เดาเป็น `rclone/rclone`
+> เพราะถ้าเดาผิดจะเสนอไฟล์ของ upstream ให้คนที่ใช้ fork ทุกวัน
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

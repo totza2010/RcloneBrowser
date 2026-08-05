@@ -1,4 +1,5 @@
 #include "transfer_dialog.h"
+#include "completers.h"
 #include "file_dialog.h"
 #include "list_of_job_options.h"
 #include "utils.h"
@@ -28,6 +29,14 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
   }
 
   mJobOptionsRcloneCmd = new JobOptions(mIsDownload);
+
+  InstallRcloneFlagCompleter(ui.pte_textExtra);
+
+  // Only the local side of the transfer is a path on this machine. The other
+  // side is a remote, where a filesystem completer would offer directories
+  // that have nothing to do with it.
+  InstallPathCompleter(mIsDownload ? ui.textDest : ui.textSource,
+                       mIsDownload ? PathKind::Directory : PathKind::AnyFile);
 
   auto settings = GetSettings();
 

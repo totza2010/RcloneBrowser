@@ -7,6 +7,7 @@
 #include "mount_dialog.h"
 #include "mount_widget.h"
 #include "preferences_dialog.h"
+#include "rclone_flags.h"
 #include "remote_widget.h"
 #include "scheduler_widget.h"
 #include "stream_widget.h"
@@ -143,6 +144,11 @@ MainWindow::MainWindow() {
   }
   SetRclone(settings->value("Settings/rclone").toString());
   SetRcloneConf(settings->value("Settings/rcloneConf").toString());
+
+  // Asked for early because two things want the answer: completion in the
+  // options fields, and working out which repository to watch for rclone
+  // updates. One query, both uses.
+  RcloneFlagRegistry::instance().ensureLoaded();
 
   mAlwaysShowInTray =
       settings->value("Settings/alwaysShowInTray", false).toBool();
@@ -636,13 +642,19 @@ MainWindow::MainWindow() {
       settings->setValue("Settings/jobLastFinishedScriptRun",
                          dialog.getJobLastFinishedScriptRun());
 
-      settings->setValue("Settings/queueRcloneRepoUse",
-                         dialog.getQueueRcloneRepoUse());
-      settings->setValue("Settings/queueRcloneRepo",
-                         dialog.getQueueRcloneRepo());
+      // Settings/queueRcloneRepo and Settings/queueRcloneRepoUse are no longer
+      // written: which repository to watch is worked out from the binary now
+      // (DetectRcloneRepo). Any value left over from an earlier version is
+      // simply not read.
 
       SetRclone(dialog.getRclone());
       SetRcloneConf(dialog.getRcloneConf());
+      // A different binary accepts a different set of flags, and may well be
+      // from a different repository -- switching between a mainline and a
+      // teldrive build is the whole reason that field exists -- so both the
+      // completion list and the detected repository have to be asked again.
+      RcloneFlagRegistry::instance().invalidate();
+      RcloneFlagRegistry::instance().ensureLoaded();
       mFirstTime = true;
       rcloneGetVersion();
 
@@ -2717,11 +2729,18 @@ void MainWindow::rcloneGetVersion() {
                 QDate::fromString(settings->value("Settings/lastRcloneUpdateCheck").toString(), Qt::ISODate);
           };
 
+          // Which repository to watch is worked out from the binary rather
+          // than typed in -- see DetectRcloneRepo. Empty means the flag query
+          // has not answered yet, in which case the check waits for the next
+          // launch: asking upstream about a fork would offer a download that
+          // does not belong to the build in use, every day.
+          const QString repo =
+              DetectRcloneRepo(RcloneFlagRegistry::instance().flags());
+
           // dont check if already checked today (once per day only)
-          if (!(last_check == current_date)) {
+          if (!(last_check == current_date) && !repo.isEmpty()) {
             // remmber when last checked
             settings->setValue("Settings/lastRcloneUpdateCheck", current_date.toString(Qt::ISODate));
-            QString repo = settings->value("Settings/queueRcloneRepo", "rclone/rclone").toString();
 
             QString url =
                 QString("https://api.github.com/repos/%1/releases/latest").arg(repo);

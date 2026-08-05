@@ -44,6 +44,7 @@ set(CORE_SOURCE
   job_options.cpp
   list_of_job_options.cpp
   rclone_capabilities.cpp
+  rclone_flags.cpp
   job_log.cpp
   job_stats.cpp
   lsjson_parser.cpp
@@ -58,6 +59,7 @@ set(CORE_HEADER
   job_options.h
   list_of_job_options.h
   rclone_capabilities.h
+  rclone_flags.h
   job_log.h
   job_stats.h
   lsjson_parser.h
@@ -121,6 +123,7 @@ set(OTHER
   pch.h
   job_options_item.h
   widget_settings.h
+  completers.h
 )
 
 set(SOURCE
@@ -138,6 +141,7 @@ set(SOURCE
   mount_widget.cpp
   stream_widget.cpp
   preferences_dialog.cpp
+  completers.cpp
   icon_cache.cpp
   item_model.cpp
   widget_settings.cpp

@@ -1,4 +1,6 @@
 #include "preferences_dialog.h"
+#include "completers.h"
+#include "rclone_flags.h"
 #include "utils.h"
 #include <QFileDialog>
 #include <QSystemTrayIcon>
@@ -61,6 +63,23 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   setMaximumHeight(this->height());
 
   ui.rclone->setFocus(Qt::FocusReason::OtherFocusReason);
+
+  // Every free-text field on this page either holds rclone flags or a path,
+  // and both were previously typed blind: a mistyped flag is only found when
+  // a job fails, and a mistyped path when a transfer goes to the wrong place.
+  //
+  // The flag list is whatever the configured rclone reports, so a teldrive
+  // build offers its --teldrive-* flags and a mainline one does not.
+  for (QLineEdit *options :
+       {ui.defaultRcloneOptions, ui.defaultDownloadOptions,
+        ui.defaultUploadOptions, ui.mount}) {
+    InstallRcloneFlagCompleter(options);
+  }
+
+  InstallPathCompleter(ui.rclone, PathKind::AnyFile);
+  InstallPathCompleter(ui.rcloneConf, PathKind::AnyFile);
+  InstallPathCompleter(ui.defaultDownloadDir, PathKind::Directory);
+  InstallPathCompleter(ui.defaultUploadDir, PathKind::Directory);
 
   QObject::connect(ui.rcloneBrowse, &QPushButton::clicked, this, [=]() {
     QString rclone = QFileDialog::getOpenFileName(
@@ -207,11 +226,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
         ui.transferOffScript->setText("\"" + transferOffScript + "\"");
       });
-
-  QObject::connect(ui.queueRcloneRepoTest, &QPushButton::clicked, this, [=]() {
-    QString repo = ui.queueRcloneRepo->text().trimmed();
-    onRepoTestClicked(repo);
-  });
 
   QObject::connect(ui.closeToTray, &QCheckBox::clicked, this, [=]() {
     if (ui.closeToTray->isChecked()) {
@@ -442,15 +456,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   ui.jobLastFinishedScriptRun->setChecked(
       settings->value("Settings/jobLastFinishedScriptRun", true).toBool());
 
-  ui.queueRcloneRepo->setText(
-      settings->value("Settings/queueRcloneRepo").toString());
-  ui.queueRcloneRepoUse->setChecked(
-      settings->value("Settings/queueRcloneRepoUse", true).toBool());
-  ui.queueRcloneRepoTest->setIcon(
-      QIcon(":media/images/qbutton_icons/refresh.png"));
-  ui.queueRcloneRepoTest->setIconSize(QSize(16, 16));
-  ui.queueRcloneRepoTest->setToolButtonStyle(Qt::ToolButtonIconOnly);
-
   if (ui.queueScript->text().trimmed().isEmpty()) {
     ui.queueScriptRun->setEnabled(false);
   } else {
@@ -467,13 +472,14 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
     ui.jobLastFinishedScriptRun->setEnabled(true);
   }
 
-  if (ui.queueRcloneRepo->text().trimmed().isEmpty()) {
-    ui.queueRcloneRepoUse->setEnabled(false);
-    ui.queueRcloneRepoUse->setChecked(false);
-  } else {
-    ui.queueRcloneRepoUse->setEnabled(true);
-    ui.queueRcloneRepoUse->setChecked(true);
-  }
+  // Which repository to watch for rclone updates used to be typed in here,
+  // which meant it was usually empty or wrong. It is worked out from the
+  // binary instead, so this only reports what was found.
+  showDetectedRepo();
+  QObject::connect(&RcloneFlagRegistry::instance(),
+                   &RcloneFlagRegistry::flagsChanged, this,
+                   &PreferencesDialog::showDetectedRepo);
+  RcloneFlagRegistry::instance().ensureLoaded();
 
   QObject::connect(ui.queueScript, &QLineEdit::textChanged, this, [=]() {
     if (ui.queueScript->text().trimmed().isEmpty()) {
@@ -734,14 +740,6 @@ bool PreferencesDialog::getQueueScriptRun() const {
   return ui.queueScriptRun->isChecked();
 }
 
-bool PreferencesDialog::getQueueRcloneRepoUse() const {
-  return ui.queueRcloneRepoUse->isChecked();
-}
-
-QString PreferencesDialog::getQueueRcloneRepo() const {
-  return ui.queueRcloneRepo->text();
-}
-
 bool PreferencesDialog::getJobStartScriptRun() const {
   return ui.jobStartScriptRun->isChecked();
 }
@@ -750,144 +748,26 @@ bool PreferencesDialog::getJobLastFinishedScriptRun() const {
   return ui.jobLastFinishedScriptRun->isChecked();
 }
 
-void PreferencesDialog::onRepoTestClicked(const QString &repo) {
-  logDialog = new QDialog(this);
-  logDialog->setWindowTitle("Rclone Repo Check");
-  layout = new QVBoxLayout(logDialog);
+void PreferencesDialog::showDetectedRepo() {
+  const QString detected =
+      DetectRcloneRepo(RcloneFlagRegistry::instance().flags());
 
-  logEdit = new QTextEdit(logDialog);
-  logEdit->setReadOnly(true);
-  layout->addWidget(logEdit);
-
-  logEdit->append(QString("⏳ Checking repository %1 ...").arg(repo));
-  logDialog->setLayout(layout);
-  logDialog->resize(500, 300);
-  logDialog->show();
-
-  ui.queueRcloneRepoUse->setEnabled(false);
-  ui.queueRcloneRepoUse->setChecked(false);
-
-  QRegularExpression re("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$");
-  if (!re.match(repo).hasMatch()) {
-    logEdit->append("<p>❌ Invalid format. Use owner/repo (e.g. <b>tgdrive/rclone</b>).</p>");
+  if (detected.isEmpty()) {
+    ui.repoDetected->setText(
+        "<i>could not read the flags of the configured rclone</i>");
     return;
   }
 
-  checkRcloneRepo(repo);
-}
+  // Say how it was decided, not just what: this is read off the backends the
+  // build carries, and someone comparing it against their own idea of where
+  // their rclone came from deserves to know that.
+  const QString why =
+      detected == QStringLiteral("rclone/rclone")
+          ? QStringLiteral("no fork-only backend in this build")
+          : QStringLiteral("this build has the teldrive backend");
 
-void PreferencesDialog::checkRcloneRepo(const QString &repo) {
-  auto manager = new QNetworkAccessManager(this);
-  QString repoApi = QString("https://api.github.com/repos/%1").arg(repo);
-
-  connect(manager, &QNetworkAccessManager::finished, this, [=](QNetworkReply *reply) {
-    reply->deleteLater();
-
-    if (reply->error() != QNetworkReply::NoError) {
-      logEdit->append("❌ Request failed: " + reply->errorString());
-      return;
-    }
-
-    QJsonParseError jsonError;
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &jsonError);
-    if (jsonError.error != QJsonParseError::NoError) {
-      logEdit->append("❌ Invalid JSON response.");
-      return;
-    }
-
-    QJsonObject repoObj = doc.object();
-    QString branch = repoObj.value("default_branch").toString();
-
-    checkRcloneCoreFiles(repo, branch, repoObj);
-  });
-  manager->get(QNetworkRequest(QUrl(repoApi)));
-}
-
-void PreferencesDialog::checkRcloneCoreFiles(const QString &repo, const QString &branch, const QJsonObject &repoObj) {
-  auto manager = new QNetworkAccessManager(this);
-  QStringList mustHaveFiles = { "rclone.1", "rclone.go", "librclone/librclone.go" };
-  auto haveFiles = std::make_shared<int>(0);
-
-  auto checkFile = [this, repo, branch, repoObj, manager, haveFiles](const QString &file) {
-    QString fileUrl = QString("https://api.github.com/repos/%1/contents/%2?ref=%3")
-                        .arg(repo, file, branch);
-
-    QNetworkReply *reply = manager->get(QNetworkRequest(QUrl(fileUrl)));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, repo, repoObj, file, haveFiles]() {
-      reply->deleteLater();
-      if (reply->error() == QNetworkReply::NoError) {
-        logEdit->append(QString("✅ <b>%1</b> Core file detected, fetching latest release...").arg(file));
-        (*haveFiles)++;
-        if (*haveFiles == 3) {
-          logEdit->append("✅ All core files detected.");
-          checkRcloneRelease(repo, repoObj);
-        }
-        return;
-      }
-      logEdit->append(QString("❌ <b>%1</b> Core file not detected.").arg(file));
-      return;
-    });
-  };
-
-  for (const QString &file : mustHaveFiles) {
-    checkFile(file);
-  }
-}
-
-void PreferencesDialog::checkRcloneRelease(const QString &repo, const QJsonObject &repoObj) {
-  auto manager = new QNetworkAccessManager(this);
-  QString releaseApi = QString("https://api.github.com/repos/%1/releases/latest").arg(repo);
-  QNetworkReply *reply = manager->get(QNetworkRequest(QUrl(releaseApi)));
-
-  connect(reply, &QNetworkReply::finished, this, [=]() {
-    reply->deleteLater();
-
-    QJsonParseError jsonError;
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &jsonError);
-    if (jsonError.error != QJsonParseError::NoError) {
-      logEdit->append("✅ Repository detected, but no release found.");
-      showRepoSummary(repoObj, QJsonObject());
-      return;
-    }
-    showRepoSummary(repoObj, doc.object());
-  });
-}
-
-void PreferencesDialog::showRepoSummary(const QJsonObject &repoObj, const QJsonObject &releaseObj) {
-  QString fullName = repoObj.value("full_name").toString();
-  QString description = repoObj.value("description").toString();
-  QString stars = QString::number(repoObj.value("stargazers_count").toInt());
-  QString forks = QString::number(repoObj.value("forks_count").toInt());
-  QString updatedAt = repoObj.value("pushed_at").toString();
-
-  QString tag = releaseObj.value("tag_name").toString("(no release)");
-  QString published = releaseObj.value("published_at").toString();
-  QString releaseUrl = releaseObj.value("html_url").toString();
-
-  QString summary = QString(
-    "<p><b>Name:        </b> <a href='%8'>%1</a><br>"
-    "<b>Description:    </b> %2<br>"
-    "<b>Latest Release: </b> %3<br>"
-    "<b>Published:      </b> %4<br>"
-    "<b>Last Updated:   </b> %7<br>"
-    "<b>Stars:          </b> ⭐ %5 &nbsp;&nbsp; <b>Forks:</b> 🔁 %6</p>"
-  ).arg(fullName, description, tag, published, stars, forks, updatedAt, releaseUrl);
-  
-  if (releaseObj.isEmpty()) {
-      logEdit->append("✅ Repository detected, but no release found.");
-  } else {
-      logEdit->append("✅ Repository and release detected.");
-  }
-
-  okButton = new QPushButton("OK", logDialog);
-  layout->addWidget(okButton);
-  
-  connect(okButton, &QPushButton::clicked, this, [=]() {
-    ui.summaryRepo->setText(summary);
-    logDialog->accept();
-    logDialog->deleteLater();
-  });
-
-  ui.queueRcloneRepoUse->setEnabled(true);
-  ui.queueRcloneRepoUse->setChecked(true);
+  ui.repoDetected->setText(
+      QStringLiteral(
+          "<a href=\"https://github.com/%1\">%1</a><br/><i>detected: %2</i>")
+          .arg(detected, why));
 }

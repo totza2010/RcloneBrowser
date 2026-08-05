@@ -1457,72 +1457,32 @@
           <string>Advanced</string>
          </property>
          <layout class="QGridLayout" name="gridLayout_7">
-          <item row="0" column="1">
-           <widget class="QCheckBox" name="queueRcloneRepoUse">
-            <property name="toolTip">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use this Repo.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-            </property>
+          <item row="0" column="1" alignment="Qt::AlignRight">
+           <widget class="QLabel" name="label_13">
             <property name="text">
-             <string/>
+             <string>Rclone repository:</string>
             </property>
            </widget>
           </item>
           <item row="0" column="2">
-           <spacer name="horizontalSpacer_8">
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-            <property name="sizeType">
-             <enum>QSizePolicy::Fixed</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>5</width>
-              <height>20</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-          <item row="0" column="3" alignment="Qt::AlignRight">
-           <widget class="QLabel" name="label_13">
+           <widget class="QLabel" name="repoDetected">
             <property name="text">
-             <string>Custom Rclone Repo:</string>
+             <string/>
             </property>
-           </widget>
-          </item>
-          <item row="0" column="4">
-           <widget class="QLineEdit" name="queueRcloneRepo">
-            <property name="toolTip">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Rclone Repo e.g.: rclone/rclone&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <property name="textFormat">
+             <enum>Qt::RichText</enum>
             </property>
-           </widget>
-          </item>
-          <item row="0" column="5">
-           <widget class="QToolButton" name="queueRcloneRepoTest">
-            <property name="statusTip">
-             <string>Check Repo</string>
+            <property name="openExternalLinks">
+             <bool>true</bool>
             </property>
-            <property name="toolButtonStyle">
-             <enum>Qt::ToolButtonTextUnderIcon</enum>
+            <property name="wordWrap">
+             <bool>true</bool>
             </property>
            </widget>
           </item>
          </layout>
         </widget>
        </item>
-        <item row="2" column="1">
-            <widget class="QLabel" name="summaryRepo">
-                <property name="textFormat">
-                    <enum>Qt::RichText</enum>
-                </property>
-                <property name="openExternalLinks">
-                    <bool>true</bool>
-                </property>
-                <property name="wordWrap">
-                    <bool>true</bool>
-                </property>
-            </widget>
-        </item>
        <item>
         <spacer name="verticalSpacer_11">
          <property name="orientation">

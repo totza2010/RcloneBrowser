@@ -1,0 +1,37 @@
+Usage:
+  rclone help flags [<filter>] [flags]
+
+Flags:
+      --group string   Only include flags from specific group
+  -h, --help           help for flags
+      --name           Apply filter only on flag names
+
+Flags for anything which can copy a file (flag group Copy):
+      --check-first                                 Do all the checks before starting transfers
+  -c, --checksum                                    Check for changes with size & checksum (if available, or fallback to size only)
+      --compare-dest stringArray                    Include additional server-side paths during comparison
+      --copy-dest stringArray                       Implies --compare-dest but also copies files from paths into destination
+      --cutoff-mode HARD|SOFT|CAUTIOUS              Mode to stop transfers when reaching the max transfer limit HARD|SOFT|CAUTIOUS (default HARD)
+      --ignore-case-sync                            Ignore case when synchronizing
+      --ignore-checksum                             Skip post copy check of checksums
+      --ignore-existing                             Skip all files that exist on destination
+      --ignore-size                                 Ignore size when skipping use modtime or checksum
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
+      --immutable                                   Do not modify files, fail if existing files have been modified
+
+Important flags useful for most commands (flag group Important):
+  -n, --dry-run         Do a trial run with no permanent changes
+  -i, --interactive     Enable interactive mode
+  -v, --verbose count   Print lots more stuff (repeat for more)
+
+
+Backend-only flags (these can be set in the config file also) (flag group Backend):
+      --alias-description string                            Description of the remote
+      --teldrive-api-host string                            Api Host
+      --teldrive-chunk-size SizeSuffix                      Chunk Size (default 500Mi)
+      --teldrive-upload-concurrency int                     Upload Concurrency (default 4)
+
+      --s3-use-accept-encoding-gzip Accept-Encoding: gzip   Whether to send Accept-Encoding: gzip header (default unset)
+
+Flags for general configuration of rclone (flag group Config):
+  -n, --dry-run                             Do a trial run with no permanent changes
