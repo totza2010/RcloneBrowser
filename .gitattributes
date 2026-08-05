@@ -1,0 +1,18 @@
+# Without this, a checkout on Windows converts these to CRLF and the
+# container fails to start: /bin/sh cannot run a script whose shebang line
+# ends in a carriage return, and the error names the interpreter rather than
+# the line ending, which makes it a slow thing to work out.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Generated from a template on release; keep it byte-identical everywhere.
+VERSION text eol=lf
+
+# Binary fixtures must never be touched.
+*.bin binary
+*.png binary
+*.ico binary
+*.icns binary
+*.wav binary
