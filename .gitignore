@@ -14,3 +14,6 @@ debian/rclone-browser*
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
+
+# holds VNC_PASSWORD
+docker/.env

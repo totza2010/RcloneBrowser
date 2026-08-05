@@ -27,6 +27,7 @@
 | §3.5 progress จาก RC API แทน regex | ✅ **เสร็จ** | `job_stats.*` + `rc_client.*` (L0) · ลบ regex 10 ตัว · V-11/V-12 **PASS** |
 | §3.4 listing ด้วย `lsjson` | ✅ **เสร็จ** | `lsjson_parser.*` (L0) · ลบ regex 2 ตัวสุดท้าย · ทดสอบมือแล้ว |
 | §6.1 log เป็นไฟล์ | ✅ **เสร็จ** | `job_log.*` (L0) · ทดสอบมือแล้ว · ⚠️ **ค้าง: ทบทวนรูปแบบชื่อไฟล์อีกครั้งช่วงท้าย** |
+| §6.2 ย้าย Dockerfile เข้า repo | ✅ **เสร็จ** | `docker/` — build จริงผ่าน · noVNC ยังอยู่จนกว่าจะถึง E4 |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 

@@ -1,0 +1,92 @@
+# Reachable at http://localhost:5800 once up.
+#
+#   cp docker/.env.example docker/.env   # then edit VNC_PASSWORD
+#   docker compose -f docker/compose.yaml up -d
+#
+# Build from this checkout instead of pulling:
+#   docker compose -f docker/compose.yaml build
+
+services:
+  rclonebrowser:
+    image: ghcr.io/totza2010/rclonebrowser:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: rclonebrowser
+    ports:
+      # The interface is an unencrypted desktop session. Bound to loopback so
+      # it is not on the network by accident; put it behind a reverse proxy
+      # with TLS before exposing it.
+      #
+      # Windows reserves scattered port ranges for Hyper-V and refuses to bind
+      # inside them, with a message about socket access permissions rather
+      # than about the port being reserved. Set RB_PORT if the default is in
+      # one of them; "netsh interface ipv4 show excludedportrange protocol=tcp"
+      # lists them.
+      - "127.0.0.1:${RB_PORT:-5800}:5800"
+    environment:
+      # Match the owner of any host directory mounted below. Running as root
+      # was the previous default and left everything the container wrote owned
+      # by root on the host.
+      - USER_ID=${USER_ID:-1000}
+      - GROUP_ID=${GROUP_ID:-1000}
+      - TZ=${TZ:-Asia/Bangkok}
+      # No default: an empty password leaves the session open to anyone who
+      # can reach the port.
+      - VNC_PASSWORD=${VNC_PASSWORD:?set VNC_PASSWORD in docker/.env}
+      - KEEP_APP_RUNNING=true
+    volumes:
+      # rclone.conf, saved tasks, the scheduler, and the per-job logs.
+      #
+      # A named volume by default, because a host path that works on both
+      # Windows and Linux cannot be written literally here, and because Docker
+      # manages ownership for us. Point RB_CONFIG at a directory to use one
+      # instead -- for example to carry on using an existing rclone.conf:
+      #
+      #   RB_CONFIG=/home/you/.config/rclone      (Linux/macOS)
+      #   RB_CONFIG=C:\Users\you\AppData\Roaming\rclone   (Windows)
+      #
+      # Compose reads anything that is not a path as a volume name, so the
+      # default below is the named volume declared at the bottom of this file.
+      - "${RB_CONFIG:-rclonebrowser-config}:/config"
+
+      # What the application can see to transfer. Defaults to a named volume
+      # so it works out of the box; point RB_MEDIA at a directory to reach
+      # real files.
+      - "${RB_MEDIA:-rclonebrowser-media}:/media"
+
+      # Wherever rclone already keeps its configuration on this machine, so
+      # the remotes you have set up are simply there. Resolved per platform:
+      #
+      #   Windows            the rclone folder under %APPDATA%
+      #   Linux and macOS    $HOME/.config/rclone
+      #
+      # The container uses this rclone.conf if it finds one and otherwise
+      # falls back to the /config volume, creating it there. Nothing here is
+      # overwritten either way.
+      #
+      # The directory is mounted rather than the file: rclone saves by writing
+      # a new file and renaming it over the old one, which a single-file bind
+      # mount cannot do -- the save fails with "device or resource busy" and
+      # every remote added through the interface is lost on restart.
+      #
+      # Set RB_RCLONE_CONF to point somewhere else.
+      - "${RB_RCLONE_CONF:-${APPDATA:-$HOME/.config}/rclone}:/rclone-config"
+
+      # An rclone from outside the image, for staying on a build you already
+      # run. Must be a Linux binary of this architecture, so on Windows it
+      # means supplying a Linux rclone rather than the installed one.
+      # - "/usr/local/bin/rclone:/opt/rclone/rclone:ro"
+
+    # rclone mount needs FUSE. Left out because it widens what a compromised
+    # container can do and transfers do not need it. Uncomment to mount:
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
+
+volumes:
+  rclonebrowser-config:
+  rclonebrowser-media:

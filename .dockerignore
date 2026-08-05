@@ -1,0 +1,23 @@
+# The build directory is several gigabytes and the image compiles its own
+# copy, so sending it would only slow the build down.
+build*
+release/
+
+.git/
+.github/
+.vscode/
+
+docs/
+*.md
+!VERSION
+
+scripts/
+tests/
+
+# Anything a developer left lying around.
+*.user*
+*.ini
+*.log
+
+# holds VNC_PASSWORD
+docker/.env

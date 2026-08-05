@@ -1,0 +1,210 @@
+name: Rebuild image on new rclone
+
+# rclone moves on its own schedule, and an image that was current when it was
+# published stops being so a few weeks later. This checks both upstreams once
+# a day and rebuilds only when there is something new.
+#
+# It builds from the newest release tag of this repository, not from the
+# default branch. A rebuild triggered by rclone should change the rclone and
+# nothing else; building from the branch would quietly ship unreleased
+# application code under the same moving tags.
+on:
+  schedule:
+    # 04:00 UTC, which is outside the hours anyone here is working.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if the tag already exists'
+        type: boolean
+        default: false
+
+concurrency:
+  group: docker-rclone-watch
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/rclonebrowser
+
+jobs:
+  watch:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Image tags carry the rclone that is inside them, so a version can
+          # be picked without having to inspect anything:
+          #   :tgdrive-1.73.1   :rclone-1.75.0
+          - name: tgdrive
+            repo: tgdrive/rclone
+            moving: latest
+            expect_teldrive: 'yes'
+          - name: rclone
+            repo: rclone/rclone
+            moving: latest-mainline
+            expect_teldrive: 'no'
+
+    steps:
+      - name: Find the newest release of this application
+        id: app
+        run: |
+          tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [ -z "$tag" ]; then
+            echo "no release to build from; nothing to do" >&2
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "building from $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find the newest ${{ matrix.repo }} release
+        id: rclone
+        if: steps.app.outputs.skip != 'true'
+        run: |
+          version="$(gh api "repos/${{ matrix.repo }}/releases/latest" --jq .tag_name | sed 's/^v//')"
+          if [ -z "$version" ]; then
+            echo "could not resolve the latest ${{ matrix.repo }} release" >&2
+            exit 1
+          fi
+          echo "rclone is at $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to ghcr.io
+        if: steps.app.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same scheme as docker.yml, so a rebuild lands on the tag a release
+      # build would have produced for the same pair:
+      #
+      #   3.1.1-tgdrive-1.73.1   exact, never moves
+      #   tgdrive-1.73.1         that rclone, newest application release
+      #   latest                 newest of both
+      #
+      # The registry is the state: if the exact tag is already there, this
+      # combination has been built. Nothing is remembered between runs.
+      - name: Work out the tags, and whether there is anything to do
+        id: check
+        if: steps.app.outputs.skip != 'true'
+        run: |
+          app="$(echo '${{ steps.app.outputs.tag }}' | sed 's/^v//')"
+          rc="${{ steps.rclone.outputs.version }}"
+          exact="${{ env.IMAGE }}:${app}-${{ matrix.name }}-${rc}"
+          {
+            echo "exact=$exact"
+            echo "byrclone=${{ env.IMAGE }}:${{ matrix.name }}-${rc}"
+            echo "moving=${{ env.IMAGE }}:${{ matrix.moving }}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "forced"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect "$exact" >/dev/null 2>&1; then
+            echo "$exact exists; nothing to do"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$exact is missing; building"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.build == 'true'
+        with:
+          ref: ${{ steps.app.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.check.outputs.build == 'true'
+
+      # Built and loaded first so the check below runs against what would be
+      # published rather than a second build of it.
+      - name: Build
+        if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}:watch
+          build-args: |
+            RCLONE_REPO=${{ matrix.repo }}
+            RCLONE_VERSION=${{ steps.rclone.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Check the image before publishing it
+        if: steps.check.outputs.build == 'true'
+        run: |
+          docker run --rm --entrypoint /bin/sh ${{ env.IMAGE }}:watch -c '
+            set -eu
+            cat /etc/rclone-source
+            test -x /usr/bin/rclone-browser
+            if ldd /usr/bin/rclone-browser | grep "not found"; then
+              echo "missing shared libraries" >&2
+              exit 1
+            fi
+
+            # An automatic rebuild must not quietly change which backends the
+            # image carries.
+            if rclone help backends | grep -q teldrive; then have=yes; else have=no; fi
+            if [ "$have" != "${{ matrix.expect_teldrive }}" ]; then
+              echo "expected teldrive=${{ matrix.expect_teldrive }}, got $have" >&2
+              exit 1
+            fi
+
+            # The version asked for is the version that arrived.
+            got="$(rclone version | head -1 | awk "{print \$2}" | sed "s/^v//")"
+            if [ "$got" != "${{ steps.rclone.outputs.version }}" ]; then
+              echo "asked for ${{ steps.rclone.outputs.version }}, got $got" >&2
+              exit 1
+            fi
+          '
+
+      - name: Publish
+        if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          # The exact tag is a record and never moves; the other two are what
+          # a compose file follows.
+          tags: |
+            ${{ steps.check.outputs.exact }}
+            ${{ steps.check.outputs.byrclone }}
+            ${{ steps.check.outputs.moving }}
+          build-args: |
+            RCLONE_REPO=${{ matrix.repo }}
+            RCLONE_VERSION=${{ steps.rclone.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+
+      - name: Say what happened
+        if: always() && steps.app.outputs.skip != 'true'
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            echo
+            echo "- application release: \`${{ steps.app.outputs.tag }}\`"
+            echo "- rclone: \`${{ matrix.repo }} v${{ steps.rclone.outputs.version }}\`"
+            if [ "${{ steps.check.outputs.build }}" = "true" ]; then
+              echo "- published:"
+              echo "  - \`${{ steps.check.outputs.exact }}\`"
+              echo "  - \`${{ steps.check.outputs.byrclone }}\`"
+              echo "  - \`${{ steps.check.outputs.moving }}\`"
+            else
+              echo "- already built, nothing published"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
