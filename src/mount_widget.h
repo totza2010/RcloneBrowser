@@ -1,5 +1,6 @@
 #pragma once
 
+#include "job_log.h"
 #include "ui_mount_widget.h"
 
 class MountWidget : public QWidget {
@@ -40,6 +41,7 @@ private:
   // or a log. See docs/ARCHITECTURE.md section 5.
   QString mRcUser;
   QString mRcPass;
+  JobLogWriter mLog;
   QStringList mArgs;
   QString mUniqueID = "";
 

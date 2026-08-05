@@ -37,6 +37,13 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
 
+  if (JobLogWriter::isEnabled()) {
+    // args[0] is the rclone subcommand ("copy", "sync", "move"). transferMode
+    // is often empty and describes the queue, not the operation.
+    // The redacted form is what gets written; the log outlives the window.
+    mLog.begin(args.value(0), uniqueID, RedactArgs(mArgs));
+  }
+
   ui.source->setText(source);
   ui.source->setCursorPosition(0);
   ui.source->setToolTip(source);
@@ -179,7 +186,9 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
       // SECURITY: at -vv rclone echoes the remote-control password it read
       // out of the environment. Never let that reach the output pane, the
       // clipboard, or a log file (docs/ARCHITECTURE.md section 5).
-      ui.output->appendPlainText(RedactOutputLine(line, mRcUser, mRcPass));
+      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
+      ui.output->appendPlainText(safe);
+      mLog.appendLine(safe);
     }
   });
 
@@ -225,6 +234,9 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
           ui.progress_info->hide();
         }
+
+        mLog.finish(mJobFinalStatus.isEmpty() ? QStringLiteral("finished")
+                                              : mJobFinalStatus);
 
         updateFinishInfo();
 

@@ -932,6 +932,8 @@
     <property name="title">
      <string>&amp;Help</string>
     </property>
+    <addaction name="openLogFolder"/>
+    <addaction name="separator"/>
     <addaction name="about"/>
     <addaction name="aboutQt"/>
    </widget>
@@ -939,6 +941,14 @@
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <action name="openLogFolder">
+   <property name="text">
+    <string>Open &amp;log folder</string>
+   </property>
+   <property name="toolTip">
+    <string>Open the folder holding the per-job rclone logs</string>
+   </property>
+  </action>
   <action name="about">
    <property name="text">
     <string>&amp;About</string>

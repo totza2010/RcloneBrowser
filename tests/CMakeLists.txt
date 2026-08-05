@@ -19,6 +19,7 @@ rb_add_test(test_utils)
 rb_add_test(test_job_stats)
 rb_add_test(test_task_store)
 rb_add_test(test_lsjson_parser)
+rb_add_test(test_job_log)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

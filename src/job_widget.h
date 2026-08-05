@@ -1,5 +1,6 @@
 #pragma once
 
+#include "job_log.h"
 #include "job_stats.h"
 #include "rc_client.h"
 #include "ui_job_widget.h"
@@ -43,6 +44,8 @@ private:
   QString mRcPass;
   void applyStats(const JobStats &stats);
   void updateTransferBars(const JobStats &stats);
+
+  JobLogWriter mLog;
 
   QStringList mArgs;
   QHash<QString, QLabel *> mActive;

@@ -44,6 +44,7 @@ set(CORE_SOURCE
   job_options.cpp
   list_of_job_options.cpp
   rclone_capabilities.cpp
+  job_log.cpp
   job_stats.cpp
   lsjson_parser.cpp
   rc_client.cpp
@@ -57,6 +58,7 @@ set(CORE_HEADER
   job_options.h
   list_of_job_options.h
   rclone_capabilities.h
+  job_log.h
   job_stats.h
   lsjson_parser.h
   rc_client.h

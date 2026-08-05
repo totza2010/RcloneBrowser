@@ -26,6 +26,10 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
   // diagnostics -- must go through RedactArgs() as well.
   ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
 
+  if (JobLogWriter::isEnabled()) {
+    mLog.begin(QStringLiteral("mount"), uniqueID, RedactArgs(mArgs));
+  }
+
   QString screenInfo;
   if (info == "") {
     screenInfo = QString("%1 on %2").arg(remote).arg(folder);
@@ -136,7 +140,11 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
 
     while (mScriptProcess->canReadLine()) {
       line = mScriptProcess->readLine().trimmed();
-      ui.sOutput->appendPlainText(line);
+      // The script is handed the remote-control password as an argument, so
+      // anything it echoes needs the same treatment as rclone's own output.
+      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
+      ui.sOutput->appendPlainText(safe);
+      mLog.appendLine(QStringLiteral("[script] ") + safe);
     }
   });
 
@@ -244,7 +252,11 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
 
     while (mProcess->canReadLine()) {
       line = mProcess->readLine().trimmed();
-      ui.output->appendPlainText(line);
+      // SECURITY: rclone echoes the remote-control password it read from the
+      // environment at -vv (docs/ARCHITECTURE.md section 5).
+      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
+      ui.output->appendPlainText(safe);
+      mLog.appendLine(safe);
       // we capture RC port here from rclone output
       if (rx.match(line).hasMatch()) {
         line.replace("/", "");
@@ -277,6 +289,8 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
       this, [=](int status, QProcess::ExitStatus) {
         mProcess->deleteLater();
         isRunning = false;
+        mLog.finish(status == 0 ? QStringLiteral("unmounted")
+                                : QStringLiteral("error"));
 
         // we terminate script as well
         if (mScriptRunning) {

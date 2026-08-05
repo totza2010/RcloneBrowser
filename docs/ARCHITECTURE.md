@@ -26,6 +26,7 @@
 | **สร้าง `rbcore` static lib + QTest** | ✅ **เสร็จ** | ลิงก์แค่ `Qt6::Core` `Qt6::Network` — linker บังคับขอบเขตแล้ว |
 | §3.5 progress จาก RC API แทน regex | ✅ **เสร็จ** | `job_stats.*` + `rc_client.*` (L0) · ลบ regex 10 ตัว · V-11/V-12 **PASS** |
 | §3.4 listing ด้วย `lsjson` | ✅ **เสร็จ** | `lsjson_parser.*` (L0) · ลบ regex 2 ตัวสุดท้าย · ทดสอบมือแล้ว |
+| §6.1 log เป็นไฟล์ | ✅ **เสร็จ** | `job_log.*` (L0) · ทดสอบมือแล้ว · ⚠️ **ค้าง: ทบทวนรูปแบบชื่อไฟล์อีกครั้งช่วงท้าย** |
 | E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
@@ -135,6 +136,7 @@ python scripts/check_layers.py
 | `job_stats.h/.cpp` | 230 | L0 — แปลง `core/stats` เป็นตัวเลข | ✅ **ใหม่** |
 | `rc_client.h/.cpp` | 130 | L0 — poll RC ของ job แบบ async | ✅ **ใหม่** |
 | `lsjson_parser.h/.cpp` | 190 | L0 — streaming parser ของ `lsjson` | ✅ **ใหม่** |
+| `job_log.h/.cpp` | 190 | L0 — เขียน log ของ job ลงไฟล์ | ✅ **ใหม่** |
 
 รวม **~1,985 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 6 ชุด (`tests/`)
 

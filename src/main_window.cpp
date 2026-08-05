@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "job_options.h"
+#include "job_log.h"
 #include "job_options_item.h"
 #include "job_widget.h"
 #include "list_of_job_options.h"
@@ -27,6 +28,11 @@
 MainWindow::MainWindow() {
 
   ui.setupUi(this);
+
+  // A job that never finished still leaves a readable file, so age is the
+  // only thing worth going on. Done at startup rather than on a timer: the
+  // directory is small and this is the one moment nothing is writing to it.
+  JobLogWriter::purgeOldLogs();
 
 #ifdef Q_OS_MACOS
   // macOS power saving control object
@@ -656,6 +662,14 @@ MainWindow::MainWindow() {
   QObject::connect(ui.quit, &QAction::triggered, this, [=]() {
     mCloseToTray = false;
     close();
+  });
+
+  QObject::connect(ui.openLogFolder, &QAction::triggered, this, [=]() {
+    const QString dir = JobLogWriter::logDir();
+    // The folder is only created when the first job writes something, so a
+    // fresh installation would otherwise open nothing at all.
+    QDir().mkpath(dir);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
   });
 
   QObject::connect(ui.about, &QAction::triggered, this, [=]() {
