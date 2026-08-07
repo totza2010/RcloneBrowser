@@ -1,20 +1,16 @@
 #pragma once
 
-#include "job_log.h"
-#include "job_stats.h"
-#include "rc_client.h"
+#include "running_job.h"
 #include "ui_job_widget.h"
 
+// A view of a RunningJob. It owns no process, no remote-control client and
+// no log writer -- those belong to the job (L1), which outlives the card and
+// can be watched by anything else that wants to. See docs/API.md S2.
 class JobWidget : public QWidget {
   Q_OBJECT
 
 public:
-  JobWidget(QProcess *process, const QString &info, const QStringList &args,
-            const QString &source, const QString &dest, const QString &uniqueID,
-            const QString &transferMode, const QString &requestId,
-            const QString &rcUser = QString(),
-            const QString &rcPass = QString(), QWidget *parent = nullptr);
-  ~JobWidget();
+  JobWidget(RunningJob *job, QWidget *parent = nullptr);
 
   void showDetails();
   bool isRunning = true;
@@ -34,31 +30,19 @@ signals:
 private:
   Ui::JobWidget ui;
 
-  QProcess *mProcess;
+  RunningJob *mJob;
 
-  // Every figure on the card comes from rclone's remote control. Nothing is
-  // read out of the printed output any more except the line announcing which
-  // port the control ended up on.
-  RcClient *mRc = nullptr;
-  QString mRcUser;
-  QString mRcPass;
   void applyStats(const JobStats &stats);
   void updateTransferBars(const JobStats &stats);
+  void applyFinished(JobState state);
 
-  JobLogWriter mLog;
-
-  QStringList mArgs;
   QHash<QString, QLabel *> mActive;
 
-  QString mUniqueID = "";
-  QString mTransferMode = "";
-  QString mRequestId = "";
-  QString mJobFinalStatus = "";
-
-  // 0 - running, 1 - finished, 2 - error
+  // The sort key the jobs tab uses. Kept in the widget because the leading
+  // digit and the "z" in "zmount" exist only to make the list sort the way
+  // the tab wants -- that is a display decision, not part of the job.
   QString mStatus = "0_transfer_running";
 
-  QDateTime mStartDateTime = QDateTime::currentDateTime();
   void updateStartInfo();
   void updateFinishInfo(qint64 etaSeconds = 0);
 };

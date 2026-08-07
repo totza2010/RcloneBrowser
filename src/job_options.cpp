@@ -127,8 +127,21 @@ QStringList JobOptions::getOptions() const {
     list << "--delete-empty-src-dirs";
   }
 
-  list << "--transfers" << transfers;
-  list << "--checkers" << checkers;
+  // Only when there is a value to pass. An empty one produces "--transfers"
+  // followed by an empty argument, and rclone refuses to start:
+  //
+  //   invalid argument "" for "--transfers" flag: parsing "" as int failed
+  //
+  // The dialog always fills these in, which is why it went unnoticed; a task
+  // built any other way -- headless, or later through the API -- need not.
+  // Leaving the flag out gives rclone's own default, which is what every
+  // other option here already does.
+  if (!transfers.isEmpty()) {
+    list << "--transfers" << transfers;
+  }
+  if (!checkers.isEmpty()) {
+    list << "--checkers" << checkers;
+  }
 
   if (!bandwidth.isEmpty()) {
     list << "--bwlimit" << bandwidth;
@@ -147,10 +160,20 @@ QStringList JobOptions::getOptions() const {
     list << "--max-depth" << QString::number(maxDepth);
   }
 
-  list << "--contimeout" << (connectTimeout + "s");
-  list << "--timeout" << (idleTimeout + "s");
-  list << "--retries" << retries;
-  list << "--low-level-retries" << lowLevelRetries;
+  // Same again -- and the timeouts are worse, because an empty value still
+  // gets its unit appended and becomes the bare string "s".
+  if (!connectTimeout.isEmpty()) {
+    list << "--contimeout" << (connectTimeout + "s");
+  }
+  if (!idleTimeout.isEmpty()) {
+    list << "--timeout" << (idleTimeout + "s");
+  }
+  if (!retries.isEmpty()) {
+    list << "--retries" << retries;
+  }
+  if (!lowLevelRetries.isEmpty()) {
+    list << "--low-level-retries" << lowLevelRetries;
+  }
 
   if (deleteExcluded) {
     list << "--delete-excluded";

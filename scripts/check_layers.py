@@ -41,6 +41,7 @@ GUI_INCLUDE = re.compile(
 )
 UI_MEMBER = re.compile(r"\bui\.|Ui::")
 MARKER = re.compile(r"//\s*(CORE|LAYER|SECURITY|TEST)\s*:\s*(.+)")
+COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 
 # Files declared CORE in docs/ARCHITECTURE.md. Keep in sync with that table --
 # adding a name here is a promise that the file links without Qt6::Widgets.
@@ -55,10 +56,22 @@ CORE_FILES = {
 }
 
 
+def strip_comments(text):
+    """Blank out comments, keeping line numbers intact.
+
+    A comment saying that something used to reach through ui.foo is not a
+    dependency on ui.foo, but counting raw text cannot tell the difference --
+    and writing that sentence down is much of the point of moving code into
+    the core. Newlines survive so marker line numbers still land correctly.
+    """
+    return COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
 def scan(path):
     text = path.read_text(encoding="utf-8", errors="replace")
-    gui = GUI_INCLUDE.findall(text)
-    ui = len(UI_MEMBER.findall(text))
+    code = strip_comments(text)
+    gui = GUI_INCLUDE.findall(code)
+    ui = len(UI_MEMBER.findall(code))
     markers = [(i, m.group(1), m.group(2).strip())
                for i, line in enumerate(text.splitlines(), 1)
                for m in [MARKER.search(line)] if m]

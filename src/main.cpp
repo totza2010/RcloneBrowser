@@ -1,9 +1,14 @@
 #include "main_window.h"
+#include "task_runner.h"
 #include "utils.h"
+
+#include <QTextStream>
 
 #ifdef Q_OS_WIN
 // required by messageHandler
 #include "stdio.h"
+// required by AttachToParentConsole
+#include <windows.h>
 #endif
 
 #ifdef Q_OS_WIN
@@ -38,6 +43,148 @@ void messageHandler(QtMsgType type, const QMessageLogContext &context,
 }
 #endif
 
+namespace {
+
+#ifdef Q_OS_WIN
+// Give the headless run somewhere to print on Windows.
+//
+// The executable is linked as a GUI application (add_executable(... WIN32)),
+// which on Windows means it starts with no standard handles at all. Piping or
+// redirecting gives it some, which is why "--list-tasks > out.txt" works while
+// the same command typed in a terminal prints nothing.
+//
+// Only when there is no handle already: a pipe or a file redirection is a
+// handle the caller chose, and reopening CONOUT$ over it would send the output
+// to the console instead of where it was asked to go.
+void AttachToParentConsole() {
+  const HANDLE existing = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (existing != nullptr && existing != INVALID_HANDLE_VALUE) {
+    return;
+  }
+  if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+    return; // started from a shortcut or a service: nowhere to print
+  }
+  FILE *stream = nullptr;
+  freopen_s(&stream, "CONOUT$", "w", stdout);
+  freopen_s(&stream, "CONOUT$", "w", stderr);
+}
+#endif
+
+// The command line, read straight from argv.
+//
+// QCommandLineParser wants QCoreApplication::arguments(), and the whole point
+// here is deciding which kind of application to create -- so the decision has
+// to be made before either exists.
+struct CommandLine {
+  bool headless = false; // asked for something that needs no window
+  bool listTasks = false;
+  bool help = false;
+  bool dryRun = false;
+  QString task;
+  QString unknownOption;
+};
+
+CommandLine ReadCommandLine(int argc, char *argv[]) {
+  CommandLine cmd;
+
+  for (int i = 1; i < argc; ++i) {
+    const QString arg = QString::fromLocal8Bit(argv[i]);
+
+    if (arg == QLatin1String("--run-task")) {
+      cmd.headless = true;
+      if (i + 1 < argc) {
+        cmd.task = QString::fromLocal8Bit(argv[++i]);
+      }
+    } else if (arg.startsWith(QLatin1String("--run-task="))) {
+      cmd.headless = true;
+      cmd.task = arg.section(QLatin1Char('='), 1);
+    } else if (arg == QLatin1String("--list-tasks")) {
+      cmd.headless = true;
+      cmd.listTasks = true;
+    } else if (arg == QLatin1String("--dry-run")) {
+      cmd.dryRun = true;
+    } else if (arg == QLatin1String("--help") || arg == QLatin1String("-h")) {
+      cmd.headless = true;
+      cmd.help = true;
+    } else if (arg.startsWith(QLatin1Char('-'))) {
+      // Only flagged when something else already asked for the command line;
+      // starting the window with a stray argument stays harmless.
+      cmd.unknownOption = arg;
+    }
+  }
+
+  return cmd;
+}
+
+void PrintUsage(QTextStream &out) {
+  // The real file name, not a guess. The executable is "RcloneBrowser.exe" on
+  // Windows and "rclone-browser" everywhere else (see src/CMakeLists.txt), so
+  // a hardcoded name sends half the readers to a command that does not exist.
+  const QString program =
+      QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+
+  out << program << " [options]\n"
+      << "\n"
+      << "With no options the window opens as usual.\n"
+      << "\n"
+      << "  --list-tasks         list saved tasks as \"<id>  <operation>  "
+         "<name>\"\n"
+      << "  --run-task <name|id> run one saved task and exit with rclone's "
+         "exit code\n"
+      << "  --dry-run            with --run-task, pass --dry-run to rclone\n"
+      << "  -h, --help           this text\n"
+      << "\n"
+      << "Exit codes: rclone's own (1-9) are passed through.\n"
+      << "  64 usage   65 no such task   66 ambiguous name\n"
+      << "  69 rclone would not start   70 rclone did not exit normally\n";
+}
+
+// Everything the headless path needs that the window would otherwise set up.
+//
+// Deliberately short: no single-instance lock, so a task can be run from a
+// terminal or a cron job while the window is open, and no writable-directory
+// check, because that one reports failure through a message box.
+int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
+#ifdef Q_OS_WIN
+  AttachToParentConsole();
+#endif
+
+  QCoreApplication app(argc, argv);
+  app.setApplicationName("rclone-browser");
+  app.setOrganizationName("rclone-browser");
+
+  QTextStream out(stdout);
+  QTextStream err(stderr);
+
+  if (cmd.help) {
+    PrintUsage(out);
+    return TaskRunner::Ok;
+  }
+
+  if (!cmd.unknownOption.isEmpty()) {
+    err << "unknown option: " << cmd.unknownOption << "\n\n";
+    PrintUsage(err);
+    return TaskRunner::UsageError;
+  }
+
+  if (cmd.listTasks) {
+    return TaskRunner::listTasks(out);
+  }
+
+  if (cmd.task.isEmpty()) {
+    err << "--run-task needs the name or id of a task\n\n";
+    PrintUsage(err);
+    return TaskRunner::UsageError;
+  }
+
+  SetRclone(GetSettings()->value("Settings/rclone").toString());
+  SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
+
+  return TaskRunner::runTask(cmd.task, cmd.dryRun, out, err);
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
 
 #ifdef Q_OS_WIN
@@ -45,6 +192,13 @@ int main(int argc, char *argv[]) {
   QLoggingCategory::defaultCategory()->setEnabled(QtDebugMsg, true);
   qInstallMessageHandler(messageHandler);
 #endif
+
+  // Before anything that would need a screen. The window path below opens
+  // message boxes on failure, which is no use to a cron job.
+  const CommandLine cmd = ReadCommandLine(argc, argv);
+  if (cmd.headless) {
+    return RunHeadless(argc, argv, cmd);
+  }
 
   // set locale to UK english
   // would be great to let Qt manage it but it leads to issue like this one:

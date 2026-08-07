@@ -26,6 +26,50 @@ ListOfJobOptions *ListOfJobOptions::getInstance() {
   return SavedJobOptions;
 }
 
+JobOptions *ListOfJobOptions::find(const QUuid &id) const {
+  if (id.isNull()) {
+    return nullptr;
+  }
+  for (JobOptions *task : tasks) {
+    if (task->uniqueId == id) {
+      return task;
+    }
+  }
+  return nullptr;
+}
+
+JobOptions *ListOfJobOptions::find(const QString &id) const {
+  // QUuid::fromString returns a null uuid for anything it cannot read, and a
+  // null uuid never matches a real task, so a malformed id simply finds
+  // nothing rather than needing its own error path.
+  return find(QUuid::fromString(id));
+}
+
+JobOptions *ListOfJobOptions::findByName(const QString &description) const {
+  if (description.isEmpty()) {
+    return nullptr;
+  }
+  for (JobOptions *task : tasks) {
+    if (task->description == description) {
+      return task;
+    }
+  }
+  return nullptr;
+}
+
+int ListOfJobOptions::countByName(const QString &description) const {
+  if (description.isEmpty()) {
+    return 0;
+  }
+  int count = 0;
+  for (JobOptions *task : tasks) {
+    if (task->description == description) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 bool ListOfJobOptions::Persist(JobOptions *jo) {
   bool isNew = !this->tasks.contains(jo);
   if (isNew)

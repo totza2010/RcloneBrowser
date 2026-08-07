@@ -19,6 +19,8 @@ rb_add_test(test_redact_args)
 rb_add_test(test_utils)
 rb_add_test(test_job_stats)
 rb_add_test(test_task_store)
+rb_add_test(test_task_runner)
+rb_add_test(test_job_registry)
 rb_add_test(test_lsjson_parser)
 rb_add_test(test_job_log)
 

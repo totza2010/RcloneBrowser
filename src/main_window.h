@@ -106,7 +106,7 @@ private:
 
   void addEmptyJobsMessage();
 
-  void runItem(JobOptionsListWidgetItem *item, const QString &transferMode,
+  void runItem(JobOptions *jo, const QString &transferMode,
                const QString &requestId, bool dryrun = false);
   void editSelectedTask();
   QIcon mUploadIcon;

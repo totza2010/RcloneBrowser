@@ -203,6 +203,107 @@ private slots:
     QVERIFY(!fileContains(taskFilePath(), QStringLiteral("added by test")));
     QVERIFY(fileContains(taskFilePath(), QStringLiteral("nightly photos")));
   }
+
+  // A task whose numeric fields were never filled in used to build a command
+  // rclone would not start: "--transfers" followed by an empty argument, and
+  // "--contimeout s". The dialog always fills them, so it only showed up once
+  // a task could be built without one -- headless, and later through the API.
+  void getOptionsLeavesOutFlagsWithNoValue() {
+    JobOptions bare;
+    bare.operation = JobOptions::Copy;
+    bare.jobType = JobOptions::Upload;
+    bare.source = "from";
+    bare.dest = "to";
+
+    const QStringList args = bare.getOptions();
+
+    for (int i = 0; i < args.size(); ++i) {
+      QVERIFY2(!args.at(i).isEmpty(),
+               qPrintable(QStringLiteral("empty argument after %1")
+                              .arg(i > 0 ? args.at(i - 1) : QString())));
+    }
+
+    // Left out entirely rather than passed empty, so rclone applies its own
+    // defaults.
+    QVERIFY(!args.contains(QStringLiteral("--transfers")));
+    QVERIFY(!args.contains(QStringLiteral("--checkers")));
+    QVERIFY(!args.contains(QStringLiteral("--contimeout")));
+    QVERIFY(!args.contains(QStringLiteral("s")));
+
+    // What must survive: the operation and both sides of it.
+    QCOMPARE(args.at(0), QStringLiteral("copy"));
+    QCOMPARE(args.at(1), QStringLiteral("from"));
+    QCOMPARE(args.at(2), QStringLiteral("to"));
+  }
+
+  // Finding a task used to be written out as a loop over the tasks list
+  // widget at each call site, which is why nothing without a window could
+  // start a job. docs/API.md S1.
+  void findsByUuid() {
+    ListOfJobOptions *store = ListOfJobOptions::getInstance();
+    QVERIFY(!store->getTasks().isEmpty());
+
+    JobOptions *expected = store->getTasks().first();
+    QCOMPARE(store->find(expected->uniqueId), expected);
+
+    // The id arrives as text from queue.conf and scheduler.conf, so the
+    // string form has to find the same task.
+    QCOMPARE(store->find(expected->uniqueId.toString()), expected);
+  }
+
+  void findsNothingRatherThanTheFirstTask_data() {
+    QTest::addColumn<QString>("id");
+    QTest::newRow("empty") << "";
+    QTest::newRow("not a uuid") << "nightly photos";
+    QTest::newRow("unknown uuid")
+        << "{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}";
+    QTest::newRow("truncated") << "{aaaaaaaa-bbbb-cccc";
+  }
+
+  // A malformed or unknown id must not fall through to something plausible:
+  // the caller would then run a task the user never asked for.
+  void findsNothingRatherThanTheFirstTask() {
+    QFETCH(QString, id);
+    QVERIFY(ListOfJobOptions::getInstance()->find(id) == nullptr);
+    QVERIFY(ListOfJobOptions::getInstance()->find(QUuid::fromString(id)) ==
+            nullptr);
+  }
+
+  void findsByName() {
+    ListOfJobOptions *store = ListOfJobOptions::getInstance();
+    JobOptions *found = store->findByName(QStringLiteral("nightly photos"));
+    QVERIFY(found != nullptr);
+    QCOMPARE(found->description, QStringLiteral("nightly photos"));
+    QVERIFY(store->findByName(QStringLiteral("no such task")) == nullptr);
+    QVERIFY(store->findByName(QString()) == nullptr);
+  }
+
+  // Nothing stops two tasks from carrying the same description, so
+  // "--run-task <name>" has to be able to tell that it is ambiguous instead
+  // of quietly running whichever one comes first.
+  void countsDuplicateNames() {
+    ListOfJobOptions *store = ListOfJobOptions::getInstance();
+    QCOMPARE(store->countByName(QStringLiteral("nightly photos")), 1);
+
+    auto twin = std::make_unique<JobOptions>();
+    twin->description = "nightly photos";
+    twin->uniqueId = QUuid::createUuid();
+    twin->operation = JobOptions::Copy;
+    twin->jobType = JobOptions::Upload;
+    twin->source = "remote:x";
+    twin->dest = "remote:y";
+    QVERIFY(store->Persist(twin.get()));
+
+    QCOMPARE(store->countByName(QStringLiteral("nightly photos")), 2);
+    QCOMPARE(store->countByName(QStringLiteral("no such task")), 0);
+    QCOMPARE(store->countByName(QString()), 0);
+
+    // Both are still reachable by id even though the name no longer picks
+    // one out.
+    QCOMPARE(store->find(twin->uniqueId), twin.get());
+
+    QVERIFY(store->Forget(twin.release()));
+  }
 };
 
 QTEST_MAIN(TestTaskStore)

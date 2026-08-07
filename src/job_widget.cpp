@@ -28,62 +28,46 @@ QString FitProgressText(QProgressBar *bar, QStringList parts) {
 
 } // namespace
 
-JobWidget::JobWidget(QProcess *process, const QString &info,
-                     const QStringList &args, const QString &source,
-                     const QString &dest, const QString &uniqueID,
-                     const QString &transferMode, const QString &requestId,
-                     const QString &rcUser, const QString &rcPass,
-                     QWidget *parent)
-    : QWidget(parent), mProcess(process) {
+JobWidget::JobWidget(RunningJob *job, QWidget *parent)
+    : QWidget(parent), mJob(job) {
   ui.setupUi(this);
 
   updateStartInfo();
 
-  mRcUser = rcUser;
-  mRcPass = rcPass;
-  if (!rcUser.isEmpty() && !rcPass.isEmpty()) {
-    mRc = new RcClient(this);
-    QObject::connect(mRc, &RcClient::statsReceived, this,
-                     &JobWidget::applyStats);
-    // The job itself is unaffected -- it is only the figures on the card that
-    // stop updating. Say so rather than leaving a card frozen at zero.
-    QObject::connect(mRc, &RcClient::unavailable, this, [this]() {
-      ui.overall->hide();
-      ui.progress_info->show();
-      ui.progress_info->setStyleSheet(
-          "QLabel { color: orange; font-weight: bold;}");
-      ui.progress_info->setText("(no progress info)");
-      ui.progress_info->setToolTip(
-          "rclone's remote control did not respond, so progress cannot be "
-          "reported. The transfer itself is unaffected; see the output for "
-          "details.");
-    });
-  }
+  QObject::connect(mJob, &RunningJob::statsUpdated, this,
+                   &JobWidget::applyStats);
+  QObject::connect(mJob, &RunningJob::outputLine, this,
+                   [this](const QString &line) {
+                     ui.output->appendPlainText(line);
+                   });
+  QObject::connect(mJob, &RunningJob::finished, this,
+                   &JobWidget::applyFinished);
 
-  if (mRc) {
-    // Busy until the first reading arrives: rclone has not said how much there
-    // is to do, so a bar sitting at 0% would be claiming to know that nothing
-    // has happened.
-    ui.overall->setRange(0, 0);
-    ui.progress_info->setText("Starting");
-  } else {
-    // Without the remote control there is nothing to fill either of these
-    // with. Showing an empty bar and "(0%)" for the whole job, as this did
-    // before, reads as a transfer that never moves.
+  // The job itself is unaffected -- it is only the figures on the card that
+  // stop updating. Say so rather than leaving a card frozen at zero.
+  QObject::connect(mJob, &RunningJob::progressUnavailable, this, [this]() {
     ui.overall->hide();
-    ui.progress_info->hide();
-  }
+    ui.progress_info->show();
+    ui.progress_info->setStyleSheet(
+        "QLabel { color: orange; font-weight: bold;}");
+    ui.progress_info->setText("(no progress info)");
+    ui.progress_info->setToolTip(
+        "rclone's remote control did not respond, so progress cannot be "
+        "reported. The transfer itself is unaffected; see the output for "
+        "details.");
+  });
 
-  mArgs = GetRcloneCmd(args);
+  // Busy until the first reading arrives: rclone has not said how much there
+  // is to do, so a bar sitting at 0% would be claiming to know that nothing
+  // has happened.
+  ui.overall->setRange(0, 0);
+  ui.progress_info->setText("Starting");
 
-  ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
+  ui.showOutput->setToolTip(mJob->displayCommand().join(" "));
 
-  if (JobLogWriter::isEnabled()) {
-    // args[0] is the rclone subcommand ("copy", "sync", "move"). transferMode
-    // is often empty and describes the queue, not the operation.
-    // The redacted form is what gets written; the log outlives the window.
-    mLog.begin(args.value(0), uniqueID, RedactArgs(mArgs));
-  }
+  const QString source = mJob->description().source;
+  const QString dest = mJob->description().dest;
+  const QString info = mJob->description().info;
 
   ui.source->setText(source);
   ui.source->setCursorPosition(0);
@@ -94,10 +78,6 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
   ui.dest->setToolTip(dest);
 
   QString infoTrimmed;
-
-  mRequestId = requestId;
-  mUniqueID = uniqueID;
-  mTransferMode = transferMode;
 
   if (info.length() > 140) {
     infoTrimmed = info.left(57) + "..." + info.right(80);
@@ -203,97 +183,51 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(RedactArgs(mArgs).join(" "));
+    clipboard->setText(mJob->displayCommand().join(" "));
   });
-
-  QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
-    while (mProcess->canReadLine()) {
-      const QString line = QString(mProcess->readLine()).trimmed();
-
-      // rclone announces the port it settled on. This is the only thing the
-      // job card still takes from the output; every figure on the card comes
-      // from core/stats instead.
-      if (mRc && !mRc->isRunning()) {
-        if (const quint16 port = ParseRcServingPort(line)) {
-          mRc->start(port, mRcUser, mRcPass);
-        }
-      }
-
-      // Our own polling would otherwise dominate the log at -vv and above.
-      if (IsRcPollingNoise(line)) {
-        continue;
-      }
-
-      // SECURITY: at -vv rclone echoes the remote-control password it read
-      // out of the environment. Never let that reach the output pane, the
-      // clipboard, or a log file (docs/ARCHITECTURE.md section 5).
-      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
-      ui.output->appendPlainText(safe);
-      mLog.appendLine(safe);
-    }
-  });
-
-  QObject::connect(
-      mProcess,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
-      this, [=](int status, QProcess::ExitStatus) {
-        if (mRc) {
-          mRc->stop();
-        }
-        mProcess->deleteLater();
-        for (auto label : mActive) {
-          ui.progress->removeRow(label); // deletes the label and its bar
-        }
-        mActive.clear();
-
-        isRunning = false;
-        ui.overall->hide();
-        if (status == 0) {
-          if (iconsColour == "white") {
-            ui.showDetails->setStyleSheet(
-                "QToolButton { border: 0; font-weight: bold;}");
-          } else {
-            ui.showDetails->setStyleSheet(
-                "QToolButton { border: 0; color: black; font-weight: bold;}");
-          }
-          ui.showDetails->setText("  Finished");
-          mJobFinalStatus = "finished";
-          mStatus = "1_transfer_finished";
-          ui.progress_info->hide();
-        } else {
-          ui.showDetails->setStyleSheet(
-              "QToolButton { border: 0; color: red; font-weight: bold;}");
-          ui.showDetails->setText("  Error");
-
-          if (mJobFinalStatus == "stopped") {
-          } else {
-            mJobFinalStatus = "error";
-            mStatus = "2_transfer_error";
-          }
-
-          ui.progress_info->hide();
-        }
-
-        mLog.finish(mJobFinalStatus.isEmpty() ? QStringLiteral("finished")
-                                              : mJobFinalStatus);
-
-        updateFinishInfo();
-
-        ui.cancel->setToolTip("Close");
-        ui.cancel->setStatusTip("Close");
-        emit finished(ui.info->text(), mJobFinalStatus);
-      });
 
   ui.showDetails->setStyleSheet(
       "QToolButton { border: 0; color: green; font-weight: bold;}");
   ui.showDetails->setText("  Running");
 }
 
-JobWidget::~JobWidget() {
-  if (mRc) {
-    mRc->stop();
+void JobWidget::applyFinished(JobState state) {
+  for (auto label : mActive) {
+    ui.progress->removeRow(label); // deletes the label and its bar
   }
+  mActive.clear();
+
+  isRunning = false;
+  ui.overall->hide();
+  ui.progress_info->hide();
+
+  const QString iconsColour =
+      GetSettings()->value("Settings/iconsColour").toString();
+
+  if (state == JobState::Finished) {
+    if (iconsColour == "white") {
+      ui.showDetails->setStyleSheet(
+          "QToolButton { border: 0; font-weight: bold;}");
+    } else {
+      ui.showDetails->setStyleSheet(
+          "QToolButton { border: 0; color: black; font-weight: bold;}");
+    }
+    ui.showDetails->setText("  Finished");
+    mStatus = "1_transfer_finished";
+  } else {
+    ui.showDetails->setStyleSheet(
+        "QToolButton { border: 0; color: red; font-weight: bold;}");
+    ui.showDetails->setText(state == JobState::Stopped ? "  Stopped"
+                                                       : "  Error");
+    mStatus = state == JobState::Stopped ? "2_transfer_stopped"
+                                         : "2_transfer_error";
+  }
+
+  updateFinishInfo();
+
+  ui.cancel->setToolTip("Close");
+  ui.cancel->setStatusTip("Close");
+  emit finished(ui.info->text(), mJob->finalStatus());
 }
 
 void JobWidget::applyStats(const JobStats &stats) {
@@ -417,38 +351,24 @@ void JobWidget::cancel() {
   if (!isRunning) {
     return;
   }
-
-  mJobFinalStatus = "stopped";
-  mStatus = "2_transfer_stopped";
-
-  if (mRc) {
-    mRc->stop();
-  }
-
-  mProcess->kill();
-  mProcess->waitForFinished();
-
-  ui.showDetails->setStyleSheet(
-      "QToolButton { border: 0; color: red; font-weight: bold;}");
-  ui.showDetails->setText("  Stopped");
-  ui.overall->hide();
-  ui.progress_info->hide();
-  ui.cancel->setToolTip("Close");
-  ui.cancel->setStatusTip("Close");
+  // Everything the card shows about the ending is settled in applyFinished(),
+  // which the job emits into once rclone is actually gone. Asking here would
+  // mean two places deciding what "stopped" looks like.
+  mJob->stop();
 }
 
-QString JobWidget::getUniqueID() { return mUniqueID; }
+QString JobWidget::getUniqueID() { return mJob->taskId(); }
 
-QString JobWidget::getRequestId() { return mRequestId; }
+QString JobWidget::getRequestId() { return mJob->requestId(); }
 
-QString JobWidget::getTransferMode() { return mTransferMode; }
+QString JobWidget::getTransferMode() { return mJob->transferMode(); }
 
-QDateTime JobWidget::getStartDateTime() { return mStartDateTime; }
+QDateTime JobWidget::getStartDateTime() { return mJob->startedAt(); }
 
 void JobWidget::updateStartInfo() {
   ui.le_StartInfo->setText(
       "Started:   " +
-      QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
+      QLocale::system().toString(mJob->startedAt(), QLocale::LongFormat));
 }
 
 void JobWidget::updateFinishInfo(qint64 etaSeconds) {
