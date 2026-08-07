@@ -7,7 +7,7 @@
 > เป้าหมายสุดท้าย: โมเดลแบบ qBittorrent — core ตัวเดียว มี 2 หน้าตา
 > `RcloneBrowser` (Qt GUI) และ `rclone-browser-nox` (headless + Web UI)
 >
-> อัปเดตล่าสุด: 2026-08-06
+> อัปเดตล่าสุด: 2026-08-07
 
 ## สถานะความคืบหน้า
 
@@ -31,15 +31,22 @@
 | §6.7 การแสดงผลการ์ด job | ✅ **เสร็จ** | `JobPhase` + `progressText()` ใน `job_stats.*` (L0) · ทดสอบ 15 เคส · **รอทดสอบมือ (V-13)** |
 | §6.4 autocomplete | ✅ **เสร็จ** | `rclone_flags.*` (L0) ถาม `rclone help flags` จริง · `completers.*` (L3) · ครอบ Preferences + Transfer + Mount dialog · ⬜ ยังไม่ทำ: เติมชื่อ remote · **รอทดสอบมือ (V-14, V-15)** |
 | ตรวจ repo ของ rclone เอง (เอาช่องกรอกออก) | ✅ **เสร็จ** | `DetectRcloneRepo()` — binary ไม่ได้บอก repo (module path เหมือนกันทั้งสอง fork) จึงดูจาก backend · ยืนยันกับ binary จริง 3 ตัวแล้ว · **รอทดสอบมือ (V-16)** |
-| E1 `--run-task` headless | ⬜ ยังไม่ทำ | |
+| **ทะเบียนระบบ S1–S12** | 📋 **วางโครงแล้ว** | ดู [`API.md` §12](API.md) — แจกแจงทุกระบบ ลำดับ และของส่งมอบต่อระบบ |
+| S1 Task store → L1 | ✅ **เสร็จ** | `find()` / `findByName()` · `runItem()` รับ `JobOptions*` · แก้บั๊ก `getOptions()` ใส่ flag ค่าว่าง |
+| **E1 `--run-task` headless** | ✅ **เสร็จ** | `task_runner.*` (L1) — test รัน rclone จริง 7 เคส · **รอทดสอบมือ (V-17)** |
+| S2 Job registry → L1 | 🟡 **transfer เสร็จ** | `running_job.*` + `job_registry.*` (L1) · `JobWidget` เหลือแค่แสดงผล · test 7 เคสไม่มี widget · **รอทดสอบมือ (V-18)** |
+| **S13 เก็บทุกอย่างลง DB + ประวัติการรัน** | ⬜ **ใหม่ 2026-08-07** | ประวัติงานหายทุกครั้งที่ปิดโปรแกรม · SQLite ผ่าน `Qt6::Sql` · ดู [`PLAN.md` §6.8](PLAN.md) |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 38/79** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 44/85** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
 ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์แค่ `Qt6::Core` และ
 `Qt6::Network` — **ขอบเขตชั้นถูกบังคับด้วย linker แล้ว ไม่ใช่แค่ข้อตกลง**
 ถ้าใครดึง widget เข้า core จะ build ไม่ผ่านทันที ไม่ต้องรอ `-DNO_GUI=ON`
+
+> **กฎคือ "ไม่ต้องมีหน้าจอ" ไม่ใช่ "สองโมดูลนี้เท่านั้น"** — ตอนทำ S13 จะเพิ่ม
+> `Qt6::Sql` ซึ่งไม่ใช่ GUI จึงไม่ผิดกฎข้อ 1 สิ่งที่ห้ามคือ `Qt6::Widgets` และ `Qt6::Gui`
 
 ```bash
 cmake --build build --config Release          # rbcore + GUI + tests
@@ -66,7 +73,7 @@ ctest --test-dir build -C Release --output-on-failure
 │ L0  rclone invocation    [rbcore]                       │
 │     สร้าง args · spawn process · parse output · log      │
 └─────────────────────────────────────────────────────────┘
-       L0+L1 ลิงก์ได้แค่ Qt6::Core และ Qt6::Network
+       L0+L1 ลิงก์ได้เฉพาะโมดูลที่ไม่ต้องมีหน้าจอ (Core, Network, Sql)
 ```
 
 ### กฎที่ห้ามละเมิด
@@ -142,8 +149,11 @@ python scripts/check_layers.py
 | `lsjson_parser.h/.cpp` | 190 | L0 — streaming parser ของ `lsjson` | ✅ **ใหม่** |
 | `job_log.h/.cpp` | 190 | L0 — เขียน log ของ job ลงไฟล์ | ✅ **ใหม่** |
 | `rclone_flags.h/.cpp` | 195 | L0 — อ่าน flag ที่ rclone ตัวนี้รับจริง | ✅ **ใหม่** |
+| `task_runner.h/.cpp` | 190 | L1 — รัน task โดยไม่มีหน้าต่าง (E1) | ✅ **ใหม่** |
+| `running_job.h/.cpp` | 279 | L1 — งานที่กำลังวิ่ง ถือ process/RC/log | ✅ **ใหม่** |
+| `job_registry.h/.cpp` | 119 | L1 — ทะเบียนงานที่วิ่งอยู่ | ✅ **ใหม่** |
 
-รวม **~2,345 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 8 ชุด (`tests/`)
+รวม **~2,933 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 10 ชุด (`tests/`)
 
 ### 3.2 🟡 แยกได้ด้วยงานเล็ก
 

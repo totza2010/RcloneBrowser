@@ -526,6 +526,148 @@ C:/nonexistent/rclone.exe               flags=0     teldrive=0   -> (unknown)
 
 ---
 
+## รอบที่ 6 — headless (2026-08-06)
+
+### V-17 · `--run-task` ทำงานโดยไม่เปิดหน้าต่าง
+
+marker: `task_runner.cpp` · อัตโนมัติแล้ว: `tests/test_task_runner.cpp` (7 เคส)
+
+นี่คือ **E1** และเป็นของส่งมอบชิ้นแรกของ S1 ([`API.md` §12](API.md))
+
+**ชื่อไฟล์ต่างกันตามแพลตฟอร์ม** — Windows คือ `RcloneBrowser.exe` ส่วน Linux/macOS คือ `rclone-browser`
+(ดู `src/CMakeLists.txt`) และยังไม่ได้อยู่บน PATH จึงต้องเรียกด้วย path เต็ม
+
+```bash
+.uilduild\Release\RcloneBrowser.exe --list-tasks
+.uilduild\Release\RcloneBrowser.exe --run-task "ชื่องาน" --dry-run
+```
+
+```bash
+./rclone-browser --list-tasks
+```
+
+> ⚠️ **บน Windows ไบนารีเป็น GUI subsystem** (`add_executable(... WIN32 ...)`)
+> เชลล์จึง**ไม่รอ**ให้จบก่อนคืน prompt และข้อความอาจโผล่หลัง prompt
+> ถ้าจะอ่าน exit code ต้องบังคับให้รอ เช่น `... --run-task "X" | Out-String`
+> หรือ `Start-Process -Wait` — ดูข้อ 2/3 ข้างล่าง
+
+| exit | ความหมาย |
+|---|---|
+| 0–9 | ของ rclone เอง ส่งผ่านตรงๆ |
+| 64 | ใช้คำสั่งผิด / เป็น mount task |
+| 65 | ไม่มี task ชื่อนั้น |
+| 66 | ชื่อซ้ำหลาย task |
+| 69 | รัน rclone ไม่ได้เลย |
+| 70 | rclone ตายผิดปกติ |
+
+**ที่ test อัตโนมัติครอบแล้ว** (รันจริงกับ rclone จริง): copy สำเร็จ + exit 0 ·
+`--dry-run` ไม่คัดลอกจริง · ไม่เจอ task → 65 · ชื่อซ้ำ → 66 พร้อมรายการ id ·
+mount → 64 · `--list-tasks` มี id ครบ
+
+**ที่ผู้ช่วยรันเองแล้ว** (2026-08-07, Windows 11, rclone v1.72.1 tgdrive build):
+
+| คำสั่ง | ผลที่ได้ | exit |
+|---|---|---|
+| `--help` | ข้อความ usage ครบ | 0 |
+| `--list-tasks` | 3 task พร้อม id และชนิด | 0 |
+| `--run-task "no such task"` | `no task called "no such task"` + ชี้ไป `--list-tasks` | **65** |
+| `--run-task "ef"` (mount task) | `"ef" is a mount task, which runs until it is stopped` | **64** |
+| `--run-task` (ไม่ใส่ชื่อ) | บอกว่าต้องใส่ชื่อ + usage | **64** |
+| `--run-task "_tmp_05Feb2026_193021_main_01"` | รัน rclone จริง → `CRITICAL: Failed to create file system for "main_01:"` (remote ถูกลบไปแล้ว) | **1** (ของ rclone) |
+
+ยืนยันเพิ่ม: หลังคำสั่งจบ **ไม่มี process `RcloneBrowser` ค้าง** (`Get-Process` = 0)
+และบรรทัด `rclone:` ที่พิมพ์ออกมาเป็นคำสั่งที่ผ่าน `RedactArgs()` แล้ว
+
+> ⚠️ ทั้งหมดนี้รันแบบ **pipe** เพราะสภาพแวดล้อมนี้จับ stdout เสมอ
+> **ข้อ 1, 2 จึงยังต้องมีคนดูด้วยตาจริงๆ** ว่าไม่มีหน้าต่างเปิด และข้อความขึ้นโดยไม่ต้อง pipe
+
+**ที่ต้องมีคนลอง:**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | รันในเทอร์มินัล → **ไม่มีหน้าต่างเปิดเลย** | | | |
+| 2 | เห็นข้อความบนหน้าจอ **โดยไม่ต้อง pipe** (Windows: แอปเป็น GUI subsystem จึงต้อง attach console) | | | |
+| 3 | `--list-tasks > out.txt` ได้ไฟล์ครบ (การ attach console ต้องไม่ทับ redirect) | PASS | claude / 2026-08-07 | ยืนยันด้วยการ pipe — ได้ 3 task ครบพร้อม id |
+| 4 | **รันขณะที่เปิดโปรแกรมค้างอยู่** → ทำงานได้ ไม่ติด "already running" | | | |
+| 5 | ตั้งใน Task Scheduler (Windows) หรือ cron (Linux) แล้วเด้งทำงานตามเวลา | | | |
+| 6 | ในคอนเทนเนอร์: `docker exec rclonebrowser rclone-browser --run-task "X"` | | | |
+| 7 | task ที่มี `--rc-pass` หรือ token → บรรทัด `rclone:` ที่พิมพ์ออกมาต้องเป็น `***` | PASS | claude / 2026-08-07 | อัตโนมัติใน `test_job_registry` (`--drive-token=SECRET123` → `***`) |
+| 8 | ปิดโปรแกรมระหว่าง `--run-task` วิ่ง → งาน headless ไม่ได้รับผลกระทบ | | | |
+
+**regression ของ GUI (เพราะ `runItem()` เปลี่ยน signature):**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 9 | ดับเบิลคลิก task ในแท็บ Tasks → รันได้ | | | |
+| 10 | ใส่คิว → คิวเดินจนหมด | | | |
+| 11 | scheduler เด้งตามเวลา → รันได้ | | | |
+| 12 | mount autostart ตอนเปิดโปรแกรม → ยัง mount ให้ | | | |
+
+> **บั๊กที่เจอตอนทำข้อนี้:** `JobOptions::getOptions()` ใส่ `--transfers` `--checkers`
+> `--contimeout` `--timeout` `--retries` `--low-level-retries` **โดยไม่เช็คว่าค่าว่างหรือไม่**
+> ทั้งที่ option อื่นๆ รอบๆ เช็คหมด · task ที่ค่าพวกนี้ว่างจะสร้างคำสั่งที่ rclone ไม่ยอมเริ่ม
+> (`invalid argument "" for "--transfers" flag`) และ `--contimeout` กลายเป็น `"s"` เฉยๆ
+> หน้าต่างกรอกค่าให้เสมอจึงไม่เคยเจอ — แต่ task ที่สร้างจากทางอื่น (headless หรือ API ในอนาคต) เจอแน่
+> แก้แล้วพร้อม test
+
+---
+
+### V-18 · การ์ด job แยกจากตัวงานแล้ว (S2)
+
+marker: `job_widget.h` · อัตโนมัติแล้ว: `tests/test_job_registry.cpp` (7 เคส)
+
+`JobWidget` เคยเป็นเจ้าของ `QProcess` + `RcClient` + `JobLogWriter` แปลว่า
+**งานที่กำลังวิ่ง = widget** ตอนนี้เป็นแค่หน้าจอที่ดู `RunningJob` (L1) อยู่
+การ์ดลดจาก 462 → 382 บรรทัด และ `--rc --rc-addr=localhost:0` ย้ายเข้า `RunningJob`
+
+**ทั้งหมดนี้ต้องทำงานเหมือนเดิมทุกอย่าง** — ไม่ได้ตั้งใจเปลี่ยนพฤติกรรมอะไรเลย
+
+**ที่ผู้ช่วยรันเองแล้ว** (2026-08-07) — `tests/test_job_registry.cpp` รัน rclone จริง
+โดยไม่มี widget ที่ไหนเลย ผ่านครบ 7 เคส:
+
+| เคส | ยืนยันอะไร | เกี่ยวกับข้อ |
+|---|---|---|
+| `runsAJobAndReportsItFinished` | สั่งงาน → `Running` → `Finished` · ไฟล์ถึงปลายทางจริง · `runningCount()` ถูก | 1, 6 |
+| `reportsProgressFromTheRemoteControl` | `statsUpdated` มาจาก `core/stats` และค่าสอดคล้อง | 2 |
+| `aStoppedJobIsNotAnError` | หยุดกลางคัน → `Stopped` **ไม่ใช่** `Error` | **5** |
+| `aJobThatCannotStartStillEnds` | rclone ไม่มีอยู่ → จบเป็น `Error` ไม่ค้าง `Running` | **15** |
+| `theCommandItReportsIsRedacted` | `--drive-token=SECRET123` → `***` | 4 |
+| `refusesToForgetARunningJob` | ลบงานที่ยังวิ่งไม่ได้ | 7 |
+| `listsEverySavedTask` (ใน task runner) | รายการมี id ครบ | — |
+
+> ข้อ 5 และ 15 เป็นสองข้อที่เสี่ยงที่สุดของ S2 และ**ทดสอบอัตโนมัติได้แล้ว**
+> ที่เหลือในตารางข้างล่างเป็นเรื่องของหน้าจอล้วนๆ ซึ่งต้องมีคนดู
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 1 | รัน transfer → การ์ดขึ้น ตัวเลขเดินครบทุกช่อง | | | |
+| 2 | แถบ progress + `Scanning` / `Finishing` ยังทำงาน (V-13 ซ้ำ) | | | |
+| 3 | ช่อง output ไหลตามปกติ · `-vv` ยังเห็น DEBUG | | | |
+| 4 | ปุ่ม copy คำสั่ง → ได้คำสั่งที่ redact แล้ว | | | |
+| 5 | **กด Cancel → ขึ้น `Stopped` ไม่ใช่ `Error`** | PASS (core) | claude / 2026-08-07 | `aStoppedJobIsNotAnError` · เหลือยืนยันว่าการ์ดแสดงถูก |
+| 6 | งานจบเอง exit 0 → `Finished` · exit ไม่ใช่ 0 → `Error` | | | |
+| 7 | ปิดการ์ดที่จบแล้ว → หายไป และตัวนับแท็บ Jobs ถูก | | | |
+| 8 | เรียงตามเวลา / ตามสถานะ ยังถูกต้อง | | | |
+| 9 | ไฟล์ log ในโฟลเดอร์ `logs/` ยังถูกเขียนครบ | | | |
+| 10 | คิวเดินต่อเองเมื่องานก่อนหน้าจบ | | | |
+| 11 | scheduler เด้ง → รันแล้วการ์ดขึ้นถูก | | | |
+| 12 | Stop all jobs ทำงาน | | | |
+| 13 | **mount / stream ยังทำงานเหมือนเดิมทุกอย่าง** (ยังไม่ถูกย้าย = S10) | | | |
+| 14 | ปิดโปรแกรมขณะมีงานวิ่ง → ยังถามยืนยันและปิดได้ตามปกติ | | | |
+
+**เคสที่เพิ่งแก้ (ของเดิมพังมาตลอด):**
+
+| # | เกณฑ์ | ผล | ผู้ทดสอบ / วันที่ | หมายเหตุ |
+|---|---|---|---|---|
+| 15 | ตั้ง path rclone เป็นค่าที่ใช้ไม่ได้ แล้วสั่งรัน task → **การ์ดต้องจบเป็น `Error` ไม่ค้าง `Running`** | PASS (core) | claude / 2026-08-07 | `aJobThatCannotStartStillEnds` · เหลือยืนยันบนการ์ดจริง |
+
+> ข้อ 15 คือบั๊กเก่า: `QProcess` ส่ง `errorOccurred` แล้ว**ไม่ส่ง** `finished`
+> การ์ดจึงค้างที่ Running ตลอดชีวิตโปรแกรม · มองไม่เห็นเลยจนกระทั่งเขียน test ได้
+> ตอนแก้ยังเจอ segfault ต่ออีกชั้น เพราะบน Windows `FailedToStart` ยิงจาก**ใน** `start()`
+> ทำให้ตัวชี้ process เป็น null ก่อนที่ `start()` จะ return
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

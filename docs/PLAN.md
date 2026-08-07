@@ -35,7 +35,8 @@
 | §6.6 | Mount script editor ในหน้าต่าง | ✅ | V-10 ⬜ |
 | §6.7 | การแสดงผลการ์ด job | ✅ | V-13 ⬜ |
 | — | ตรวจ repo ของ rclone เอง (นอกแผนเดิม) | ✅ | V-16 ⬜ |
-| §6.3 E1 | `--run-task` headless | ⬜ **ถัดไป** | |
+| §6.8 | **เก็บทุกอย่างลง DB + ประวัติการรัน** | ⬜ **ใหม่** | = S13 |
+| §6.3 E1 | `--run-task` headless | ✅ | V-17 🟡 core ผ่าน |
 | §6.3 E2 | `rbcore` + `-DNO_GUI=ON` | ⬜ | |
 | §6.3 E3 | HTTP API | ⬜ | |
 | §6.3 E4 | Web UI + Docker ไม่มี X11 | ⬜ | |
@@ -950,6 +951,162 @@ completer->setCompletionMode(QCompleter::PopupCompletion);
 
 ---
 
+## 6.8 เก็บทุกอย่างลงฐานข้อมูล — รวมประวัติงานที่รันไปแล้ว
+
+> เพิ่มเข้าแผน 2026-08-07 · ระบบ **S13** ใน [`API.md` §12](API.md)
+
+### ปัญหา
+
+**ปิดโปรแกรมแล้วประวัติงานหายหมด** — ไม่มีที่ไหนเก็บเลยว่างานไหนเคยรัน เมื่อไหร่ ผลเป็นอย่างไร
+โอนไปกี่ไบต์ ใช้เวลาเท่าไหร่ การ์ดใน UI คือที่เดียวที่ข้อมูลนั้นเคยมีอยู่ และมันอยู่ในหน่วยความจำล้วนๆ
+
+สภาพจริงตอนนี้แยกเป็นสามแบบ:
+
+| ข้อมูล | เก็บที่ไหน | รอดตอนปิดโปรแกรมไหม |
+|---|---|---|
+| Task | `tasks.bin` (QDataStream binary v8) | ✅ |
+| Queue | `queue.conf` (`uniqueId,requestId` บรรทัดละคู่) | ✅ |
+| Scheduler | `scheduler.conf` (`key,value` คั่น comma ค่าเป็น base64) | ✅ |
+| **ประวัติการรัน** | **ไม่มีที่ไหนเลย** | ❌ **หายทั้งหมด** |
+| Log ของแต่ละงาน | `logs/<เวลา>-<operation>-<id ย่อ>.log` | ✅ แต่**ไม่มีอะไรผูกกับ task** |
+
+ข้อสุดท้ายคือหัวใจ: ไฟล์ log **ไม่ได้หาย** แต่ไม่มีอะไรบอกว่าไฟล์ไหนมาจาก task ไหน รันเมื่อไหร่
+สำเร็จหรือไม่ — ต้องเปิดอ่านทีละไฟล์ (ซึ่งตรงกับ `REVISIT` ที่มาร์คไว้ใน `job_log.cpp` พอดี)
+
+### รูปแบบไฟล์ทั้งสามแบบเป็นของทำมือคนละแบบ
+
+`.bin` ผูกกับลำดับฟิลด์ · `.conf` สองไฟล์เป็นรูปแบบที่เขียนเองไม่มี schema version
+ทุกครั้งที่เพิ่มฟิลด์ต้องแก้ตัวอ่าน/เขียนเองทั้งหมด และ **ไม่มีอันไหนรองรับการค้นหา**
+ซึ่งเป็นสิ่งที่ประวัติต้องการเป็นอย่างแรก ("เดือนที่แล้ว task นี้ fail กี่ครั้ง")
+
+### เลือก SQLite ผ่าน QtSql
+
+**ตรวจแล้วว่ามีจริงทั้งสองแพลตฟอร์ม** ไม่ต้องเพิ่ม dependency จากข้างนอก:
+
+| | |
+|---|---|
+| Windows (Qt 6.9.3 msvc2022_64) | `plugins/sqldrivers/qsqlite.dll` มาพร้อม Qt |
+| Alpine (คอนเทนเนอร์) | แพ็กเกจ `qt6-qtbase-sqlite` มีใน repo |
+
+`Qt6::Sql` **ไม่ใช่ GUI** จึงลิงก์เข้า `rbcore` ได้โดยไม่เสียกฎข้อ 1 ของ
+[`ARCHITECTURE.md`](ARCHITECTURE.md) — แต่ต้องบันทึกเพิ่มในทะเบียนว่า core ลิงก์อะไรได้บ้าง
+เพราะปัจจุบันเขียนไว้ว่า "แค่ `Qt6::Core` และ `Qt6::Network`"
+
+ทางเลือกอื่นที่พิจารณาแล้วไม่เอา:
+
+| ทางเลือก | ทำไมไม่ |
+|---|---|
+| JSON หลายไฟล์ | แก้ปัญหา schema แต่ยังค้นหาไม่ได้ และเขียนพร้อมกันสองโปรเซสไม่ปลอดภัย |
+| ฝัง `sqlite3.c` เอง | ได้ควบคุมเต็มที่ แต่เพิ่มโค้ดที่ต้องดูแล ทั้งที่ Qt ให้มาแล้ว |
+| เซิร์ฟเวอร์ DB (Postgres) | เกินความจำเป็นมากสำหรับแอปเดสก์ท็อป และเพิ่มของที่ต้องติดตั้ง |
+
+### ⚠️ ข้อจำกัดที่ต้องออกแบบตั้งแต่ต้น: สองโปรเซสเขียนพร้อมกัน
+
+**E1 จงใจไม่ใส่ single-instance lock ให้ `--run-task`** เพื่อให้สั่งงานจาก cron ได้ขณะเปิดหน้าต่างอยู่
+แปลว่า **หน้าต่างกับ CLI จะเขียนไฟล์ DB เดียวกันพร้อมกัน** ซึ่งเป็นสิ่งที่ต้องออกแบบรับ ไม่ใช่ไปเจอทีหลัง:
+
+- เปิด **WAL mode** (`PRAGMA journal_mode=WAL`) ให้อ่านและเขียนพร้อมกันได้
+- ตั้ง **busy timeout** ไม่ใช่ปล่อยให้ล้มทันทีเมื่อชนกัน
+- transaction ต้องสั้น — อย่าเปิดคาไว้ตลอดอายุงานที่รันเป็นชั่วโมง
+- แต่ละ `QThread` ต้องมี connection ของตัวเอง (ข้อบังคับของ QtSql)
+
+### Log: เก็บไฟล์ไว้เหมือนเดิม แต่ทำดัชนีใน DB
+
+**ไม่ย้ายเนื้อ log เข้า DB** เหตุผล:
+
+- งานที่กำลังวิ่งเขียน log ต่อเนื่อง — เขียนลงไฟล์แล้ว tail ง่ายกว่าและถูกกว่า append เข้า row
+- API จะต้องส่ง log แบบ follow (SSE) ซึ่งอ่านจากไฟล์ตรงๆ ได้เลย
+- log ของงานใหญ่เป็นหลายสิบ MB ยัดลง DB ทำให้ไฟล์ DB บวมและ backup ยาก
+
+สิ่งที่ DB เก็บคือ **ตัวชี้**: `log_path` `log_bytes` ผูกกับ `job_run` — ซึ่งแก้ปัญหาจริง
+(หาไม่เจอว่าไฟล์ไหนของงานไหน) โดยไม่ย้ายข้อมูลที่ไม่ควรย้าย
+**นี่คือคำตอบของ `REVISIT` เรื่องชื่อไฟล์ log ด้วย** — เมื่อมีดัชนีแล้ว ชื่อไฟล์ไม่ต้องอธิบายตัวเอง
+
+### เค้าโครงตาราง (ร่าง)
+
+```sql
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);   -- schema_version
+
+-- Task: เก็บ 46 ฟิลด์เป็น JSON หนึ่งก้อน แล้วดึงเฉพาะที่ต้องค้นออกมาเป็นคอลัมน์
+-- 46 คอลัมน์จะพังทุกครั้งที่เพิ่มฟิลด์ ซึ่งเป็นปัญหาเดียวกับ tasks.bin
+CREATE TABLE task (
+  id          TEXT PRIMARY KEY,      -- uniqueId
+  name        TEXT NOT NULL,         -- description
+  operation   TEXT NOT NULL,
+  source      TEXT, dest TEXT,
+  options     TEXT NOT NULL,         -- JSON ของ JobOptions ทั้งก้อน
+  created_at  INTEGER, updated_at INTEGER
+);
+
+-- ประวัติการรัน -- ของที่ตอนนี้หายทุกครั้งที่ปิดโปรแกรม
+CREATE TABLE job_run (
+  request_id   TEXT PRIMARY KEY,
+  task_id      TEXT REFERENCES task(id) ON DELETE SET NULL,
+  task_name    TEXT,                 -- ชื่อ ณ ตอนรัน task อาจถูกลบไปแล้ว
+  kind         TEXT,                 -- transfer | mount | stream
+  transfer_mode TEXT,                -- task | queue | scheduler | autostart
+  started_at   INTEGER NOT NULL,
+  finished_at  INTEGER,
+  state        TEXT,                 -- running | finished | error | stopped
+  exit_code    INTEGER,
+  bytes        INTEGER, total_bytes INTEGER,
+  transfers    INTEGER, errors INTEGER,
+  log_path     TEXT, log_bytes INTEGER
+);
+CREATE INDEX job_run_by_task ON job_run(task_id, started_at DESC);
+CREATE INDEX job_run_by_time ON job_run(started_at DESC);
+
+CREATE TABLE queue_entry (
+  request_id TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  dry_run    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE schedule (
+  id TEXT PRIMARY KEY, name TEXT, task_id TEXT,
+  active INTEGER, rule TEXT,          -- JSON: daily/cron
+  last_run INTEGER, last_finished INTEGER, last_status TEXT
+);
+```
+
+### การย้ายข้อมูลเดิม
+
+ต้องอ่านของเก่าได้ครบก่อนถือว่าเสร็จ · **ห้ามลบไฟล์เดิม** ให้เปลี่ยนชื่อเป็น `.migrated`
+เพื่อให้ย้อนกลับได้ถ้าเจอปัญหา
+
+```
+tasks.bin      → task
+queue.conf     → queue_entry
+scheduler.conf → schedule
+logs/*.log     → job_run (เท่าที่เดาได้จากชื่อไฟล์ -- ของเก่าจะขาดข้อมูลบางส่วน)
+```
+
+`tests/test_task_store.cpp` มี golden file v8 อยู่แล้ว ใช้เป็นฐานของ test การย้ายได้ทันที
+
+### การตัดข้อมูลเก่า
+
+ประวัติโตไม่มีที่สิ้นสุด ต้องมีนโยบายตั้งแต่แรก ไม่ใช่รอจนไฟล์บวม:
+เก็บ N วัน หรือ N รายการล่าสุด (ตั้งค่าได้) · ลบแถวแล้ว**ลบไฟล์ log ที่ผูกอยู่ด้วย**
+มิฉะนั้นโฟลเดอร์ `logs/` จะกลายเป็นขยะที่ไม่มีดัชนีอีกครั้ง
+
+### ได้อะไรกลับมา
+
+- **ประวัติไม่หาย** — เปิดโปรแกรมมาเห็นว่าเมื่อคืนงานไหนสำเร็จ งานไหนล้ม
+- แท็บ/หน้า **History** ที่ค้นและกรองได้
+- log เปิดจากประวัติได้ตรงๆ ไม่ต้องเดาจากชื่อไฟล์
+- `/api/v1/jobs?history=true` เขียนได้โดยไม่ต้องมีกลไกเก็บของตัวเอง
+- schema version เดียวแทนรูปแบบไฟล์ทำมือสามแบบ
+
+### เสร็จเมื่อ
+
+1. ปิดแล้วเปิดโปรแกรมใหม่ → ประวัติงานที่รันไปแล้วยังอยู่ครบ พร้อมลิงก์ไปไฟล์ log
+2. `tasks.bin` / `queue.conf` / `scheduler.conf` เดิมถูกย้ายเข้า DB ครบ **โดยไม่สูญหาย**
+3. รัน `--run-task` จาก CLI ขณะเปิดหน้าต่างอยู่ → **ทั้งสองเขียนประวัติได้ ไม่ชนกัน**
+4. test ที่ลิงก์แค่ `rbcore` ครอบ: สร้าง/อ่าน/ย้ายข้อมูล/เขียนพร้อมกันสองการเชื่อมต่อ
+
+---
+
 ## 6.5 ลำดับที่แนะนำสำหรับเฟส 2
 
 ```
@@ -958,8 +1115,8 @@ completer->setCompletionMode(QCompleter::PopupCompletion);
 ✅          §6.2 ย้าย Dockerfile เข้า repo
 ✅          §6.7 การแสดงผลการ์ด job
 ✅          §6.4 autocomplete (เหลือ #3 ชื่อ remote)
-⬜ ถัดไป    §6.3 E1 headless --run-task    ~4-5 วัน  + split job_options/utils
-⬜          §6.3 E2 rbcore + JobEngine     ~1.5-2 สัปดาห์
+✅          §6.3 E1 headless --run-task              (S1 ใน API.md §12)
+⬜ ถัดไป    §6.3 E2 rbcore + JobEngine     ~1.5-2 สัปดาห์  = S2 JobRegistry
 ⬜          §6.3 E3 HTTP API + security    ~1.5-2 สัปดาห์
 ⬜          §6.3 E4 Web UI + Docker nox    ~2-3 สัปดาห์  → ปลด noVNC ทิ้ง
 ```
