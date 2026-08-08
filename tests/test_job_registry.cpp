@@ -1,3 +1,4 @@
+#include "job_options.h"
 #include "job_registry.h"
 #include "running_job.h"
 #include "utils.h"
@@ -183,6 +184,77 @@ private slots:
     QSignalSpy ended(job, &RunningJob::finished);
     ended.wait(60000);
     registry.forget(job);
+  }
+
+  // A mount is a different animal and the differences are what this checks.
+  // It uses a remote that does not exist, so rclone fails early -- which is
+  // enough, because what is being tested is the shape of the job, not
+  // whether a filesystem appeared.
+  void aMountIsNotATransfer() {
+    JobRegistry &registry = JobRegistry::instance();
+
+    JobOptions task;
+    task.operation = JobOptions::Mount;
+    task.source = "no-such-remote:";
+    task.dest = mDest->path();
+    task.mountRcPort = "0";
+
+    const QStringList args = task.getMountOptions();
+
+    RunningJob *job = registry.start(
+        JobKind::Mount, args, JobDescription{"test mount", task.source,
+                                             task.dest},
+        QStringLiteral("{task-id}"), QStringLiteral("mount"),
+        QStringLiteral("{mount-request}"));
+
+    // A transfer has "--rc-addr=localhost:0" added for it; a mount carries
+    // whatever the task said and nothing more. Adding a second one would
+    // make rclone refuse to start.
+    const QString shown = job->displayCommand().join(QLatin1Char(' '));
+    QCOMPARE(shown.count(QStringLiteral("--rc-addr")), 1);
+    QVERIFY2(!shown.contains(QStringLiteral("localhost:0 ")),
+             qPrintable(shown));
+
+    QCOMPARE(job->kind(), JobKind::Mount);
+
+    QSignalSpy ended(job, &RunningJob::finished);
+    QVERIFY2(ended.count() > 0 || ended.wait(30000), "the mount never ended");
+
+    // Ending badly is still an error, the same as anywhere else.
+    QCOMPARE(job->state(), JobState::Error);
+    QCOMPARE(job->finalStatus(), QStringLiteral("error"));
+    QCOMPARE(registry.runningCount(JobKind::Mount), 0);
+
+    registry.forget(job);
+  }
+
+  // The word in the log for a mount that ended cleanly has always been
+  // "unmounted", not "finished", and it is worth keeping: they are the same
+  // exit code and very different events.
+  void aMountThatEndsCleanlyReadsAsUnmounted() {
+    JobOptions task;
+    task.operation = JobOptions::Mount;
+    task.source = "remote:";
+    task.dest = "/mnt/x";
+
+    RunningJob mount(JobKind::Mount, task.getMountOptions(),
+                     JobDescription{"m", "remote:", "/mnt/x"},
+                     QStringLiteral("{t}"), QStringLiteral("mount"),
+                     QStringLiteral("{r}"));
+    RunningJob transfer(JobKind::Transfer, QStringList{"copy", "a", "b"},
+                        JobDescription{"t", "a", "b"}, QStringLiteral("{t}"),
+                        QStringLiteral("task"), QStringLiteral("{r2}"));
+
+    // Neither has run, so both are still Running and say nothing.
+    QVERIFY(mount.finalStatus().isEmpty());
+    QVERIFY(transfer.finalStatus().isEmpty());
+
+    // The remote-control flags are the visible difference before either
+    // starts: the transfer gets a port picked for it, the mount does not.
+    QVERIFY(!mount.displayCommand().join(' ').contains(
+        QStringLiteral("--rc-addr=localhost:0")));
+    QVERIFY(transfer.displayCommand().join(' ').contains(
+        QStringLiteral("--rc-addr=localhost:0")));
   }
 
   // Forgetting a running job would leave rclone going with nothing holding

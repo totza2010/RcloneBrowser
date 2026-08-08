@@ -236,6 +236,108 @@ private slots:
     QCOMPARE(args.at(2), QStringLiteral("to"));
   }
 
+  // Mount arguments were assembled in MainWindow::runItem, which is why a
+  // mount could not be started by anything but the window. docs/API.md S10.
+  void getMountOptionsBuildsTheSameCommandTheWindowDid() {
+    JobOptions mount;
+    mount.operation = JobOptions::Mount;
+    mount.jobType = JobOptions::Download;
+    mount.source = "remote:";
+    mount.dest = "X:";
+    mount.mountRcPort = "5572";
+    mount.mountVolume = "my volume";
+    mount.mountCacheLevel = JobOptions::MountCacheLevel::Writes;
+    mount.extra = "--allow-other --dir-cache-time=30s";
+
+    const QStringList args = mount.getMountOptions();
+
+    QCOMPARE(args.at(0), QStringLiteral("mount"));
+    QCOMPARE(args.at(1), QStringLiteral("remote:"));
+    QCOMPARE(args.at(2), QStringLiteral("X:"));
+
+    QVERIFY(args.contains(QStringLiteral("--rc")));
+    QCOMPARE(args.at(args.indexOf(QStringLiteral("--rc-addr")) + 1),
+             QStringLiteral("localhost:5572"));
+    QCOMPARE(args.at(args.indexOf(QStringLiteral("--volname")) + 1),
+             QStringLiteral("my volume"));
+    QCOMPARE(args.at(args.indexOf(QStringLiteral("--vfs-cache-mode")) + 1),
+             QStringLiteral("writes"));
+    QVERIFY(args.contains(QStringLiteral("--allow-other")));
+    QVERIFY(args.contains(QStringLiteral("--dir-cache-time=30s")));
+
+    // SECURITY: the remote-control login goes through the environment. If it
+    // ever reaches the argument list it lands in a saved task and in a log
+    // (docs/ARCHITECTURE.md section 5).
+    QVERIFY(!args.contains(QStringLiteral("--rc-user")));
+    QVERIFY(!args.contains(QStringLiteral("--rc-pass")));
+  }
+
+  // No port set means no remote control, and then unmounting on Windows has
+  // no way to ask rclone to quit.
+  void getMountOptionsLeavesOutTheRemoteControlWithoutAPort() {
+    JobOptions mount;
+    mount.operation = JobOptions::Mount;
+    mount.source = "remote:";
+    mount.dest = "/mnt/x";
+
+    const QStringList args = mount.getMountOptions();
+    QVERIFY(!args.contains(QStringLiteral("--rc")));
+    QVERIFY(!args.contains(QStringLiteral("--rc-addr")));
+    QVERIFY(!args.contains(QStringLiteral("--volname")));
+    QVERIFY(!args.contains(QStringLiteral("--vfs-cache-mode")));
+  }
+
+  // Google Drive in shared mode mounts read-only unless the task says
+  // otherwise -- the one place where two settings interact.
+  void getMountOptionsHandlesTheDriveModes_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<bool>("readOnlyFlag");
+    QTest::addColumn<QString>("expected");
+    QTest::addColumn<bool>("expectReadOnly");
+
+    QTest::newRow("shared") << "shared" << false << "--drive-shared-with-me"
+                            << true;
+    QTest::newRow("shared, writable") << "shared" << true
+                                      << "--drive-shared-with-me" << true;
+    QTest::newRow("trash") << "trash" << false << "--drive-trashed-only"
+                           << false;
+  }
+
+  void getMountOptionsHandlesTheDriveModes() {
+    QFETCH(QString, mode);
+    QFETCH(bool, readOnlyFlag);
+    QFETCH(QString, expected);
+    QFETCH(bool, expectReadOnly);
+
+    JobOptions mount;
+    mount.operation = JobOptions::Mount;
+    mount.source = "gdrive:";
+    mount.dest = "/mnt/x";
+    mount.remoteType = "drive";
+    mount.remoteMode = mode;
+    mount.mountReadOnly = readOnlyFlag;
+
+    const QStringList args = mount.getMountOptions();
+    QVERIFY2(args.contains(expected), qPrintable(args.join(' ')));
+    QCOMPARE(args.contains(QStringLiteral("--read-only")), expectReadOnly);
+  }
+
+  // Quoted values survive the split, which is what lets a path with a space
+  // be passed in the extra options at all.
+  void extraOptionsKeepQuotedValuesTogether() {
+    JobOptions mount;
+    mount.operation = JobOptions::Mount;
+    mount.source = "remote:";
+    mount.dest = "/mnt/x";
+    mount.extra = "--cache-dir \"C:/two words/cache\"\n--umask 002";
+
+    const QStringList args = mount.getMountOptions();
+    QCOMPARE(args.at(args.indexOf(QStringLiteral("--cache-dir")) + 1),
+             QStringLiteral("C:/two words/cache"));
+    QCOMPARE(args.at(args.indexOf(QStringLiteral("--umask")) + 1),
+             QStringLiteral("002"));
+  }
+
   // Finding a task used to be written out as a loop over the tasks list
   // widget at each call site, which is why nothing without a window could
   // start a job. docs/API.md S1.

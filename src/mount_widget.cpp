@@ -2,33 +2,52 @@
 #include "global.h"
 #include "utils.h"
 
-MountWidget::MountWidget(QProcess *process, const QString &remote,
-                         const QString &folder, const QStringList &args,
-                         const QString &script, const QString &uniqueID,
-                         const QString &info, const QString &rcUser,
-                         const QString &rcPass, QWidget *parent)
-    : QWidget(parent), mProcess(process) {
+MountWidget::MountWidget(RunningJob *job, const QString &remote,
+                         const QString &folder, const QString &script,
+                         QWidget *parent)
+    : QWidget(parent), mJob(job) {
   ui.setupUi(this);
 
   updateStartInfo();
 
-  mUniqueID = uniqueID;
-  mRcUser = rcUser;
-  mRcPass = rcPass;
-  QProcess *mScriptProcess = new QProcess();
+  QObject::connect(mJob, &RunningJob::outputLine, this,
+                   [this](const QString &line) {
+                     ui.output->appendPlainText(line);
+                   });
+  QObject::connect(mJob, &RunningJob::scriptOutputLine, this,
+                   [this](const QString &line) {
+                     ui.sOutput->appendPlainText(line);
+                   });
+  QObject::connect(mJob, &RunningJob::finished, this,
+                   &MountWidget::applyFinished);
 
-  mArgs.append(QDir::toNativeSeparators(GetRclone()));
-  mArgs.append(args);
+  // Unmounting can be refused while the mount stays up -- a file on it open
+  // in another program is enough. The card has to go back to saying
+  // "Mounted", because that is what it still is.
+  QObject::connect(mJob, &RunningJob::stopFailed, this,
+                   [this](const QString &reason) {
+                     mUnmountingError = reason;
+                     mStatus = "0_zmount_mounted";
+                     ui.cancel->setEnabled(true);
+                     ui.showDetails->setStyleSheet(
+                         "QToolButton { border: 0; color: red; "
+                         "font-weight: bold;}");
+                     ui.showDetails->setText("  Mounted");
+                     ui.showDetails->setToolTip(
+                         "Unmounting failed - check if mount"
+                         " is not used by other programs");
+                     ui.showDetails->setStatusTip(
+                         "Unmounting failed - check if mount"
+                         " is not used by other programs");
+                   });
 
-  // SECURITY: (docs/ARCHITECTURE.md 5) the remote-control login no longer
-  // reaches mArgs, but users can still put backend tokens in the free-form
-  // option fields. Any new sink for arguments -- log files, API responses,
-  // diagnostics -- must go through RedactArgs() as well.
-  ui.showOutput->setToolTip(RedactArgs(mArgs).join(" "));
+  // SECURITY: (docs/ARCHITECTURE.md 5) the remote-control login never reaches
+  // the argument list, but users can still put backend tokens in the
+  // free-form option fields. Any new sink for arguments -- log files, API
+  // responses, diagnostics -- must go through RedactArgs() as well.
+  ui.showOutput->setToolTip(mJob->displayCommand().join(" "));
 
-  if (JobLogWriter::isEnabled()) {
-    mLog.begin(QStringLiteral("mount"), uniqueID, RedactArgs(mArgs));
-  }
+  const QString info = mJob->description().info;
 
   QString screenInfo;
   if (info == "") {
@@ -135,57 +154,26 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
         }
       });
 
-  QObject::connect(mScriptProcess, &QProcess::readyRead, this, [=]() {
-    QString line;
-
-    while (mScriptProcess->canReadLine()) {
-      line = mScriptProcess->readLine().trimmed();
-      // The script is handed the remote-control password as an argument, so
-      // anything it echoes needs the same treatment as rclone's own output.
-      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
-      ui.sOutput->appendPlainText(safe);
-      mLog.appendLine(QStringLiteral("[script] ") + safe);
-    }
-  });
-
-  QObject::connect(mScriptProcess, &QProcess::started, this,
-                   [=]() { mScriptRunning = true; });
+  QObject::connect(mJob, &RunningJob::scriptFailed, this,
+                   [this](const QString &error) {
+                     ui.l_script->setStyleSheet(
+                         "QLabel { color: red; font-weight: bold;}");
+                     ui.l_script->setText("Process error: " + error);
+                   });
 
   QObject::connect(
-      mScriptProcess, &QProcess::errorOccurred, this,
-      [=](QProcess::ProcessError error) {
-        mScriptRunning = false;
-        QString errorString =
-            QMetaEnum::fromType<QProcess::ProcessError>().valueToKey(error);
-
-        ui.l_script->setStyleSheet("QLabel { color: red; font-weight: bold;}");
-        ui.l_script->setText("Process error: " + errorString);
-      });
-
-  QObject::connect(
-      mScriptProcess,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
-      this, [=](int status, QProcess::ExitStatus) {
-        mScriptRunning = false;
-        mScriptProcess->deleteLater();
+      mJob, &RunningJob::scriptFinished, this, [this, iconsColour](int status) {
         if (status == 0) {
-
           if (iconsColour == "white") {
-
             ui.l_script->setStyleSheet("QLabel {font-weight: bold;}");
             ui.l_script->setText("Finished");
-
           } else {
-
             ui.l_script->setStyleSheet(
                 "QLabel { color: black; font-weight: bold;}");
             ui.l_script->setText("Finished (returned error code: " +
                                  QString::number(status) + ")");
           }
-
         } else {
-
           ui.l_script->setStyleSheet(
               "QLabel { color: red; font-weight: bold;}");
           ui.l_script->setText(
@@ -195,7 +183,7 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(RedactArgs(mArgs).join(" "));
+    clipboard->setText(mJob->displayCommand().join(" "));
   });
 
   QObject::connect(
@@ -245,178 +233,72 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
       emit closed();
     }
   });
-
-  QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
-    QString line;
-    QRegularExpression rx("^.+Serving\\sremote\\scontrol\\son\\s\\S+$");
-
-    while (mProcess->canReadLine()) {
-      line = mProcess->readLine().trimmed();
-      // SECURITY: rclone echoes the remote-control password it read from the
-      // environment at -vv (docs/ARCHITECTURE.md section 5).
-      const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
-      ui.output->appendPlainText(safe);
-      mLog.appendLine(safe);
-      // we capture RC port here from rclone output
-      if (rx.match(line).hasMatch()) {
-        line.replace("/", "");
-        mRcPort = line.right(line.length() - line.lastIndexOf(":") - 1);
-      }
-
-      // we only start custome script when rclone reports RC port
-      if (mRcPort != "0" && mScriptStarted == false) {
-
-        mScriptStarted = true;
-        QStringList sargs;
-
-        sargs << GetRclone();
-        sargs << mRcPort;
-
-        sargs << mRcUser;
-        sargs << mRcPass;
-        sargs << folder;
-
-        mScriptProcess->start(QDir::toNativeSeparators(script), sargs,
-                              QIODevice::ReadOnly);
-      }
-    }
-  });
-
-  QObject::connect(
-      mProcess,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
-      this, [=](int status, QProcess::ExitStatus) {
-        mProcess->deleteLater();
-        isRunning = false;
-        mLog.finish(status == 0 ? QStringLiteral("unmounted")
-                                : QStringLiteral("error"));
-
-        // we terminate script as well
-        if (mScriptRunning) {
-          mScriptProcess->kill();
-        }
-
-        QString info = "Mounted " + ui.info->text();
-        mStatus = "0_zmount_mounted";
-        ui.showDetails->setToolTip("Show details");
-        ui.showDetails->setStatusTip("Show details");
-        QString infoTrimmed;
-        if (info.length() > 140) {
-          infoTrimmed = info.left(57) + "..." + info.right(80);
-        } else {
-          infoTrimmed = info;
-        }
-        ui.info->setText(infoTrimmed);
-        ui.info->setCursorPosition(0);
-
-        if (status == 0) {
-          if (iconsColour == "white") {
-            ui.showDetails->setStyleSheet(
-                "QToolButton { border: 0; wfont-weight: bold;}");
-          } else {
-            ui.showDetails->setStyleSheet(
-                "QToolButton { border: 0; color: black; font-weight: bold;}");
-          }
-          ui.showDetails->setText("  Finished");
-          mStatus = "1_zmount_finished";
-          ui.showDetails->setToolTip("Show details");
-          ui.showDetails->setStatusTip("Show details");
-        } else {
-          ui.showDetails->setStyleSheet(
-              "QToolButton { border: 0; color: red; font-weight: bold;}");
-          ui.showDetails->setText("  Error");
-          mStatus = "1_zmount_erro";
-          ui.showDetails->setToolTip("Show details");
-          ui.showDetails->setStatusTip("Show details");
-        }
-        ui.cancel->setToolTip("Close");
-        ui.cancel->setStatusTip("Close");
-        ui.cancel->setEnabled(true);
-
-        updateFinishInfo();
-        emit finished();
-      });
 }
-
-MountWidget::~MountWidget() {}
 
 void MountWidget::cancel() {
   if (!isRunning) {
     return;
   }
 
-  QString cmd;
+  // Asking, not killing. Whether it worked is reported back through
+  // stopFailed(), because a mount can refuse to go.
   mUnmountingError = "0";
-
-  QProcess *pUnmount = new QProcess();
-
-  QObject::connect(
-      pUnmount,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
-      this, [=](int status, QProcess::ExitStatus) {
-        if (status != 0) {
-          // unmounting failed
-          mUnmountingError = QString::number(status);
-          ui.cancel->setEnabled(true);
-          ui.showDetails->setStyleSheet(
-              "QToolButton { border: 0; color: red; font-weight: bold;}");
-          ui.showDetails->setText("  Mounted");
-          mStatus = "0_zmount_mounted";
-          ui.showDetails->setToolTip("Unmounting failed - check if mount"
-                                     " is not used by other programs");
-          ui.showDetails->setStatusTip("Unmounting failed - check if mount"
-                                       " is not used by other programs");
-
-        } else {
-          mUnmountingError = "0";
-        }
-      });
-
-#if defined(Q_OS_MACOS) || defined(Q_OS_FREEBSD)
-  pUnmount->start("umount", QStringList() << ui.folder->text());
-#else
-#if defined(Q_OS_WIN32)
-  QStringList unmountArgs;
-  unmountArgs << "rc";
-
-  // requires rlone version at least 1.50
-  unmountArgs << "core/quit";
-
-  unmountArgs << "--rc-addr";
-
-  unmountArgs << "localhost:" + mRcPort;
-
-  // The login goes through the environment, same as the mount process itself,
-  // so it does not show up in the process list of this short-lived client.
-  UseRcCredentials(pUnmount, mRcUser, mRcPass);
-
-  //  UseRclonePassword(pUnmount);
-  pUnmount->start(GetRclone(), unmountArgs, QIODevice::ReadOnly);
-
-#else
-  pUnmount->start("fusermount", QStringList() << "-u" << ui.folder->text());
-#endif
-#endif
-
-  //  mProcess->waitForFinished();
+  mJob->stop();
 
   ui.showDetails->setStyleSheet(
       "QToolButton { border: 0; color: green; font-weight: bold;}");
   ui.showDetails->setText("  Unmounting");
   ui.cancel->setEnabled(false);
-  //  ui.cancel->setStatusTip("Close");
 }
 
-QString MountWidget::getUniqueID() { return mUniqueID; }
+void MountWidget::applyFinished(JobState state) {
+  isRunning = false;
+
+  const QString iconsColour =
+      GetSettings()->value("Settings/iconsColour").toString();
+
+  QString info = "Mounted " + ui.info->text();
+  if (info.length() > 140) {
+    info = info.left(57) + "..." + info.right(80);
+  }
+  ui.info->setText(info);
+  ui.info->setCursorPosition(0);
+
+  if (state == JobState::Error) {
+    ui.showDetails->setStyleSheet(
+        "QToolButton { border: 0; color: red; font-weight: bold;}");
+    ui.showDetails->setText("  Error");
+    mStatus = "1_zmount_erro";
+  } else {
+    if (iconsColour == "white") {
+      ui.showDetails->setStyleSheet(
+          "QToolButton { border: 0; wfont-weight: bold;}");
+    } else {
+      ui.showDetails->setStyleSheet(
+          "QToolButton { border: 0; color: black; font-weight: bold;}");
+    }
+    ui.showDetails->setText("  Finished");
+    mStatus = "1_zmount_finished";
+  }
+
+  ui.showDetails->setToolTip("Show details");
+  ui.showDetails->setStatusTip("Show details");
+  ui.cancel->setToolTip("Close");
+  ui.cancel->setStatusTip("Close");
+  ui.cancel->setEnabled(true);
+
+  updateFinishInfo();
+  emit finished();
+}
+
+QString MountWidget::getUniqueID() { return mJob->taskId(); }
 QString MountWidget::getUnmountingError() { return mUnmountingError; }
-QDateTime MountWidget::getStartDateTime() { return mStartDateTime; }
+QDateTime MountWidget::getStartDateTime() { return mJob->startedAt(); }
 
 void MountWidget::updateStartInfo() {
   ui.le_StartInfo->setText(
     "Started:   " +
-    QLocale::system().toString(mStartDateTime, QLocale::LongFormat));
+    QLocale::system().toString(mJob->startedAt(), QLocale::LongFormat));
 }
 
 void MountWidget::updateFinishInfo() {

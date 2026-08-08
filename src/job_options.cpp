@@ -1,5 +1,6 @@
 #include "job_options.h"
 #include "utils.h"
+#include <QRegularExpression>
 #include <qexception.h>
 #include <qlogging.h>
 #ifdef _WIN32
@@ -33,6 +34,30 @@ JobOptions::~JobOptions() {}
  * This needs to change whenever e.g. new options are
  * added to the dialog.
  */
+// Splits the free-text extra options into arguments, respecting quotes.
+//
+// Shared so a mount and a transfer treat the same text the same way. There
+// used to be a regex for each, differing only by a capture group -- the same
+// intention written twice, which is how two things drift apart.
+static QStringList SplitExtraOptions(const QString &extra) {
+  QStringList args;
+  if (extra.trimmed().isEmpty()) {
+    return args;
+  }
+
+  static const QRegularExpression unquotedSpace(
+      R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
+
+  for (const QString &line : extra.split(QLatin1Char('\n'))) {
+    for (QString arg : line.split(unquotedSpace)) {
+      if (!arg.isEmpty()) {
+        args << arg.replace(QLatin1Char('"'), QString());
+      }
+    }
+  }
+  return args;
+}
+
 QStringList JobOptions::getOptions() const {
   QStringList list;
 
@@ -179,18 +204,7 @@ QStringList JobOptions::getOptions() const {
     list << "--delete-excluded";
   }
 
-  if (!extra.isEmpty()) {
-
-    for (auto line : extra.split('\n')) {
-      QRegularExpression re(R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
-
-      for (QString arg : line.split(re)) {
-        if (!arg.isEmpty()) {
-          list << arg.replace("\"", "");
-        }
-      }
-    }
-  }
+  list << SplitExtraOptions(extra);
 
   if (!included.isEmpty()) {
     for (auto line : included.split('\n')) {
@@ -250,6 +264,65 @@ QStringList JobOptions::getOptions() const {
   if (dryRun) {
     list << "--dry-run";
   }
+
+  return list;
+}
+
+QStringList JobOptions::getMountOptions() const {
+  QStringList list;
+
+  list << "mount";
+  list << source;
+  list << dest;
+
+  // Only the address. The login goes through the environment, so it stays out
+  // of the argument list and therefore out of saved tasks and logs.
+  if (!mountRcPort.isEmpty()) {
+    list << "--rc";
+    list << "--rc-addr";
+    list << "localhost:" + mountRcPort;
+  }
+
+  if (remoteType == "drive") {
+    if (remoteMode == "shared") {
+      list << "--drive-shared-with-me";
+      if (!mountReadOnly) {
+        list << "--read-only";
+      }
+    }
+    if (remoteMode == "trash") {
+      list << "--drive-trashed-only";
+    }
+  }
+
+  if (mountReadOnly) {
+    list << "--read-only";
+  }
+
+  if (!mountVolume.trimmed().isEmpty()) {
+    list << "--volname";
+    list << mountVolume;
+  }
+
+  switch (mountCacheLevel) {
+  case MountCacheLevel::Minimal:
+    list << "--vfs-cache-mode"
+         << "minimal";
+    break;
+  case MountCacheLevel::Writes:
+    list << "--vfs-cache-mode"
+         << "writes";
+    break;
+  case MountCacheLevel::Full:
+    list << "--vfs-cache-mode"
+         << "full";
+    break;
+  case MountCacheLevel::Off:
+  case MountCacheLevel::UnknownCacheLevel:
+    break;
+  }
+
+  list << SplitExtraOptions(extra);
 
   return list;
 }

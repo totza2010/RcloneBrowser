@@ -54,9 +54,22 @@ public:
   // Returns false only when the process could not be started at all.
   bool start();
 
-  // Kills rclone. The final status becomes Stopped rather than Error, so a
-  // job the user cancelled does not read as one that failed.
+  // Ends the job. A transfer is killed; a mount is unmounted, which is a
+  // different thing entirely -- see stopFailed().
+  //
+  // The final status becomes Stopped rather than Error, so a job the user
+  // cancelled does not read as one that failed.
   void stop();
+
+  // The script to run once the mount is up, empty for none. Set before
+  // start(). It is handed the rclone path, the remote-control port and
+  // login, and the mount point -- which is why it lives with the job rather
+  // than with the card: a headless mount needs it too.
+  void setMountScript(const QString &script) { mMountScript = script; }
+
+  // The remote-control port rclone settled on, read from its output. Zero
+  // until it is announced, and zero forever when the task set no port.
+  QString rcPort() const { return mRcPort; }
 
   JobKind kind() const { return mKind; }
   QString taskId() const { return mTaskId; }
@@ -91,9 +104,28 @@ signals:
 
   void finished(JobState state);
 
+  // The remote control is up. For a mount this is when the script can run
+  // and when unmounting becomes possible at all.
+  void rcPortDiscovered(const QString &port);
+
+  // Unmounting failed and the mount is still there -- usually because a file
+  // on it is open in another program. A transfer has no equivalent: killing
+  // it always works.
+  void stopFailed(const QString &reason);
+
+  void scriptOutputLine(const QString &line);
+
+  // How the mount script ended. Kept as an exit code and an error string
+  // rather than as text for a label -- what to write on screen is the view's
+  // decision, not the job's.
+  void scriptFinished(int exitCode);
+  void scriptFailed(const QString &error);
+
 private:
   void handleOutput();
   void handleFinished(int exitCode);
+  void startMountScript();
+  void unmount();
 
   const JobKind mKind;
   const QStringList mArgs; // includes the remote-control flags
@@ -108,6 +140,10 @@ private:
   QString mRcUser;
   QString mRcPass;
   JobLogWriter mLog;
+
+  QString mMountScript;
+  QProcess *mScriptProcess = nullptr;
+  QString mRcPort;
 
   JobState mState = JobState::Running;
   bool mStopRequested = false;

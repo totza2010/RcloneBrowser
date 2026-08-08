@@ -2238,6 +2238,32 @@ void MainWindow::autoStartMounts(void) {
   }
 }
 
+// What the quit is still waiting for, in words.
+//
+// The notice used to say only "terminating all processes, please wait", which
+// is no help when the wait never ends: there was no way to tell a slow unmount
+// from a job the application had lost track of. Naming them turns the next
+// stuck quit into a report that says what it was stuck on.
+static QString describeRunningJobs(const QList<StreamWidget *> &streams) {
+  QStringList lines;
+
+  for (const RunningJob *job : JobRegistry::instance().jobs()) {
+    if (!job->isRunning()) {
+      continue;
+    }
+    const QString what = job->kind() == JobKind::Mount
+                             ? QStringLiteral("mount")
+                             : QStringLiteral("transfer");
+    lines << QStringLiteral("  %1: %2").arg(what, job->description().info);
+  }
+
+  for (int i = 0; i < streams.size(); ++i) {
+    lines << QStringLiteral("  stream");
+  }
+
+  return lines.join(QLatin1Char('\n'));
+}
+
 void MainWindow::quitApp(void) {
   // wait for all processes to stop
   if (mQuitInfoDelay == 3) {
@@ -2257,16 +2283,33 @@ void MainWindow::quitApp(void) {
     mQuittingErrorMsgBox = msgBox;
   }
 
-  bool processActive = false;
+  // Whether anything is still running is asked of the registry, which owns
+  // the processes, rather than worked out by reading isRunning off each card.
+  //
+  // Reading the cards is what made quitting hang: a card that had lost track
+  // of its process -- or one still in the layout waiting to be deleted --
+  // reported "running" for ever, and the wait had no way of ever ending. The
+  // registry cannot be out of step with itself, because it is what starts and
+  // ends the processes.
+  //
+  // Streams are still counted the old way: they are not in the registry yet
+  // (docs/API.md S10), and leaving them out would quit while one is playing.
+  bool processActive = JobRegistry::instance().runningCount() > 0;
   bool unmountingFailed = false;
-  int widgetsCount = ui.jobs->count();
+  QList<StreamWidget *> runningStreams;
 
-  // loop over all jobs and clean them
-  for (int i = widgetsCount - 2; i >= 0; i = i - 2) {
-    QWidget *widget = ui.jobs->itemAt(i)->widget();
+  // Closing the cards of jobs that have ended is a separate matter, and a
+  // display one. Walked downwards because closing a card removes two items
+  // from the layout underneath the loop.
+  for (int i = ui.jobs->count() - 2; i >= 0; i = i - 2) {
+    QLayoutItem *item = ui.jobs->itemAt(i);
+    QWidget *widget = item == nullptr ? nullptr : item->widget();
+    if (widget == nullptr) {
+      continue;
+    }
+
     if (auto mount = qobject_cast<MountWidget *>(widget)) {
       if (mount->isRunning) {
-        processActive = true;
         if (mount->getUnmountingError() != "0") {
           // there is failed unmount - quitting fails
           // but loop continues closing what possible
@@ -2276,19 +2319,18 @@ void MainWindow::quitApp(void) {
         emit mount->closed();
       }
     } else if (auto transfer = qobject_cast<JobWidget *>(widget)) {
-      if (transfer->isRunning) {
-        processActive = true;
-      } else {
+      if (!transfer->isRunning) {
         emit transfer->closed();
       }
     } else if (auto stream = qobject_cast<StreamWidget *>(widget)) {
       if (stream->isRunning) {
         processActive = true;
+        runningStreams << stream;
       } else {
         emit stream->closed();
       }
     }
-  };
+  }
 
   if (unmountingFailed) {
     // quitting failed
@@ -2312,11 +2354,26 @@ void MainWindow::quitApp(void) {
 
   if (processActive == false) {
     // no running widget - bye bye - quitting at last
+    if (mQuittingErrorMsgBox != NULL) {
+      mQuittingErrorMsgBox->hide();
+      mQuittingErrorMsgBox = NULL;
+    }
     saveQueueFile();
     saveSchedulerFile();
     QApplication::quit();
   } else {
     // something still running we check again a bit later then
+    if (mQuittingErrorMsgBox != NULL) {
+      const QString waitingFor = describeRunningJobs(runningStreams);
+      mQuittingErrorMsgBox->setText(
+          waitingFor.isEmpty()
+              ? QStringLiteral("Terminating all processes\nbefore quitting, "
+                               "please wait.")
+              : QStringLiteral("Waiting for these to finish before "
+                               "quitting:\n\n%1")
+                    .arg(waitingFor));
+    }
+
     QTimer::singleShot(200, Qt::CoarseTimer, this, SLOT(quitApp()));
     ++mQuitInfoDelay;
   }
@@ -3241,6 +3298,11 @@ bool MainWindow::canClose() {
     // we make close process aware that it is quitting
     mAppQuittingStatus = true;
 
+    // Each attempt counts its own delay. Without this a second attempt never
+    // reaches 3 and never puts up the "terminating" notice, so a slow quit
+    // looks like a frozen window.
+    mQuitInfoDelay = 0;
+
     int widgetsCount = ui.jobs->count();
     for (int i = widgetsCount - 2; i >= 0; i = i - 2) {
       QWidget *widget = ui.jobs->itemAt(i)->widget();
@@ -3732,11 +3794,6 @@ void MainWindow::listTasks() {
 
 } // MainWindow::listTasks()
 
-// LAYER: (VIO-1, docs/ARCHITECTURE.md 3.3) เหลือครึ่งเดียวแล้ว -- ฝั่ง transfer
-// เรียก jo->getOptions() (L1) แล้วส่งให้ JobRegistry ไปเลย (S2 ใน docs/API.md)
-// **แต่ฝั่ง mount ยังประกอบ args เองในนี้ ~30 บรรทัด** ปนกับการอ่านค่าจาก UI
-// เป้าหมาย: ย้ายไป JobOptions::getMountOptions() แล้วให้ mount เดินทาง
-// RunningJob เหมือน transfer -- ทำพร้อม S10
 // Takes the task itself, not the row that happens to be showing it.
 //
 // The body only ever reached through the widget item to call GetData(), so
@@ -3918,77 +3975,8 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
   } else {
     // mount
 
-    QStringList args;
-
-    args << "mount";
-
-    args << jo->source;
-
-    args << jo->dest;
-
-    if (!jo->mountRcPort.isEmpty()) {
-
-      args << "--rc";
-      args << "--rc-addr";
-      args << "localhost:" + jo->mountRcPort;
-
-      // The remote-control login is generated in addNewMount() and handed to
-      // rclone through the environment, so it never appears in the argument
-      // list (and therefore never in a saved task).
-    }
-    if (jo->remoteType == "drive") {
-      if (jo->remoteMode == "shared") {
-        args << "--drive-shared-with-me";
-        if (!jo->mountReadOnly) {
-          args << "--read-only";
-        }
-      }
-      if (jo->remoteMode == "trash") {
-        args << "--drive-trashed-only";
-      }
-    }
-
-    if (jo->mountReadOnly) {
-      args << "--read-only";
-    }
-
-    if (!(jo->mountVolume.trimmed().isEmpty())) {
-      args << "--volname";
-      args << jo->mountVolume;
-    }
-
-    switch (jo->mountCacheLevel) {
-    case JobOptions::MountCacheLevel::Off:
-      break;
-    case JobOptions::MountCacheLevel::Minimal:
-      args << "--vfs-cache-mode";
-      args << "minimal";
-      break;
-    case JobOptions::MountCacheLevel::Writes:
-      args << "--vfs-cache-mode";
-      args << "writes";
-      break;
-    case JobOptions::MountCacheLevel::Full:
-      args << "--vfs-cache-mode";
-      args << "full";
-      break;
-    case JobOptions::MountCacheLevel::UnknownCacheLevel:
-      break;
-    }
-
-    if (!jo->extra.trimmed().isEmpty()) {
-      for (auto line : jo->extra.trimmed().split('\n')) {
-        if (!line.isEmpty()) {
-          QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-          for (QString arg : line.split(re)) {
-            if (!arg.isEmpty()) {
-              args << arg.replace("\"", "");
-            }
-          }
-        }
-      }
-    }
+    // Built by the task, not here -- see JobOptions::getMountOptions().
+    const QStringList args = jo->getMountOptions();
 
     addNewMount(jo->source, jo->dest, jo->remoteType, args, jo->mountScript,
                 jo->uniqueId.toString(), "Mounting task: " + jo->description);
@@ -4659,9 +4647,6 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
 
   QStringList argsFinal = args;
 
-  QProcess *mount = new QProcess(this);
-  mount->setProcessChannelMode(QProcess::MergedChannels);
-
   if (ui.jobs->count() == 2) {
     ui.noJobsAvailable->hide();
   }
@@ -4684,19 +4669,18 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
 
   argsFinal << GetRcloneConf();
 
-  // Generate the remote-control login here rather than while building the
-  // arguments, so it is never written into a saved task and never reaches the
-  // command line. MountWidget needs it for the mount script and for the
-  // "core/quit" unmount call.
-  QString rcUser;
-  QString rcPass;
-  if (argsFinal.contains("--rc")) {
-    rcUser = GenerateRcCredential(10);
-    rcPass = GenerateRcCredential(22);
-  }
+  // The remote-control login is generated inside the job, along with
+  // everything else that has to stay out of the argument list and therefore
+  // out of a saved task. See docs/API.md S10.
+  const QString screenInfo =
+      info.isEmpty() ? QString("%1 on %2").arg(remote, folder) : info;
 
-  auto widget = new MountWidget(mount, remote, folder, argsFinal, script,
-                                uniqueId, info, rcUser, rcPass);
+  RunningJob *job = JobRegistry::instance().start(
+      JobKind::Mount, argsFinal, JobDescription{screenInfo, remote, folder},
+      uniqueId, QStringLiteral("mount"), QUuid::createUuid().toString());
+  job->setMountScript(script);
+
+  auto widget = new MountWidget(job, remote, folder, script);
 
   auto line = new QFrame();
   line->setFrameShape(QFrame::HLine);
@@ -4741,6 +4725,10 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
     widget->deleteLater();
     delete line;
 
+    // Same as a transfer card: the job outlives the card, so closing the
+    // card is what says the job is no longer wanted.
+    JobRegistry::instance().forget(job);
+
     int _jobsCount = (ui.jobs->count() - 2) / 2;
     ui.buttonSortByTime->setEnabled(_jobsCount > 1);
     ui.buttonSortByStatus->setEnabled(_jobsCount > 1);
@@ -4755,9 +4743,6 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
     setTasksButtons();
   });
 
-  UseRclonePassword(mount);
-  UseRcCredentials(mount, rcUser, rcPass);
-  mount->start(GetRclone(), argsFinal, QIODevice::ReadOnly);
 
   ui.buttonStopAllJobs->setEnabled(mTransferJobCount != 0);
   ui.buttonCleanNotRunning->setEnabled(mJobCount != (ui.jobs->count() - 2) / 2);

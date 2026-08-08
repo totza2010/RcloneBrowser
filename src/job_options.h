@@ -94,6 +94,18 @@ public:
   }
   QStringList getOptions() const;
 
+  // The argument list for a mount, built the same way getOptions() builds one
+  // for a transfer.
+  //
+  // This lived in MainWindow::runItem, where it was the last half of VIO-1:
+  // thirty lines of rclone arguments assembled in the window, which meant a
+  // mount could not be started by anything else. See docs/API.md S10.
+  //
+  // The remote-control login is not in here on purpose. It goes through the
+  // environment, so it never reaches the argument list and therefore never
+  // reaches a saved task or a log (docs/ARCHITECTURE.md section 5).
+  QStringList getMountOptions() const;
+
   bool operator==(const JobOptions &other) const {
     return uniqueId == other.uniqueId;
   }
