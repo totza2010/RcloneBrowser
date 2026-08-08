@@ -387,7 +387,7 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S7** | Job logs | `job_log.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S8** | Capabilities | `rclone_capabilities.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S9** | Flags / repo | `rclone_flags.*` (L0) | — | — | — | ✅ **มีแล้ว** |
-| **S10** | Mounts / Streams | `mount_widget` / `stream_widget` | ชนิดหนึ่งของ `RunningJob` | S2 | M | ⬜ **ถัดไป** |
+| **S10** | Mounts / Streams | `mount_widget` / `stream_widget` | ชนิดหนึ่งของ `RunningJob` | S2 | M | ✅ **mount เสร็จ** · stream ไม่ย้าย (มีเหตุผล) |
 | **S13** | **Store + ประวัติ** | 3 รูปแบบไฟล์ทำมือ · ประวัติ**ไม่มีเลย** | SQLite ผ่าน `Qt6::Sql` (L1) | S2 | **L** | ⬜ ดู [`PLAN.md` §6.8](PLAN.md) |
 | **S11** | HTTP API | — | `rbapi` (L2) | S1–S6, S10 | L | ⬜ |
 | **S12** | Web UI | — | static (L3) | S11 | L | ⬜ |
@@ -688,6 +688,54 @@ mount และ stream คือ `RunningJob` คนละชนิด ไม่
 - `MountWidget` / `StreamWidget` เลิกถือ `QProcess`
 - unmount ผ่าน RC `core/quit` ย้ายเข้า `RunningJob::stop()` ตามชนิด
 - **stream ไม่เปิดทาง API** (สั่ง player บนเครื่องที่รันแอป ไม่มีความหมายจากเบราว์เซอร์)
+
+---
+
+#### ความคืบหน้า (2026-08-07)
+
+| ขั้น | สถานะ |
+|---|---|
+| `JobOptions::getMountOptions()` (L1) — ย้าย 73 บรรทัดออกจาก `MainWindow::runItem` | ✅ |
+| `SplitExtraOptions()` ใช้ร่วมกันระหว่าง transfer กับ mount | ✅ เดิมเป็น regex คนละตัวที่ต่างกันแค่ capture group |
+| **VIO-1 ปิดสนิท** — ไม่มี `LAYER:` marker เหลือในโค้ดแล้ว | ✅ |
+| test ของ args ของ mount (6 เคส ไม่ต้องใช้ rclone) | ✅ |
+| mount เดินทาง `RunningJob` | ✅ `mount_widget.cpp` 428 → 310 บรรทัด · `addNewMount` −107 |
+| `stop()` ของ mount = unmount ไม่ใช่ kill · `stopFailed` เมื่อ unmount ไม่สำเร็จ | ✅ |
+| mount script ย้ายเข้า `RunningJob` (headless ก็ต้องรัน) | ✅ |
+| regex อ่าน RC port ของ mount ที่เขียนซ้ำ → ใช้ `ParseRcServingPort` (L0) ตัวเดียว | ✅ |
+| stream เดินทาง `RunningJob` | ❌ **ไม่ทำ** ดูเหตุผลข้างล่าง |
+
+**mount ย้ายเสร็จแล้ว (2026-08-07)** — สิ่งที่เจอระหว่างทาง:
+
+| เจอ | รายละเอียด |
+|---|---|
+| `mount_widget.cpp` มี regex อ่าน RC port **ของตัวเอง** | `^.+Serving\sremote\scontrol\son\s\S+$` ทั้งที่ `ParseRcServingPort()` อยู่ใน L0 และมี test อยู่แล้ว — เศษของ VIO-2 ที่ตกค้าง |
+| `waitForStarted()` หมุน event loop | บรรทัดแรกๆ ของ output อาจถูก emit ก่อนที่ตัวแสดงผลจะต่อ signal ทัน · เอาออกแล้ว ใช้ `errorOccurred` แทนซึ่งไม่ต้องรอ |
+| mount ห้ามได้ `--rc-addr=localhost:0` | port ของ mount อยู่ใน task เพราะการ unmount บน Windows ต้องยิงไปที่ port เดิมทุกครั้ง — ไม่มีใครอ่านประกาศย้อนหลังได้หลังรีสตาร์ท · ใส่เพิ่มจะทำให้ rclone ไม่ยอมเริ่ม |
+
+**ทำไม stream ไม่ย้าย** — การย้ายนี้**ทดสอบอัตโนมัติไม่ได้เลยในเครื่องนี้**
+mount ต้องมี WinFsp + remote จริง + drive letter ว่าง ต่างจาก transfer ที่
+`test_job_registry` รัน rclone จริงได้ · ความเสี่ยงจึงลดด้วย test ไม่ได้ ต้องให้คนลองเท่านั้น
+`RunningJob` แตกพฤติกรรมตาม kind แล้ว:
+
+```
+Transfer : + --rc --rc-addr=localhost:0 · poll stats · capture output · log
+Mount    : args พก --rc-addr ของตัวเองมา (หรือไม่มีเลย) · ไม่ poll stats
+           · capture output · log · รัน script เมื่อ RC ขึ้น
+           · stop() = unmount ไม่ใช่ kill → ล้มเหลวได้ → stopFailed
+```
+
+`rclone rc core/quit` (Windows) · `umount` (macOS/FreeBSD) · `fusermount -u` (อื่นๆ)
+
+⚠️ **ทดสอบอัตโนมัติในเครื่องนี้ไม่ได้** — mount ต้องมี WinFsp + remote จริง + drive letter
+test ที่เขียนได้ครอบแค่ *รูปร่าง* ของ job (ไม่มี `--rc-addr` ซ้ำ · จบเป็น error ได้ · คำว่า
+`unmounted` ต่างจาก `finished`) ไม่ใช่ว่า filesystem ขึ้นจริง — **V-20 ต้องมีคนลอง**
+
+**stream อาจไม่ควรย้ายเลย** — `rclone cat` ต่อท่อเข้า player ด้วย
+`setStandardOutputProcess()` แปลว่า **สองโปรเซส** ไม่มี output ของตัวเอง ไม่มี stats ไม่มี log
+ถ้ายัดเข้า `RunningJob` จะได้ branch ที่สามใน L1 เพื่อแลกกับอะไรที่ API ใช้ไม่ได้อยู่ดี
+(§6 ตัดสินไปแล้วว่า stream ไม่เปิดทาง API เพราะสั่ง player บนเครื่องที่รันแอป)
+**ข้อเสนอ: ปล่อย stream ไว้ตามเดิม** แล้วบันทึกเหตุผลไว้ ไม่ใช่ทำครึ่งๆ
 
 ---
 

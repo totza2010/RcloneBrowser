@@ -33,8 +33,9 @@
 | ตรวจ repo ของ rclone เอง (เอาช่องกรอกออก) | ✅ **เสร็จ** | `DetectRcloneRepo()` — binary ไม่ได้บอก repo (module path เหมือนกันทั้งสอง fork) จึงดูจาก backend · ยืนยันกับ binary จริง 3 ตัวแล้ว · **รอทดสอบมือ (V-16)** |
 | **ทะเบียนระบบ S1–S12** | 📋 **วางโครงแล้ว** | ดู [`API.md` §12](API.md) — แจกแจงทุกระบบ ลำดับ และของส่งมอบต่อระบบ |
 | S1 Task store → L1 | ✅ **เสร็จ** | `find()` / `findByName()` · `runItem()` รับ `JobOptions*` · แก้บั๊ก `getOptions()` ใส่ flag ค่าว่าง |
-| **E1 `--run-task` headless** | ✅ **เสร็จ** | `task_runner.*` (L1) — test รัน rclone จริง 7 เคส · **รอทดสอบมือ (V-17)** |
-| S2 Job registry → L1 | 🟡 **transfer เสร็จ** | `running_job.*` + `job_registry.*` (L1) · `JobWidget` เหลือแค่แสดงผล · test 7 เคสไม่มี widget · **รอทดสอบมือ (V-18)** |
+| **E1 `--run-task` headless** | ✅ **เสร็จ** | `task_runner.*` (L1) — test รัน rclone จริง 7 เคส · V-17 **ผ่านเบื้องต้น** |
+| S2 Job registry → L1 | 🟡 **transfer เสร็จ** | `running_job.*` + `job_registry.*` (L1) · `JobWidget` เหลือแค่แสดงผล · test 7 เคสไม่มี widget · V-18 **ผ่านเบื้องต้น** |
+| S10 Mounts / Streams | ✅ **mount เสร็จ** | `getMountOptions()` (L1) · **VIO-1 ปิดสนิท** (V-19 ผ่านเบื้องต้น) · mount เดินทาง `RunningJob` แล้ว · stream ไม่ย้าย (มีเหตุผลใน `API.md`) · V-20 **ผ่านเบื้องต้น** (แก้อาการปิดโปรแกรมค้างไปด้วย) |
 | **S13 เก็บทุกอย่างลง DB + ประวัติการรัน** | ⬜ **ใหม่ 2026-08-07** | ประวัติงานหายทุกครั้งที่ปิดโปรแกรม · SQLite ผ่าน `Qt6::Sql` · ดู [`PLAN.md` §6.8](PLAN.md) |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
@@ -80,7 +81,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 1. **L0/L1 ห้าม `#include` อะไรก็ตามจาก QtWidgets/QtGui** — บังคับด้วย target `rbcore` ที่ไม่ลิงก์ `Qt6::Widgets` · ปลายทางคือ `cmake -DNO_GUI=ON` build ทั้งแอปได้
 2. **L0/L1 ห้ามเปิด dialog หรือ `QMessageBox`** — ต้องคืน error กลับขึ้นไปให้ client ตัดสินใจแทน
-3. **L3 ห้ามสร้าง rclone args เอง** — ต้องเรียกผ่าน L0 เท่านั้น (ตอนนี้ยังละเมิดอยู่ ดู §4)
+3. **L3 ห้ามสร้าง rclone args เอง** — ต้องเรียกผ่าน L0/L1 เท่านั้น · ✅ **ไม่มีการละเมิดแล้ว** (VIO-1 ปิด 2026-08-07) — transfer ใช้ `getOptions()` · mount ใช้ `getMountOptions()`
 4. **การสื่อสารขึ้นบน ใช้ signal เท่านั้น** — L1 ห้ามรู้จักชนิดของ client
 5. **ทุกอย่างที่ออกจาก L0/L1 ต้องผ่าน `RedactArgs()`** — เพราะ args มี `--rc-pass` (ดู §5)
 
@@ -150,7 +151,7 @@ python scripts/check_layers.py
 | `job_log.h/.cpp` | 190 | L0 — เขียน log ของ job ลงไฟล์ | ✅ **ใหม่** |
 | `rclone_flags.h/.cpp` | 195 | L0 — อ่าน flag ที่ rclone ตัวนี้รับจริง | ✅ **ใหม่** |
 | `task_runner.h/.cpp` | 190 | L1 — รัน task โดยไม่มีหน้าต่าง (E1) | ✅ **ใหม่** |
-| `running_job.h/.cpp` | 279 | L1 — งานที่กำลังวิ่ง ถือ process/RC/log | ✅ **ใหม่** |
+| `running_job.h/.cpp` | 411 | L1 — งานที่กำลังวิ่ง ถือ process/RC/log/script | ✅ **ใหม่** |
 | `job_registry.h/.cpp` | 119 | L1 — ทะเบียนงานที่วิ่งอยู่ | ✅ **ใหม่** |
 
 รวม **~2,933 บรรทัดอยู่ใน `rbcore`** และมี unit test ครอบแล้ว 10 ชุด (`tests/`)
@@ -183,7 +184,7 @@ python scripts/check_layers.py
 
 | # | จุด | อาการ | แก้ตอน |
 |---|---|---|---|
-| VIO-1 | `main_window.cpp:3880-3900` | L3 สร้าง rclone args เอง (ส่วนสุ่ม RC credential ย้ายออกไป `addNewMount()` แล้ว) | E2 |
+| ~~VIO-1~~ | ~~`main_window.cpp`~~ | ~~L3 สร้าง rclone args เอง~~ | ✅ **แก้แล้ว 2026-08-07** — transfer เรียก `getOptions()` (S2) · mount เรียก `getMountOptions()` (S10) · ไม่มี `LAYER:` marker เหลือในโค้ดแล้ว |
 | ~~VIO-2~~ | ~~`job_widget.cpp`~~ | ~~L3 ทำหน้าที่ parse output~~ | ✅ **แก้แล้ว** — regex ทั้ง 10 ตัวถูกลบ เหลือแค่อ่านบรรทัดประกาศ port |
 | ~~VIO-3~~ | ~~`mount_widget.cpp`~~ | ~~L3 อ่าน credential กลับจาก args ด้วย regex~~ | ✅ **แก้แล้ว** — credential ส่งผ่าน constructor และ env |
 | ~~VIO-4~~ | ~~`item_model.cpp`~~ | ~~สร้าง args ของ `lsd`/`lsl` ในชั้น model~~ | ✅ **แก้แล้ว** — parse ย้ายไป `lsjson_parser` (L0) |
