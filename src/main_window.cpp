@@ -1579,8 +1579,6 @@ MainWindow::MainWindow() {
 
       if (button == QMessageBox::Yes) {
 
-        mQueueCount = mQueueCount + items.count();
-
         foreach (auto i, items) {
           JobOptionsListWidgetItem *item =
               static_cast<JobOptionsListWidgetItem *>(i);
@@ -1600,10 +1598,13 @@ MainWindow::MainWindow() {
             jobIcon = mUploadIcon;
           }
 
-          JobOptionsListWidgetItem *newitem = new JobOptionsListWidgetItem(
-              jo, jobIcon, jo->description, QUuid::createUuid().toString());
+          // The queue gives the run its id, because the queue is what has to
+          // be able to tell two runs of the same task apart afterwards.
+          const QString requestId =
+              JobQueue::instance().enqueue(jo->uniqueId.toString());
 
-          ui.queueListWidget->addItem(newitem);
+          ui.queueListWidget->addItem(new JobOptionsListWidgetItem(
+              jo, jobIcon, jo->description, requestId));
         }
 
         if (ui.queueListWidget->count() > 0) {
@@ -1611,8 +1612,6 @@ MainWindow::MainWindow() {
         } else {
           ui.buttonPurgeQueue->setEnabled(false);
         }
-        // save new queue to file
-        saveQueueFile();
         ui.queueListWidget->setFocus();
       } else {
         // user pressed No
