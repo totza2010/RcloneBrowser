@@ -145,6 +145,9 @@ rclone lsjson --stat tgdrive_main_01:some/file > tests/fixtures/teldrive_stat.js
 
 **ข้อจำกัดของ teldrive ที่ต้องจำ** (จาก `backend features` จริง):
 - `Hashes: []` → `rclone check` ต้องใช้ `--size-only`, `cryptcheck` ใช้ไม่ได้
+  ⚠️ **ไม่ได้แปลว่า teldrive ไม่มี hash** — มันคำนวณ blake3 (`--teldrive-hash-enabled`
+  ค่าเริ่มต้น true) และเก็บไว้ในฟิลด์ `hash` ของ API แต่ไม่ได้ประกาศให้ rclone
+  แปลว่า `rclone check` เทียบได้แค่ขนาด และจับไฟล์ที่ขนาดถูกแต่เนื้อไม่ครบไม่ได้ (ดู `PLAN.md` §6.9)
 - `DuplicateFiles: false` → dedupe ใช้ไม่ได้
 - `ListR: false` → listing แบบ recursive ช้ามาก
 - `Precision: 1s` → sync ข้าม backend ต้องใช้ `--modify-window 1s`

@@ -7,7 +7,7 @@
 > เป้าหมายสุดท้าย: โมเดลแบบ qBittorrent — core ตัวเดียว มี 2 หน้าตา
 > `RcloneBrowser` (Qt GUI) และ `rclone-browser-nox` (headless + Web UI)
 >
-> อัปเดตล่าสุด: 2026-08-07
+> อัปเดตล่าสุด: 2026-08-08
 
 ## สถานะความคืบหน้า
 
@@ -23,7 +23,7 @@
 | §3.6 Capability registry | ✅ **เสร็จ** | `rclone_capabilities.*` (L0) — รอทดสอบ (V-09) |
 | §6.6 Mount script editor ในหน้าต่าง | ✅ **เสร็จ** | `script_editor_dialog.*` (L3) — รอทดสอบ (V-10) |
 | แยก `pch_core.h` | ✅ **เสร็จ** | QtCore + QtNetwork เท่านั้น |
-| **สร้าง `rbcore` static lib + QTest** | ✅ **เสร็จ** | ลิงก์แค่ `Qt6::Core` `Qt6::Network` — linker บังคับขอบเขตแล้ว |
+| **สร้าง `rbcore` static lib + QTest** | ✅ **เสร็จ** | ลิงก์ `Qt6::Core` `Qt6::Network` `Qt6::Sql` — ไม่มี GUI · linker บังคับขอบเขตแล้ว |
 | §3.5 progress จาก RC API แทน regex | ✅ **เสร็จ** | `job_stats.*` + `rc_client.*` (L0) · ลบ regex 10 ตัว · V-11/V-12 **PASS** |
 | §3.4 listing ด้วย `lsjson` | ✅ **เสร็จ** | `lsjson_parser.*` (L0) · ลบ regex 2 ตัวสุดท้าย · ทดสอบมือแล้ว |
 | §6.1 log เป็นไฟล์ | ✅ **เสร็จ** | `job_log.*` (L0) · ทดสอบมือแล้ว · ⚠️ **ค้าง: ทบทวนรูปแบบชื่อไฟล์อีกครั้งช่วงท้าย** |
@@ -36,18 +36,22 @@
 | **E1 `--run-task` headless** | ✅ **เสร็จ** | `task_runner.*` (L1) — test รัน rclone จริง 7 เคส · V-17 **ผ่านเบื้องต้น** |
 | S2 Job registry → L1 | 🟡 **transfer เสร็จ** | `running_job.*` + `job_registry.*` (L1) · `JobWidget` เหลือแค่แสดงผล · test 7 เคสไม่มี widget · V-18 **ผ่านเบื้องต้น** |
 | S10 Mounts / Streams | ✅ **mount เสร็จ** | `getMountOptions()` (L1) · **VIO-1 ปิดสนิท** (V-19 ผ่านเบื้องต้น) · mount เดินทาง `RunningJob` แล้ว · stream ไม่ย้าย (มีเหตุผลใน `API.md`) · V-20 **ผ่านเบื้องต้น** (แก้อาการปิดโปรแกรมค้างไปด้วย) |
-| **S13 เก็บทุกอย่างลง DB + ประวัติการรัน** | ⬜ **ใหม่ 2026-08-07** | ประวัติงานหายทุกครั้งที่ปิดโปรแกรม · SQLite ผ่าน `Qt6::Sql` · ดู [`PLAN.md` §6.8](PLAN.md) |
+| **S13 เก็บทุกอย่างลง DB + ประวัติการรัน** | ✅ **เสร็จ** | `database.*` (schema v2) + `run_history.*` + `config_store.*` (L0/L1) + แท็บย่อย History `history_widget.*` (L3) · task/queue/scheduler ย้ายเข้า DB แล้ว ไฟล์เดิมเปลี่ยนชื่อเป็น `.migrated` · ไม่มีไดรเวอร์ SQLite ก็ยังใช้ไฟล์เดิมได้ · test 26 เคส · V-21 |
+| **S14 Extension เฉพาะ backend** | ⬜ **ใหม่ 2026-08-08** | teldrive integrity check — core ห้ามรู้จักชื่อ backend · ดู [`PLAN.md` §6.9](PLAN.md) |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 44/85** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 50/93** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
-ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์แค่ `Qt6::Core` และ
-`Qt6::Network` — **ขอบเขตชั้นถูกบังคับด้วย linker แล้ว ไม่ใช่แค่ข้อตกลง**
+ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์ `Qt6::Core`
+`Qt6::Network` และ `Qt6::Sql` — **ขอบเขตชั้นถูกบังคับด้วย linker แล้ว ไม่ใช่แค่ข้อตกลง**
 ถ้าใครดึง widget เข้า core จะ build ไม่ผ่านทันที ไม่ต้องรอ `-DNO_GUI=ON`
 
-> **กฎคือ "ไม่ต้องมีหน้าจอ" ไม่ใช่ "สองโมดูลนี้เท่านั้น"** — ตอนทำ S13 จะเพิ่ม
-> `Qt6::Sql` ซึ่งไม่ใช่ GUI จึงไม่ผิดกฎข้อ 1 สิ่งที่ห้ามคือ `Qt6::Widgets` และ `Qt6::Gui`
+> **กฎคือ "ไม่ต้องมีหน้าจอ" ไม่ใช่ "โมดูลชุดนี้เท่านั้น"** — `Qt6::Sql` เข้ามาตอนทำ S13
+> (2026-08-09) ซึ่งไม่ใช่ GUI จึงไม่ผิดกฎข้อ 1 สิ่งที่ห้ามคือ `Qt6::Widgets` และ `Qt6::Gui`
+>
+> ⚠️ ไดรเวอร์ SQLite เป็นแพ็กเกจแยกบนหลายระบบ (`qt6-qtbase-sqlite` บน Alpine,
+> `libqt6sql6-sqlite` บน Debian/Ubuntu) ถ้าขาด ประวัติจะไม่ถูกเขียนโดยไม่มีข้อความเตือน
 
 ```bash
 cmake --build build --config Release          # rbcore + GUI + tests

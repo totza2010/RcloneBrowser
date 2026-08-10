@@ -388,7 +388,8 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S8** | Capabilities | `rclone_capabilities.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S9** | Flags / repo | `rclone_flags.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S10** | Mounts / Streams | `mount_widget` / `stream_widget` | ชนิดหนึ่งของ `RunningJob` | S2 | M | ✅ **mount เสร็จ** · stream ไม่ย้าย (มีเหตุผล) |
-| **S13** | **Store + ประวัติ** | 3 รูปแบบไฟล์ทำมือ · ประวัติ**ไม่มีเลย** | SQLite ผ่าน `Qt6::Sql` (L1) | S2 | **L** | ⬜ ดู [`PLAN.md` §6.8](PLAN.md) |
+| **S14** | **Extension เฉพาะ backend** | ยังไม่มี — ความรู้เรื่อง teldrive ไม่มีที่อยู่ | `rbext_teldrive` (โมดูลตอนคอมไพล์) | S13 | M | ⬜ ดู [`PLAN.md` §6.9](PLAN.md) |
+| **S13** | **Store + ประวัติ** | SQLite ไฟล์เดียว (schema v2) | `database.*` · `run_history.*` · `config_store.*` (L1) | S2 | **L** | ✅ เสร็จ — ดู [`PLAN.md` §6.8](PLAN.md) |
 | **S11** | HTTP API | — | `rbapi` (L2) | S1–S6, S10 | L | ⬜ |
 | **S12** | Web UI | — | static (L3) | S11 | L | ⬜ |
 
@@ -743,14 +744,41 @@ test ที่เขียนได้ครอบแค่ *รูปร่า�
 
 รายละเอียดเต็มอยู่ใน [`PLAN.md` §6.8](PLAN.md) — สรุปสิ่งที่กระทบทะเบียนนี้:
 
+> **ทำเสร็จ 2026-08-09** · schema v1 = `meta` `job_run` · v2 = `task` `queue_entry` `schedule`
+> `Database` เปิด WAL, busy timeout, และหนึ่งการเชื่อมต่อต่อเธรดตามข้อบังคับของ QtSql
+>
+> **task เก็บ 45 ฟิลด์เป็น JSON หนึ่งคอลัมน์** ส่วนที่ใช้ค้น (name/operation/source/dest)
+> ยกออกมาเป็นคอลัมน์ · **schedule เก็บ argument list ของ scheduler ตามเดิมเป็น JSON**
+> ไม่แตกเป็นคอลัมน์ เพราะรูปร่างของมันเป็นความรู้ของ scheduler ไม่ใช่ของ store
+>
+> **ไม่มีไดรเวอร์ SQLite = ยังทำงานได้** อ่าน/เขียน `tasks.bin` และ `.conf` แบบเดิม
+> เสียแค่ประวัติ — ไม่ใช่ task
+
 - `task` `queue_entry` `schedule` `job_run` อยู่ใน SQLite ไฟล์เดียว แทนรูปแบบไฟล์ทำมือ 3 แบบ
 - **ประวัติการรันคือของใหม่ทั้งหมด** ตอนนี้ไม่มีที่ไหนเก็บเลย ปิดโปรแกรมแล้วหายหมด
 - log ยังเป็นไฟล์ DB เก็บแค่ตัวชี้ — และนั่นคือคำตอบของ `REVISIT` เรื่องชื่อไฟล์ log
-- **`Qt6::Sql` เข้า `rbcore` ได้** (ไม่ใช่ GUI) แต่ต้องอัปเดตประโยค "ลิงก์แค่ Core/Network"
-  ใน [`ARCHITECTURE.md`](ARCHITECTURE.md) ให้ตรง
+- **`Qt6::Sql` เข้า `rbcore` แล้ว** (ไม่ใช่ GUI) · [`ARCHITECTURE.md`](ARCHITECTURE.md) แก้ตามแล้ว
+  · ไดรเวอร์เป็นแพ็กเกจแยกบน Alpine/Debian จึงเพิ่มเข้า CI และ Dockerfile ด้วย
 - ⚠️ หน้าต่างกับ `--run-task` เขียน DB พร้อมกันได้ (เพราะ E1 จงใจไม่ล็อก) → ต้อง WAL + busy timeout
 
 หลังทำเสร็จ `S3` และ `S4` จะเหลือแค่ตรรกะ ไม่ต้องเขียนโค้ดจัดการไฟล์ของตัวเอง
+
+---
+
+### S14 · Extension เฉพาะ backend
+
+รายละเอียดเต็มอยู่ใน [`PLAN.md` §6.9](PLAN.md) — สรุปสิ่งที่กระทบทะเบียนนี้:
+
+- **core ห้ามรู้จักชื่อ backend** เหมือนที่ห้ามรู้จัก widget · `RcloneCapabilities` ถามความสามารถ
+  แบบทั่วไปได้อยู่แล้ว แต่ endpoint ของ teldrive เป็นความรู้เฉพาะตัว
+- `RemoteExtension` เป็น interface ที่ไม่มีอะไรเกี่ยวกับ widget → CLI และ API เรียกได้เท่าหน้าต่าง
+- โมดูลตอนคอมไพล์ (`-DRB_EXT_TELDRIVE`) ไม่ใช่ปลั๊กอินตอนรัน — linker บังคับขอบเขตได้เหมือน `rbcore`
+  โดยไม่ต้องแบก ABI/การโหลด/ความปลอดภัยของปลั๊กอิน
+- 🔴 **access token ของ teldrive เป็น credential** ต้องอยู่ใต้กฎข้อ 5 เต็มที่
+  และเอามาจาก `rclone config show` ไม่ใช่แกะ `rclone.conf` เอง (ไฟล์อาจถูกเข้ารหัส)
+
+**สิ่งที่ API (S11) ต้องเผื่อไว้:** `POST /api/v1/remotes/{name}/check` จะเป็นของ extension
+ไม่ใช่ของ core — endpoint มีอยู่ก็ต่อเมื่อ build มี extension ที่รับ remote ชนิดนั้น
 
 ---
 
