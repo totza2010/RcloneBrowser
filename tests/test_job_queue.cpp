@@ -108,6 +108,9 @@ private slots:
     SetRclone(mRclone);
     SetRcloneConf(QString());
 
+    // Nothing here competes with the queue, so it drives itself.
+    JobQueue::instance().setDrivesItself(true);
+
     mSource.reset(new QTemporaryDir);
     mDest.reset(new QTemporaryDir);
     QVERIFY(mSource->isValid() && mDest->isValid());
@@ -217,6 +220,42 @@ private slots:
 
     // The dead entry went without a fight and the live one still ran.
     QVERIFY(QFile::exists(QDir(mDest->path()).filePath("hello.txt")));
+  }
+
+  // Step 0 of docs/QUEUE-MOVE.md: while the window still drives the queue,
+  // this one must not. Two drivers would both start the head entry, and the
+  // second start is a second rclone writing the same destination.
+  void withTheSwitchOffTheQueueDoesNotMoveOnItsOwn() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+    queue.setDrivesItself(false);
+
+    QTemporaryDir first, second;
+    QVERIFY(first.isValid() && second.isValid());
+    const QString a =
+        queue.enqueue(makeCopyTask("first", first.path())->uniqueId.toString());
+    queue.enqueue(makeCopyTask("second", second.path())->uniqueId.toString());
+
+    QSignalSpy started(&queue, &JobQueue::taskStarted);
+
+    // Switching the queue on records that it is on. It must not start
+    // anything: while the window drives, the window starts.
+    queue.start();
+    for (int i = 0; i < 20; ++i) {
+      QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+      QThread::msleep(10);
+    }
+    QCOMPARE(started.count(), 0);
+    QCOMPARE(queue.count(), 2);
+    QVERIFY(queue.isRunning());
+    QVERIFY(!QFile::exists(QDir(first.path()).filePath("hello.txt")));
+
+    // Handing the wheel over is all it takes for it to carry on by itself.
+    Q_UNUSED(a);
+    queue.setDrivesItself(true);
+    QVERIFY2(waitForQueue(), "the queue did not finish once it was driving");
+    QVERIFY(QFile::exists(QDir(first.path()).filePath("hello.txt")));
+    QVERIFY(QFile::exists(QDir(second.path()).filePath("hello.txt")));
   }
 
   // The whole point of S3.

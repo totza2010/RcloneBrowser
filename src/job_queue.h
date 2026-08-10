@@ -71,6 +71,17 @@ public:
   void load();
   bool save();
 
+  // Whether the queue reacts to a job ending by starting the next one.
+  //
+  // Off until the window stops doing that itself: while both are on they
+  // race to start the same entry, and the one that loses starts a second
+  // copy of a transfer -- two processes writing the same destination. See
+  // docs/QUEUE-MOVE.md step 0.
+  // Taking the wheel also means looking at the road: switching this on gives
+  // the head entry its turn straight away, in case it has been waiting.
+  void setDrivesItself(bool on);
+  bool drivesItself() const { return mDrivesItself; }
+
 signals:
   // The list or the running state changed and anything showing it should look
   // again. One signal rather than a set of finer ones: the queue is short and
@@ -88,7 +99,14 @@ private:
 
   JobOptions *taskFor(const QueueEntry &entry) const;
 
+  // Works out which entry is running by asking the registry, rather than
+  // only remembering the ones this started. While the window is still the
+  // one starting them, that is the only way to know -- and it stays true
+  // afterwards, including for a run somebody started by hand.
+  void syncRunningFromRegistry();
+
   QList<QueueEntry> mEntries;
   bool mRunning = false;
   QString mRunningRequestId;
+  bool mDrivesItself = false;
 };

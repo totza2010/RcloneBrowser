@@ -18,7 +18,18 @@ JobQueue::JobQueue(QObject *parent) : QObject(parent) {
   // had ended and tell the queue -- and that something was a handler in the
   // window, which is why a queue stopped dead without one.
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,
-                   [this](RunningJob *job) { jobFinished(job->requestId()); });
+                   [this](RunningJob *job) {
+                     if (mDrivesItself) {
+                       jobFinished(job->requestId());
+                     } else {
+                       // Not driving, but still watching: the window needs to
+                       // be able to ask whether a queued job is running.
+                       syncRunningFromRegistry();
+                     }
+                   });
+
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
+                   [this](RunningJob *) { syncRunningFromRegistry(); });
 }
 
 JobOptions *JobQueue::taskFor(const QueueEntry &entry) const {
@@ -110,7 +121,22 @@ void JobQueue::pause() {
   emit changed();
 }
 
+void JobQueue::setDrivesItself(bool on) {
+  if (mDrivesItself == on) {
+    return;
+  }
+  mDrivesItself = on;
+  advance();
+}
+
 bool JobQueue::advance() {
+  // While the window is the one driving, this must start nothing at all --
+  // not on a job ending, and not when the queue is switched on either. Both
+  // would be a second start of the same entry. See docs/QUEUE-MOVE.md step 0.
+  if (!mDrivesItself) {
+    return false;
+  }
+
   if (!mRunning || mEntries.isEmpty() || taskIsRunning()) {
     return false;
   }
@@ -178,6 +204,25 @@ void JobQueue::jobFinished(const QString &requestId) {
   advance();
 }
 
+void JobQueue::syncRunningFromRegistry() {
+  QString running;
+  for (const RunningJob *job : JobRegistry::instance().jobs()) {
+    if (!job->isRunning()) {
+      continue;
+    }
+    for (const QueueEntry &entry : mEntries) {
+      if (entry.requestId == job->requestId()) {
+        running = entry.requestId;
+        break;
+      }
+    }
+  }
+  if (running != mRunningRequestId) {
+    mRunningRequestId = running;
+    emit changed();
+  }
+}
+
 void JobQueue::load() {
   mEntries.clear();
   mRunningRequestId.clear();
@@ -191,6 +236,10 @@ void JobQueue::load() {
   }
 
   mRunning = AppSettings::queueIsRunning();
+
+  // Reading the list again must not lose track of what is running -- and
+  // after a restart this is what notices a job the window has just started.
+  syncRunningFromRegistry();
   emit changed();
 }
 
