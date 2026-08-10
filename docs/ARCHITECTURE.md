@@ -38,9 +38,11 @@
 | S10 Mounts / Streams | ✅ **mount เสร็จ** | `getMountOptions()` (L1) · **VIO-1 ปิดสนิท** (V-19 ผ่านเบื้องต้น) · mount เดินทาง `RunningJob` แล้ว · stream ไม่ย้าย (มีเหตุผลใน `API.md`) · V-20 **ผ่านเบื้องต้น** (แก้อาการปิดโปรแกรมค้างไปด้วย) |
 | **S13 เก็บทุกอย่างลง DB + ประวัติการรัน** | ✅ **เสร็จ** | `database.*` (schema v2) + `run_history.*` + `config_store.*` (L0/L1) + แท็บย่อย History `history_widget.*` (L3) · task/queue/scheduler ย้ายเข้า DB แล้ว ไฟล์เดิมเปลี่ยนชื่อเป็น `.migrated` · ไม่มีไดรเวอร์ SQLite ก็ยังใช้ไฟล์เดิมได้ · test 26 เคส · V-21 |
 | **S14 Extension เฉพาะ backend** | ⬜ **ใหม่ 2026-08-08** | teldrive integrity check — core ห้ามรู้จักชื่อ backend · ดู [`PLAN.md` §6.9](PLAN.md) |
+| **S3 Queue → L1** | 🟡 **เครื่องยนต์เสร็จ** | `job_queue.*` + `StartTask()` (L1) · test รัน copy จริง 3 งานจนหมดคิวโดยไม่มี widget · ⬜ `main_window.cpp` ยังใช้ `mQueueStatus`/`mQueueCount`/`mQueueTaskRunning` ของตัวเอง |
+| **S4 Scheduler → L1** | 🟡 **เครื่องยนต์เสร็จ** | `schedule.*` + `scheduler_store.*` (L1) · `NormalizeCron()` ย้ายออกจาก widget · ⬜ `SchedulerWidget` ยังมี timer ของตัวเอง |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 50/93** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 56/99** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
 ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์ `Qt6::Core`

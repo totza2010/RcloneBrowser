@@ -380,8 +380,8 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 |---|---|---|---|---|---|---|
 | **S1** | Task store | `ListOfJobOptions` + `ui.tasksListWidget` | `TaskStore` (L1) | — | M | ✅ **เสร็จ** — ส่งมอบ E1 |
 | **S2** | Job registry | `ui.jobs` + `JobWidget` ถือ `QProcess` | `JobRegistry` + `RunningJob` (L1) | S1 | **L** | 🟡 **transfer เสร็จ** · mount/stream = S10 |
-| **S3** | Queue | `ui.queueListWidget` | `JobQueue` (L1) | S1, S2 | M | ⬜ |
-| **S4** | Scheduler store | `ui.schedulers` + `scheduler.conf` (comma+b64) | `SchedulerStore` (L1) | S1, S2 | M | ⬜ |
+| **S3** | Queue | `ui.queueListWidget` | `JobQueue` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
+| **S4** | Scheduler store | `ui.schedulers` + `scheduler.conf` (comma+b64) | `SchedulerStore` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
 | **S5** | Remote registry | `ui.remotes` | `RemoteRegistry` (L1) | — | S | ⬜ |
 | **S6** | Settings | `QSettings` เรียกตรงทุกที่ | `SettingsFacade` (L1) | — | S | ⬜ |
 | **S7** | Job logs | `job_log.*` (L0) | — | — | — | ✅ **มีแล้ว** |
