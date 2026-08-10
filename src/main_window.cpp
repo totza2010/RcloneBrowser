@@ -1656,10 +1656,7 @@ MainWindow::MainWindow() {
 
   //!!!  QObject::connect(ui.actionStartQueue
   QObject::connect(ui.actionStartQueue, &QAction::triggered, this, [=]() {
-    mQueueStatus = true;
-
-    auto settings = GetSettings();
-    settings->setValue("Settings/queueStatus", "true");
+    JobQueue::instance().start();
 
     ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
 
@@ -1726,10 +1723,8 @@ MainWindow::MainWindow() {
   });
 
   QObject::connect(ui.actionStopQueue, &QAction::triggered, this, [=]() {
-    mQueueStatus = false;
-
-    auto settings = GetSettings();
-    settings->setValue("Settings/queueStatus", "false");
+    // Pausing, and remembering that it is paused, is the queue's own job.
+    JobQueue::instance().pause();
 
     if (ui.queueListWidget->count() > 0) {
       ui.queueListWidget->item(0)->setBackground(QBrush());
@@ -2138,7 +2133,9 @@ MainWindow::MainWindow() {
     ui.tabs->setTabText(4, QString("Scheduler (%1)").arg(mSchedulersCount));
   }
 
-  if ((settings->value("Settings/queueStatus").toBool())) {
+  // Whether the queue was left running is the queue's own memory, not a key
+  // this window reads for itself.
+  if (JobQueue::instance().isRunning()) {
     ui.actionStartQueue->trigger();
   }
 
