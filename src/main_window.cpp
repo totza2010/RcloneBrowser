@@ -1882,9 +1882,11 @@ MainWindow::MainWindow() {
           }
         }
 
-        --mQueueCount;
+        // The queue is told which run is leaving, not which row: rows are
+        // what shows it. It refuses to drop the one that is running,
+        // which is the same thing the greyed-out button has said.
+        JobQueue::instance().remove(requestId);
         ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
-        saveQueueFile(); // tell the queue before any count is read
 
         if (ui.queueListWidget->currentRow() == 0 ||
             ui.queueListWidget->currentRow() ==
@@ -1918,8 +1920,6 @@ MainWindow::MainWindow() {
 
     } else {
 
-      --mQueueCount;
-
       JobOptionsListWidgetItem *item_queue =
           static_cast<JobOptionsListWidgetItem *>(
               ui.queueListWidget->item(ui.queueListWidget->currentRow()));
@@ -1942,8 +1942,8 @@ MainWindow::MainWindow() {
         }
       }
 
+      JobQueue::instance().remove(requestId);
       ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
-      saveQueueFile(); // tell the queue before any count is read
 
       if (ui.queueListWidget->currentRow() == ui.queueListWidget->count() - 1) {
         ui.buttonDownQueue->setEnabled(false);
