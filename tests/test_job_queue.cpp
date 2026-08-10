@@ -258,6 +258,39 @@ private slots:
     QVERIFY(QFile::exists(QDir(second.path()).filePath("hello.txt")));
   }
 
+  // The measurement docs/QUEUE-MOVE.md asks for: while the window drives, it
+  // starts the job itself and the queue only watches. Does the queue then
+  // know that one of its entries is running? On screen it did not -- the tab
+  // read ">>(0)" next to a row painted green -- and this is that situation
+  // with the window taken out of it.
+  void aJobStartedByTheWindowCountsAsTheQueuesOwn() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+    queue.setDrivesItself(false);
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    JobOptions *task = makeCopyTask("started elsewhere", dest.path());
+    const QString requestId = queue.enqueue(task->uniqueId.toString());
+
+    QVERIFY(!queue.taskIsRunning()); // nothing has started it yet
+
+    // Exactly what the window does: the same request id the queue holds.
+    StartTask(task, QStringLiteral("queue"), requestId);
+
+    QVERIFY2(queue.taskIsRunning(),
+             "the queue does not know its own entry is running");
+    QCOMPARE(queue.runningRequestId(), requestId);
+
+    // And it must still know after the list is read again, which is what
+    // every save does.
+    queue.load();
+    QVERIFY2(queue.taskIsRunning(), "reading the list lost track of it");
+
+    queue.setDrivesItself(true);
+    QVERIFY2(waitForQueue(), "the queue did not finish");
+  }
+
   // The whole point of S3.
   void aQueueRunsItselfToTheEndWithNoWidget() {
     JobQueue &queue = JobQueue::instance();
