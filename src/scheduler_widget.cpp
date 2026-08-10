@@ -1,4 +1,5 @@
 #include "scheduler_widget.h"
+#include "schedule.h"
 #include "qcron.h"
 #include "utils.h"
 
@@ -766,32 +767,13 @@ QString SchedulerWidget::getSchedulerRequestId() { return mRequestId; }
 
 int SchedulerWidget::getExecutionMode() { return mExecutionMode.toInt(); }
 
+// The rewriting itself is in the core (see schedule.h): what a cron
+// expression means is not a property of this widget.
 QString SchedulerWidget::enhanceCron(QString cron) {
-
-  QString enhancedCron = cron.toUpper();
-
-  enhancedCron.replace("MON", "1");
-  enhancedCron.replace("TUE", "2");
-  enhancedCron.replace("WED", "3");
-  enhancedCron.replace("THU", "4");
-  enhancedCron.replace("FRI", "5");
-  enhancedCron.replace("SAT", "6");
-  enhancedCron.replace("SUN", "7");
-
-  enhancedCron.replace("JAN", "1");
-  enhancedCron.replace("FEB", "2");
-  enhancedCron.replace("MAR", "3");
-  enhancedCron.replace("APR", "4");
-  enhancedCron.replace("MAY", "5");
-  enhancedCron.replace("JUN", "6");
-  enhancedCron.replace("JUL", "7");
-  enhancedCron.replace("AUG", "8");
-  enhancedCron.replace("SEP", "9");
-  enhancedCron.replace("OCT", "10");
-  enhancedCron.replace("NOV", "11");
-  enhancedCron.replace("DEC", "12");
-
-  return enhancedCron;
+  QString normalised = NormalizeCron(cron);
+  // NormalizeCron() adds the year field; every call site here appends its own.
+  normalised.chop(2);
+  return normalised;
 }
 
 void SchedulerWidget::updateTaskStatus(const QString requestID,

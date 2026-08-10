@@ -32,7 +32,78 @@ JobRunRecord recordFor(const RunningJob *job) {
   return r;
 }
 
+// "Copy", "Move", "Sync" -- the words the card shows. A task with any other
+// operation has no verb worth printing.
+QString operationWord(const JobOptions &task) {
+  switch (task.operation) {
+  case JobOptions::Copy:
+    return QStringLiteral("Copy");
+  case JobOptions::Move:
+    return QStringLiteral("Move");
+  case JobOptions::Sync:
+    return QStringLiteral("Sync");
+  default:
+    return QString();
+  }
+}
+
 } // namespace
+
+JobDescription DescribeTask(const JobOptions &task,
+                            const QString &transferMode, bool dryRun) {
+  JobDescription description;
+  description.source = task.source;
+  description.dest = task.dest;
+
+  if (task.operation == JobOptions::Mount) {
+    description.info = QStringLiteral("Mounting task: ") + task.description;
+    return description;
+  }
+
+  const QString operation = operationWord(task);
+
+  if (dryRun) {
+    description.info = QStringLiteral("Dry run, task: \"%1\", %2 from %3")
+                           .arg(task.description, operation.toLower(),
+                                task.source);
+  } else if (transferMode == QStringLiteral("queue")) {
+    description.info = QStringLiteral("Queue task: \"%1\", %2 from %3")
+                           .arg(task.description, operation, task.source);
+  } else if (transferMode == QStringLiteral("scheduler")) {
+    description.info = QStringLiteral("Scheduled task: \"%1\", %2 from %3")
+                           .arg(task.description, operation, task.source);
+  } else {
+    description.info = QStringLiteral("Task: \"%1\", %2 from %3")
+                           .arg(task.description, operation, task.source);
+  }
+  return description;
+}
+
+RunningJob *StartTask(JobOptions *task, const QString &transferMode,
+                      const QString &requestId, bool dryRun) {
+  if (task == nullptr) {
+    return nullptr;
+  }
+
+  const bool isMount = task->operation == JobOptions::Mount;
+
+  // dryRun is not persisted, and setting it here rather than in the task is
+  // what stops a dry run turning into a real one on the next start.
+  task->dryRun = dryRun && !isMount;
+
+  const QStringList args = isMount ? task->getMountOptions()
+                                   : task->getOptions();
+
+  RunningJob *job = JobRegistry::instance().start(
+      isMount ? JobKind::Mount : JobKind::Transfer, args,
+      DescribeTask(*task, transferMode, dryRun), task->uniqueId.toString(),
+      transferMode, requestId);
+
+  if (isMount && !task->mountScript.isEmpty()) {
+    job->setMountScript(task->mountScript);
+  }
+  return job;
+}
 
 JobRegistry &JobRegistry::instance() {
   static JobRegistry registry;

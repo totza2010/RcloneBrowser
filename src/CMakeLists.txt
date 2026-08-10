@@ -48,6 +48,9 @@ set(CORE_SOURCE
   task_runner.cpp
   running_job.cpp
   job_registry.cpp
+  job_queue.cpp
+  schedule.cpp
+  scheduler_store.cpp
   job_log.cpp
   database.cpp
   config_store.cpp
@@ -69,6 +72,9 @@ set(CORE_HEADER
   task_runner.h
   running_job.h
   job_registry.h
+  job_queue.h
+  schedule.h
+  scheduler_store.h
   job_log.h
   database.h
   config_store.h

@@ -11,6 +11,23 @@
 #include <QList>
 #include <QObject>
 
+class JobOptions;
+
+// What to say about a job started from a saved task. The wording is what the
+// card has always shown; it lives here so that a job started without a window
+// -- from the queue, from a schedule, from the API -- describes itself the
+// same way as one started by hand.
+JobDescription DescribeTask(const JobOptions &task, const QString &transferMode,
+                            bool dryRun);
+
+// Starts a saved task and returns the job. The arguments come from the task
+// itself (JobOptions::getOptions / getMountOptions), so there is one place
+// that turns a task into a command, not one per caller.
+//
+// Returns nullptr only for a null task.
+RunningJob *StartTask(JobOptions *task, const QString &transferMode,
+                      const QString &requestId, bool dryRun = false);
+
 class JobRegistry : public QObject {
   Q_OBJECT
 
