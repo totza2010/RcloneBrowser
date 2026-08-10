@@ -184,6 +184,15 @@ void JobQueue::jobFinished(const QString &requestId) {
   if (!requestId.isEmpty() && requestId == mRunningRequestId) {
     mRunningRequestId.clear();
 
+    // A paused queue keeps its entries, including the one that was running.
+    // Stopping the queue and then the job is how somebody puts a task back in
+    // the queue rather than out of it -- taking it out would mean pressing
+    // Stop lost the entry.
+    if (!mRunning) {
+      emit changed();
+      return;
+    }
+
     for (int i = 0; i < mEntries.size(); ++i) {
       if (mEntries[i].requestId == requestId) {
         mEntries.removeAt(i);

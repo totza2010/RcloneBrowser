@@ -287,8 +287,35 @@ private slots:
     queue.load();
     QVERIFY2(queue.taskIsRunning(), "reading the list lost track of it");
 
+    // A paused queue holds on to its entry, so let it run to clear up.
     queue.setDrivesItself(true);
+    queue.start();
     QVERIFY2(waitForQueue(), "the queue did not finish");
+  }
+
+  // Reported from the running application: pressing Stop and then stopping
+  // the job took the entry out of the queue. A paused queue must keep what
+  // it holds -- that is the difference between pausing and removing.
+  void aPausedQueueKeepsTheEntryWhoseJobEnded() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+    queue.setDrivesItself(true);
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    JobOptions *task = makeCopyTask("stopped mid-queue", dest.path());
+    const QString requestId = queue.enqueue(task->uniqueId.toString());
+    QCOMPARE(queue.count(), 1);
+
+    StartTask(task, QStringLiteral("queue"), requestId);
+    QVERIFY(queue.taskIsRunning());
+
+    queue.pause(); // the user presses Stop while it runs
+    queue.jobFinished(requestId);
+
+    QCOMPARE(queue.count(), 1); // still queued, ready for the next Start
+    QCOMPARE(queue.entries().first().requestId, requestId);
+    QVERIFY(!queue.taskIsRunning());
   }
 
   // The whole point of S3.
