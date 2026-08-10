@@ -40,9 +40,11 @@
 | **S14 Extension เฉพาะ backend** | ⬜ **ใหม่ 2026-08-08** | teldrive integrity check — core ห้ามรู้จักชื่อ backend · ดู [`PLAN.md` §6.9](PLAN.md) |
 | **S3 Queue → L1** | 🟡 **เครื่องยนต์เสร็จ** | `job_queue.*` + `StartTask()` (L1) · test รัน copy จริง 3 งานจนหมดคิวโดยไม่มี widget · ⬜ `main_window.cpp` ยังใช้ `mQueueStatus`/`mQueueCount`/`mQueueTaskRunning` ของตัวเอง |
 | **S4 Scheduler → L1** | 🟡 **เครื่องยนต์เสร็จ** | `schedule.*` + `scheduler_store.*` (L1) · `NormalizeCron()` ย้ายออกจาก widget · ⬜ `SchedulerWidget` ยังมี timer ของตัวเอง |
+| **S6 Settings → L1** | 🟡 **ส่วนที่ core ใช้เสร็จ** | `app_settings.*` (L1) · ค่าเริ่มต้นและกฎว่าค่าไหนใช้ไม่ได้อยู่ที่เดียว · `JobLogWriter` / `RunHistory` / `JobQueue` เรียกผ่านแล้ว · ⬜ คีย์ที่เป็นเรื่องหน้าตาล้วนๆ ยังอยู่ที่เดิม |
+| **S5 Remote registry → L1** | 🟡 **เครื่องยนต์เสร็จ** | `remote_registry.*` (L1) · แยกการอ่าน `listremotes` ออกจากโค้ดเลือกไอคอน · **แก้บั๊ก: type ที่มีช่องว่างเคยถูกทิ้งทั้งบรรทัด** · ⬜ หน้าต่างยังอ่านเอง |
 | E2 `rbcore` + `-DNO_GUI=ON` | ⬜ ยังไม่ทำ | |
 
-**ไฟล์ที่ปลอด GUI: 56/99** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
+**ไฟล์ที่ปลอด GUI: 60/103** (เริ่มต้นที่ 21/59) — ตรวจด้วย `python scripts/check_layers.py`
 
 ### `rbcore` มีจริงแล้ว
 ไฟล์ใน §3.1 ทั้งหมดอยู่ใน target `rbcore` (static lib) ที่ลิงก์ `Qt6::Core`

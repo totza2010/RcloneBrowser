@@ -382,8 +382,8 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S2** | Job registry | `ui.jobs` + `JobWidget` ถือ `QProcess` | `JobRegistry` + `RunningJob` (L1) | S1 | **L** | 🟡 **transfer เสร็จ** · mount/stream = S10 |
 | **S3** | Queue | `ui.queueListWidget` | `JobQueue` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
 | **S4** | Scheduler store | `ui.schedulers` + `scheduler.conf` (comma+b64) | `SchedulerStore` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
-| **S5** | Remote registry | `ui.remotes` | `RemoteRegistry` (L1) | — | S | ⬜ |
-| **S6** | Settings | `QSettings` เรียกตรงทุกที่ | `SettingsFacade` (L1) | — | S | ⬜ |
+| **S5** | Remote registry | `ui.remotes` | `RemoteRegistry` (L1) | — | S | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
+| **S6** | Settings | `QSettings` เรียกตรงทุกที่ | `AppSettings` (L1) | — | S | 🟡 ส่วนที่ core ใช้เสร็จ · ส่วนที่เป็นหน้าตายังอยู่ที่เดิม |
 | **S7** | Job logs | `job_log.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S8** | Capabilities | `rclone_capabilities.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S9** | Flags / repo | `rclone_flags.*` (L0) | — | — | — | ✅ **มีแล้ว** |
