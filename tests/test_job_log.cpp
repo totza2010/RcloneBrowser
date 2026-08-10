@@ -99,6 +99,33 @@ private slots:
     QVERIFY(text.contains("(finished)"));
   }
 
+  // Found on a real 388 GiB copy of files with Thai names: the counter said
+  // 1,298,410 and the file was 1,615,532. It was counting QString characters,
+  // so anything outside ASCII counted as less than it wrote -- which both
+  // understated the size recorded with the run and let the size limit that is
+  // meant to stop a log filling the disk grow to about three times its stated
+  // value.
+  void sizeIsCountedInBytesNotCharacters() {
+    JobLogWriter writer;
+    writer.begin("copy", "thai", {"rclone", "copy"});
+
+    // Three bytes per character in UTF-8, one QChar each in QString.
+    const QString thai = QStringLiteral("ผ่าพิภพไททัน");
+    QCOMPARE(thai.size(), 12);
+    QCOMPARE(thai.toUtf8().size(), 36);
+
+    for (int i = 0; i < 100; ++i) {
+      writer.appendLine(thai);
+    }
+    writer.finish("finished");
+
+    const qint64 onDisk = QFileInfo(writer.filePath()).size();
+    QVERIFY2(onDisk > 3600, qPrintable(QString::number(onDisk)));
+
+    // What the run records has to be what is really on the disk.
+    QCOMPARE(writer.bytesWritten(), onDisk);
+  }
+
   // The header repeats the command line, which is exactly where a credential
   // would end up. The writer takes what it is given, so this pins the contract
   // that callers hand over already-redacted arguments.

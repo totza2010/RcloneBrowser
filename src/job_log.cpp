@@ -131,7 +131,12 @@ void JobLogWriter::appendLine(const QString &line) {
   }
 
   mStream << line << '\n';
-  mBytes += line.size() + 1;
+
+  // Bytes, not characters. QString::size() counts UTF-16 units, so a log full
+  // of Thai or CJK file names counted about a third of what it was really
+  // writing -- which made the size limit above roughly three times larger than
+  // it says, and made the size recorded with the run wrong by the same amount.
+  mBytes += line.toUtf8().size() + 1;
 }
 
 void JobLogWriter::finish(const QString &status) {
@@ -144,6 +149,12 @@ void JobLogWriter::finish(const QString &status) {
           << QDateTime::currentDateTime().toString(Qt::ISODate) << " ("
           << status << ")\n";
   mStream.flush();
+
+  // The running count is an estimate -- it cannot know about the newline
+  // translation this file does on Windows. Once the last line is on disk the
+  // real size is there for the asking, and that is the number recorded with
+  // the run.
+  mBytes = mFile.size();
   mFile.close();
 }
 
