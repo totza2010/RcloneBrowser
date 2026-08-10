@@ -1,4 +1,5 @@
 #include "run_history.h"
+#include "app_settings.h"
 #include "database.h"
 #include "utils.h"
 
@@ -10,9 +11,6 @@
 #include <QSqlRecord>
 
 namespace {
-
-constexpr int kDefaultRetentionDays = 90;
-constexpr int kDefaultRetentionRows = 2000;
 
 JobRunRecord readRow(const QSqlQuery &query) {
   JobRunRecord r;
@@ -197,19 +195,10 @@ int RunHistory::count() {
 }
 
 int RunHistory::retentionDays() {
-  auto settings = GetSettings();
-  const int days =
-      settings->value("Settings/historyRetentionDays", kDefaultRetentionDays)
-          .toInt();
-  return days < 0 ? kDefaultRetentionDays : days;
+  return AppSettings::historyRetentionDays();
 }
 
-int RunHistory::retentionRows() {
-  auto settings = GetSettings();
-  const int rows =
-      settings->value("Settings/historyMaxRuns", kDefaultRetentionRows).toInt();
-  return rows < 0 ? kDefaultRetentionRows : rows;
-}
+int RunHistory::retentionRows() { return AppSettings::historyMaxRuns(); }
 
 int RunHistory::purge(int keepDays, int keepRows) {
   QSqlDatabase db = Database::connection();

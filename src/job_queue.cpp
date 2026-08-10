@@ -1,4 +1,5 @@
 #include "job_queue.h"
+#include "app_settings.h"
 #include "job_options.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
@@ -95,7 +96,7 @@ void JobQueue::start() {
     return;
   }
   mRunning = true;
-  GetSettings()->setValue("Settings/queueStatus", "true");
+  AppSettings::setQueueIsRunning(true);
   emit changed();
   advance();
 }
@@ -105,7 +106,7 @@ void JobQueue::pause() {
     return;
   }
   mRunning = false;
-  GetSettings()->setValue("Settings/queueStatus", "false");
+  AppSettings::setQueueIsRunning(false);
   emit changed();
 }
 
@@ -189,7 +190,7 @@ void JobQueue::load() {
     }
   }
 
-  mRunning = GetSettings()->value("Settings/queueStatus", false).toBool();
+  mRunning = AppSettings::queueIsRunning();
   emit changed();
 }
 

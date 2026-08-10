@@ -1,4 +1,5 @@
 #include "job_log.h"
+#include "app_settings.h"
 #include "utils.h"
 
 #include <QDateTime>
@@ -11,25 +12,16 @@ namespace {
 // tree produces a line per file; this is generous for reading back what
 // happened without being unbounded.
 constexpr qint64 kMaxBytes = 50LL * 1024 * 1024;
-constexpr int kDefaultRetentionDays = 7;
 } // namespace
 
 QString JobLogWriter::logDir() {
   return GetConfigDir().filePath(QStringLiteral("logs"));
 }
 
-bool JobLogWriter::isEnabled() {
-  auto settings = GetSettings();
-  return settings->value("Settings/logToFile", true).toBool();
-}
+bool JobLogWriter::isEnabled() { return AppSettings::logToFile(); }
 
 int JobLogWriter::retentionDays() {
-  auto settings = GetSettings();
-  const int days =
-      settings->value("Settings/logRetentionDays", kDefaultRetentionDays)
-          .toInt();
-  // 0 means keep everything; anything negative is meaningless.
-  return days < 0 ? kDefaultRetentionDays : days;
+  return AppSettings::logRetentionDays();
 }
 
 QString JobLogWriter::sanitizeForFileName(const QString &text) {

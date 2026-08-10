@@ -27,6 +27,8 @@ rb_add_test(test_run_history)
 rb_add_test(test_config_store)
 rb_add_test(test_job_queue)
 rb_add_test(test_scheduler_store)
+rb_add_test(test_app_settings)
+rb_add_test(test_remote_registry)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

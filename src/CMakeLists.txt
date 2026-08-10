@@ -41,6 +41,7 @@ endif()
 # See docs/ARCHITECTURE.md.
 set(CORE_SOURCE
   utils.cpp
+  app_settings.cpp
   job_options.cpp
   list_of_job_options.cpp
   rclone_capabilities.cpp
@@ -49,6 +50,7 @@ set(CORE_SOURCE
   running_job.cpp
   job_registry.cpp
   job_queue.cpp
+  remote_registry.cpp
   schedule.cpp
   scheduler_store.cpp
   job_log.cpp
@@ -65,6 +67,7 @@ set(CORE_SOURCE
 
 set(CORE_HEADER
   utils.h
+  app_settings.h
   job_options.h
   list_of_job_options.h
   rclone_capabilities.h
@@ -73,6 +76,7 @@ set(CORE_HEADER
   running_job.h
   job_registry.h
   job_queue.h
+  remote_registry.h
   schedule.h
   scheduler_store.h
   job_log.h
