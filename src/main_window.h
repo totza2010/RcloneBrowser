@@ -1,5 +1,6 @@
 #pragma once
 #include "icon_cache.h"
+#include "job_queue.h"
 #include "job_options.h"
 #include "job_options_item.h"
 #include "ui_main_window.h"
@@ -77,17 +78,40 @@ private:
   // keep track of number of active transfers
   int mTransferJobCount = 0;
 
-  // false = Queue Paused, true = Queue running
-  bool mQueueStatus = false;
+  // The queue is JobQueue's (L1). These three keep their names but hold
+  // nothing -- see docs/QUEUE-MOVE.md.
+  struct QueueRunningFlag {
+    operator bool() const { return JobQueue::instance().isRunning(); }
+    QueueRunningFlag &operator=(bool on) {
+      if (on) {
+        JobQueue::instance().start();
+      } else {
+        JobQueue::instance().pause();
+      }
+      return *this;
+    }
+  };
+  struct QueueCount {
+    operator int() const { return JobQueue::instance().count(); }
+    QueueCount &operator=(int) { return *this; }
+    QueueCount &operator--() { return *this; }
+    QueueCount &operator++() { return *this; }
+  };
+  struct QueueTaskFlag {
+    operator bool() const { return JobQueue::instance().taskIsRunning(); }
+    QueueTaskFlag &operator=(bool) { return *this; }
+  };
+
+  QueueRunningFlag mQueueStatus;
 
   // number of schedulers
   int mSchedulersCount = 0;
   int mRunningSchedulersCount = 0;
 
   // number of queued tasks
-  int mQueueCount = 0;
+  QueueCount mQueueCount;
   // is queued task running
-  bool mQueueTaskRunning = false;
+  QueueTaskFlag mQueueTaskRunning;
 
   // make queue logic aware that app is quiting
   // so job is not removed from the queue

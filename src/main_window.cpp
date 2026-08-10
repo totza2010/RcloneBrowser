@@ -997,6 +997,7 @@ MainWindow::MainWindow() {
           mQueueStatus = false;
           /// remove top task from queue + save it
           ui.queueListWidget->takeItem(0);
+          saveQueueFile(); // tell the queue before any count is read
           --mQueueCount;
           saveQueueFile();
 
@@ -1822,6 +1823,7 @@ MainWindow::MainWindow() {
               }
 
               ui.queueListWidget->takeItem(1);
+              saveQueueFile(); // tell the queue before any count is read
             }
           } else {
             --mQueueCount;
@@ -1851,6 +1853,7 @@ MainWindow::MainWindow() {
             }
 
             ui.queueListWidget->takeItem(0);
+            saveQueueFile(); // tell the queue before any count is read
           }
 
           ui.buttonRemoveFromQueue->setEnabled(false);
@@ -1918,6 +1921,7 @@ MainWindow::MainWindow() {
 
         --mQueueCount;
         ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
+        saveQueueFile(); // tell the queue before any count is read
 
         if (ui.queueListWidget->currentRow() == 0 ||
             ui.queueListWidget->currentRow() ==
@@ -1976,6 +1980,7 @@ MainWindow::MainWindow() {
       }
 
       ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
+      saveQueueFile(); // tell the queue before any count is read
 
       if (ui.queueListWidget->currentRow() == ui.queueListWidget->count() - 1) {
         ui.buttonDownQueue->setEnabled(false);
@@ -2006,6 +2011,7 @@ MainWindow::MainWindow() {
 
   QObject::connect(ui.actionDownQueue, &QAction::triggered, this, [=]() {
     auto item = ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
+    saveQueueFile(); // tell the queue before any count is read
     ui.queueListWidget->insertItem(ui.queueListWidget->currentRow() + 1, item);
     ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
 
@@ -2017,11 +2023,13 @@ MainWindow::MainWindow() {
       // last row needs special treatment
       auto item =
           ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
+          saveQueueFile(); // tell the queue before any count is read
       ui.queueListWidget->insertItem(ui.queueListWidget->currentRow(), item);
       ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
     } else {
       auto item =
           ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
+          saveQueueFile(); // tell the queue before any count is read
       ui.queueListWidget->insertItem(ui.queueListWidget->currentRow() - 1,
                                      item);
       ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
@@ -3421,6 +3429,8 @@ void MainWindow::addTasksToQueue() {
   // restore queue from file
   // ignore no more existing
 
+  JobQueue::instance().load();
+
   ui.queueListWidget->clear();
 
   auto items = ui.tasksListWidget->selectedItems();
@@ -3639,6 +3649,7 @@ void MainWindow::listTasks() {
             // update ui.queueListWidget
 
             ui.queueListWidget->takeItem(i);
+            saveQueueFile(); // tell the queue before any count is read
 
             QIcon jobIcon = mDownloadIcon;
 
@@ -3694,6 +3705,7 @@ void MainWindow::listTasks() {
           if (i != 0) {
             --mQueueCount;
             ui.queueListWidget->takeItem(i);
+            saveQueueFile(); // tell the queue before any count is read
             if (mQueueCount == 0) {
               ui.tabs->setTabText(3,
                                   QString("Queue (%1)>>(0)").arg(mQueueCount));
@@ -3709,6 +3721,7 @@ void MainWindow::listTasks() {
         if (!itemFound) {
           --mQueueCount;
           ui.queueListWidget->takeItem(i);
+          saveQueueFile(); // tell the queue before any count is read
           if (mQueueCount == 0) {
             ui.tabs->setTabText(3, QString("Queue"));
           } else {
@@ -3813,6 +3826,7 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
                          const QString &requestId, bool dryrun) {
 
   QMutexLocker locker(&mRunItemMutex);
+
 
   if (jo == nullptr)
     return;
@@ -4095,7 +4109,9 @@ bool MainWindow::saveQueueFile(void) {
     entries.append(entry);
   }
 
-  return QueueStore::save(entries);
+  const bool ok = QueueStore::save(entries);
+  JobQueue::instance().load();
+  return ok;
 }
 
 bool MainWindow::saveSchedulerFile(void) {
@@ -4339,6 +4355,7 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
           if ((transfer->getUniqueID() == jo->uniqueId.toString()) &&
               (transfer->getRequestId() == item->GetRequestId())) {
             ui.queueListWidget->takeItem(0);
+            saveQueueFile(); // tell the queue before any count is read
             --mQueueCount;
 
             // queue is still running, even if mQueueCount is 0
@@ -4789,6 +4806,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
                 if (item_queue->GetRequestId() == requestID) {
 
                   ui.queueListWidget->takeItem(i);
+                  saveQueueFile(); // tell the queue before any count is read
 
                   break;
                 }
@@ -4812,6 +4830,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
 
           --mQueueCount;
           ui.queueListWidget->takeItem(i);
+          saveQueueFile(); // tell the queue before any count is read
           widget->updateTaskStatus(requestID, "removed from the queue");
           mRunningSchedulersCount--;
           ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
