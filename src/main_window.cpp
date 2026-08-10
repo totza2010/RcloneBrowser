@@ -1785,72 +1785,40 @@ MainWindow::MainWindow() {
 
       if (button == QMessageBox::Yes) {
 
-        int itemsCount = ui.queueListWidget->count();
-        for (int i = 0; i < itemsCount; i++) {
+        // Everything except the one that is running, which is what the
+        // button has always promised. The queue decides what "except the one
+        // running" means; the rows follow it.
+        const int first = JobQueue::instance().taskIsRunning() ? 1 : 0;
 
-          if (mQueueStatus && mQueueTaskRunning) {
-            if (i != 0) {
-              --mQueueCount;
+        while (ui.queueListWidget->count() > first) {
+          JobOptionsListWidgetItem *item_queue =
+              static_cast<JobOptionsListWidgetItem *>(
+                  ui.queueListWidget->item(first));
+          const QString requestId = item_queue->GetRequestId();
 
-              JobOptionsListWidgetItem *item_queue =
-                  static_cast<JobOptionsListWidgetItem *>(
-                      ui.queueListWidget->item(1));
+          // notify schedulers
+          int schedulersCount = ui.schedulers->count();
+          for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
+            QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
+            if (auto scheduler =
+                    qobject_cast<SchedulerWidget *>(schedulerWidget)) {
+              scheduler->updateTaskStatus(requestId, "removed from the queue");
 
-              QString requestId = item_queue->GetRequestId();
-              // notify schedulers
-              int schedulersCount = ui.schedulers->count();
-              for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-                QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-                if (auto scheduler =
-                        qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-                  scheduler->updateTaskStatus(requestId,
-                                              "removed from the queue");
-
-                  if (scheduler->getSchedulerRequestId() ==
-                      item_queue->GetRequestId()) {
-
-                    mRunningSchedulersCount--;
-                    ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                               .arg(mSchedulersCount)
-                                               .arg(mRunningSchedulersCount));
-                  }
-                }
-              }
-
-              ui.queueListWidget->takeItem(1);
-              saveQueueFile(); // tell the queue before any count is read
-            }
-          } else {
-            --mQueueCount;
-
-            JobOptionsListWidgetItem *item_queue =
-                static_cast<JobOptionsListWidgetItem *>(
-                    ui.queueListWidget->item(0));
-
-            QString requestId = item_queue->GetRequestId();
-            // notify schedulers
-            int schedulersCount = ui.schedulers->count();
-            for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-              QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-              if (auto scheduler =
-                      qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-                scheduler->updateTaskStatus(requestId,
-                                            "removed from the queue");
-
-                if (scheduler->getSchedulerRequestId() ==
-                    item_queue->GetRequestId()) {
-                  mRunningSchedulersCount--;
-                  ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                             .arg(mSchedulersCount)
-                                             .arg(mRunningSchedulersCount));
-                }
+              if (scheduler->getSchedulerRequestId() == requestId) {
+                mRunningSchedulersCount--;
+                ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
+                                           .arg(mSchedulersCount)
+                                           .arg(mRunningSchedulersCount));
               }
             }
-
-            ui.queueListWidget->takeItem(0);
-            saveQueueFile(); // tell the queue before any count is read
           }
 
+          ui.queueListWidget->takeItem(first);
+        }
+
+        JobQueue::instance().clear();
+
+        {
           ui.buttonRemoveFromQueue->setEnabled(false);
           ui.buttonPurgeQueue->setEnabled(false);
           ui.buttonUpQueue->setEnabled(false);
