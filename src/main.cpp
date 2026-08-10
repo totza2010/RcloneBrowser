@@ -1,3 +1,4 @@
+#include "database.h"
 #include "main_window.h"
 #include "task_runner.h"
 #include "utils.h"
@@ -152,6 +153,13 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
   QCoreApplication app(argc, argv);
   app.setApplicationName("rclone-browser");
   app.setOrganizationName("rclone-browser");
+
+  // Closed here rather than in main(): QtSql needs a QCoreApplication to be
+  // alive to take a connection down, and this one dies with this function.
+  // Every early return below leaves through this.
+  struct CloseDatabase {
+    ~CloseDatabase() { Database::closeForThread(); }
+  } closeDatabase;
 
   QTextStream out(stdout);
   QTextStream err(stderr);
@@ -548,5 +556,7 @@ int main(int argc, char *argv[]) {
   MainWindow w;
   w.show();
 
-  return app.exec();
+  const int code = app.exec();
+  Database::closeForThread();
+  return code;
 }

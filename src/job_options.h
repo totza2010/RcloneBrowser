@@ -2,6 +2,7 @@
 // Core (L0/L1): must not depend on QtWidgets -- see docs/ARCHITECTURE.md.
 // The QListWidgetItem adapter lives in job_options_item.h.
 #include <QDateTime>
+#include <QJsonObject>
 #include <QString>
 #include <QStringList>
 #include <qexception.h>
@@ -109,6 +110,19 @@ public:
   bool operator==(const JobOptions &other) const {
     return uniqueId == other.uniqueId;
   }
+
+  // How a task is stored now that tasks.bin has been replaced by a database
+  // (docs/PLAN.md 6.8). One JSON object per task rather than one column per
+  // field: 45 columns would have to be altered every time a field is added,
+  // which is the same brittleness as a QDataStream that depends on field
+  // order. What is searched -- name, operation, source, dest -- is lifted
+  // into columns by the store.
+  //
+  // Unknown keys are ignored and missing keys keep the constructor's value,
+  // so a file written by another version is read as far as it makes sense
+  // rather than refused.
+  QJsonObject toJson() const;
+  void readJson(const QJsonObject &json);
 
   /*
    * This allows the de-serialization method to accomodate changes

@@ -1,5 +1,10 @@
 #include "list_of_job_options.h"
+#include "database.h"
 #include <QDataStream>
+#include <QDateTime>
+#include <QJsonDocument>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <qdir.h>
 #include <qlogging.h>
 #include <qstandardpaths.h>
@@ -142,9 +147,138 @@ QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
 }
 
 bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
+  QSqlDatabase db = Database::connection();
+  if (db.isOpen()) {
+    return RestoreFromDatabase(dataIn);
+  }
+
+  // No database driver, no tasks lost: the old file is still read and still
+  // written. An installation missing the SQLite plugin keeps working exactly
+  // as it did before, minus the history.
+  return ReadLegacyFile(dataIn.tasks);
+}
+
+bool ListOfJobOptions::RestoreFromDatabase(ListOfJobOptions &dataIn) {
+  QSqlDatabase db = Database::connection();
+  if (!db.isOpen()) {
+    return false;
+  }
+
+  // tasks.bin is imported once, then renamed rather than deleted: if anything
+  // about this turns out to be wrong, the original is still there to go back
+  // to (docs/PLAN.md 6.8).
+  QSqlQuery count(db);
+  if (count.exec(QStringLiteral("SELECT COUNT(*) FROM task")) && count.next() &&
+      count.value(0).toInt() == 0) {
+    QList<JobOptions *> legacy;
+    if (ReadLegacyFile(legacy) && !legacy.isEmpty()) {
+      dataIn.tasks = legacy;
+      if (dataIn.WriteToDatabase()) {
+        QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
+        if (file != nullptr) {
+          const QString name = file->fileName();
+          file->close();
+          delete file;
+          QFile::rename(name, name + QStringLiteral(".migrated"));
+        }
+        return true;
+      }
+      // Could not write: leave the file alone and keep what was read, so the
+      // session works and the next start tries again.
+      return true;
+    }
+    qDeleteAll(legacy);
+  }
+
+  QSqlQuery query(db);
+  if (!query.exec(QStringLiteral(
+          "SELECT options FROM task ORDER BY position, name"))) {
+    return false;
+  }
+  while (query.next()) {
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(query.value(0).toString().toUtf8());
+    if (!doc.isObject()) {
+      continue; // a row we cannot read is skipped, not fatal
+    }
+    auto *jo = new JobOptions();
+    jo->readJson(doc.object());
+    dataIn.tasks.append(jo);
+  }
+  return true;
+}
+
+bool ListOfJobOptions::WriteToDatabase() {
+  QSqlDatabase db = Database::connection();
+  if (!db.isOpen()) {
+    return false;
+  }
+
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  QSqlQuery begin(db);
+  if (!begin.exec(QStringLiteral("BEGIN IMMEDIATE"))) {
+    return false;
+  }
+
+  bool ok = true;
+  QStringList kept;
+
+  for (int i = 0; i < tasks.size() && ok; ++i) {
+    JobOptions *jo = tasks[i];
+    const QString id = jo->uniqueId.toString();
+    kept.append(id);
+
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO task (id, name, operation, source, dest, options, "
+        "position, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(id) DO UPDATE SET name=excluded.name, "
+        "operation=excluded.operation, source=excluded.source, "
+        "dest=excluded.dest, options=excluded.options, "
+        "position=excluded.position, updated_at=excluded.updated_at"));
+    query.addBindValue(id);
+    query.addBindValue(jo->description);
+    query.addBindValue(static_cast<int>(jo->operation));
+    query.addBindValue(jo->source);
+    query.addBindValue(jo->dest);
+    query.addBindValue(QString::fromUtf8(
+        QJsonDocument(jo->toJson()).toJson(QJsonDocument::Compact)));
+    query.addBindValue(i);
+    query.addBindValue(now); // created_at is only used by the insert half
+    query.addBindValue(now);
+    ok = query.exec();
+  }
+
+  // Deleting what is no longer in the list is how Forget() takes effect. Done
+  // by naming what to keep rather than by emptying the table first, so
+  // created_at survives and a failure part way through changes nothing.
+  if (ok) {
+    QSqlQuery del(db);
+    QStringList marks;
+    for (int i = 0; i < kept.size(); ++i) {
+      marks.append(QStringLiteral("?"));
+    }
+    del.prepare(kept.isEmpty()
+                    ? QStringLiteral("DELETE FROM task")
+                    : QStringLiteral("DELETE FROM task WHERE id NOT IN (%1)")
+                          .arg(marks.join(QLatin1Char(','))));
+    for (const QString &id : kept) {
+      del.addBindValue(id);
+    }
+    ok = del.exec();
+  }
+
+  QSqlQuery end(db);
+  end.exec(ok ? QStringLiteral("COMMIT") : QStringLiteral("ROLLBACK"));
+  return ok;
+}
+
+// Reads what tasks.bin holds into a list of its own, so a failed import
+// cannot leave half the tasks loaded over the ones already there.
+bool ListOfJobOptions::ReadLegacyFile(QList<JobOptions *> &into) {
   QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
   if (file == nullptr) {
-      file = GetPersistenceFile(QIODevice::WriteOnly);
+    file = GetPersistenceFile(QIODevice::WriteOnly);
   }
 
   if (file == nullptr) {
@@ -158,7 +292,7 @@ bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
     try {
       JobOptions *jo = new JobOptions();
       instream >> *jo;
-      dataIn.tasks.append(jo);
+      into.append(jo);
     } catch (SerializationException &ex) {
       //      qDebug() << QString("failed to restore tasks: ") << ex.Message;
       file->close();
@@ -174,6 +308,15 @@ bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
 }
 
 bool ListOfJobOptions::PersistToUserData() {
+  if (Database::connection().isOpen()) {
+    const bool ok = WriteToDatabase();
+    emit tasksListUpdated();
+    return ok;
+  }
+  return WriteLegacyFile();
+}
+
+bool ListOfJobOptions::WriteLegacyFile() {
   QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
   if (file == nullptr) {
       file = GetPersistenceFile(QIODevice::WriteOnly);

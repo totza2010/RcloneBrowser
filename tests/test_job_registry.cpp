@@ -1,3 +1,4 @@
+#include "database.h"
 #include "job_options.h"
 #include "job_registry.h"
 #include "running_job.h"
@@ -26,6 +27,7 @@ class TestJobRegistry : public QObject {
   Q_OBJECT
 
 private:
+  std::unique_ptr<QTemporaryDir> mScratch; // history, so the real one is safe
   std::unique_ptr<QTemporaryDir> mSource;
   std::unique_ptr<QTemporaryDir> mDest;
   QString mRclone;
@@ -47,11 +49,20 @@ private slots:
     mDest.reset(new QTemporaryDir);
     QVERIFY(mSource->isValid() && mDest->isValid());
 
+    // The registry records every job it starts. Without this the run history
+    // of a test would be written into the real user database.
+    mScratch.reset(new QTemporaryDir);
+    QVERIFY(mScratch->isValid());
+    Database::setPath(
+        QDir(mScratch->path()).filePath(QStringLiteral("history.db")));
+
     QFile payload(QDir(mSource->path()).filePath("hello.txt"));
     QVERIFY(payload.open(QIODevice::WriteOnly));
     payload.write("watched without a window\n");
     payload.close();
   }
+
+  void cleanupTestCase() { Database::closeForThread(); }
 
   void runsAJobAndReportsItFinished() {
     JobRegistry &registry = JobRegistry::instance();

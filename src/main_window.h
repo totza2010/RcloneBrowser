@@ -8,6 +8,7 @@
 #endif
 #include <QSystemTrayIcon>
 
+class HistoryWidget;
 class JobWidget;
 
 class MainWindow : public QMainWindow {
@@ -57,6 +58,9 @@ private:
 
   QSystemTrayIcon *mSystemTray = nullptr;
   JobWidget *mLastFinished = nullptr;
+
+  // The runs that have already happened, read back from the database (S13).
+  HistoryWidget *mHistory = nullptr;
 
   bool mAlwaysShowInTray;
   bool mCloseToTray;

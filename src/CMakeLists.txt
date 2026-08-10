@@ -15,7 +15,7 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 # ---- Qt6 Components ----
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(Qt6 QUIET OPTIONAL_COMPONENTS Multimedia)
 
 if(Qt6Multimedia_FOUND)
@@ -49,6 +49,9 @@ set(CORE_SOURCE
   running_job.cpp
   job_registry.cpp
   job_log.cpp
+  database.cpp
+  config_store.cpp
+  run_history.cpp
   job_stats.cpp
   lsjson_parser.cpp
   rc_client.cpp
@@ -67,6 +70,9 @@ set(CORE_HEADER
   running_job.h
   job_registry.h
   job_log.h
+  database.h
+  config_store.h
+  run_history.h
   job_stats.h
   lsjson_parser.h
   rc_client.h
@@ -79,7 +85,9 @@ set(CORE_HEADER
 
 add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER})
 # No Qt6::Widgets and no Qt6::Gui here. That omission is the contract.
-target_link_libraries(rbcore PUBLIC Qt6::Core Qt6::Network)
+# Qt6::Sql is not a GUI module, so the contract above still holds: it brings
+# in the SQLite driver and nothing that needs a screen. See docs/PLAN.md 6.8.
+target_link_libraries(rbcore PUBLIC Qt6::Core Qt6::Network Qt6::Sql)
 target_include_directories(rbcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_precompile_headers(rbcore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch_core.h")
 
@@ -111,6 +119,7 @@ set(MOC
   dedupe_dialog.h
   progress_dialog.h
   job_widget.h
+  history_widget.h
   mount_widget.h
   stream_widget.h
   preferences_dialog.h
@@ -144,6 +153,7 @@ set(SOURCE
   dedupe_dialog.cpp
   progress_dialog.cpp
   job_widget.cpp
+  history_widget.cpp
   mount_widget.cpp
   stream_widget.cpp
   preferences_dialog.cpp

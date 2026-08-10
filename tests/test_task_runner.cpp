@@ -1,3 +1,4 @@
+#include "database.h"
 #include "job_options.h"
 #include "list_of_job_options.h"
 #include "task_runner.h"
@@ -90,6 +91,15 @@ private slots:
     SetRclone(mRclone);
     SetRcloneConf(QString());
 
+    // runTask() records the run, and the tasks it runs live in the same
+    // database. Point it at the scratch directory -- and start from an empty
+    // file, or every run of this test would add its tasks to the ones the
+    // last run left and the names would stop being unique.
+    Database::closeForThread();
+    QFile::remove(QDir(appDir()).filePath(QStringLiteral("history.db")));
+    Database::setPath(
+        QDir(appDir()).filePath(QStringLiteral("history.db")));
+
     mSource.reset(new QTemporaryDir);
     mDest.reset(new QTemporaryDir);
     QVERIFY(mSource->isValid() && mDest->isValid());
@@ -101,6 +111,9 @@ private slots:
   }
 
   void cleanupTestCase() {
+    const QString db = Database::path();
+    Database::closeForThread();
+    QFile::remove(db);
     QFile::remove(iniPath());
     QFile::remove(taskFilePath());
   }

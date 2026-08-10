@@ -29,6 +29,12 @@ public:
 
   bool isOpen() const { return mFile.isOpen(); }
   QString filePath() const { return mFile.fileName(); }
+
+  // How much has been written so far. Recorded alongside the run in the
+  // history, so a listing can say how big a log is without stat-ing every
+  // file in the directory.
+  qint64 bytesWritten() const { return mBytes; }
+
   bool reachedSizeLimit() const { return mTruncated; }
 
   // Where logs are written. Follows the configuration directory, so portable

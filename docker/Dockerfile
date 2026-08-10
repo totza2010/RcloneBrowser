@@ -69,6 +69,10 @@ ARG TARGETARCH=amd64
 # font-noto-thai is here because the remote and folder names in use are
 # Thai. font-noto-cjk is left out at roughly 100 MB; add it through
 # INSTALL_PACKAGES if you need it.
+#
+# qt6-qtbase-sqlite is a separate package on Alpine and is not pulled in by
+# qt6-qtbase. Without it the driver is missing and the run history silently
+# fails to persist -- see docs/PLAN.md 6.8.
 RUN apk add --no-cache \
         ca-certificates \
         dbus \
@@ -78,6 +82,7 @@ RUN apk add --no-cache \
         fontconfig \
         fuse3 \
         qt6-qtbase \
+        qt6-qtbase-sqlite \
         qt6-qtbase-x11 \
         qt6-qtmultimedia \
         xterm \

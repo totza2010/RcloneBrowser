@@ -43,6 +43,15 @@ private:
   static bool RestoreFromUserData(ListOfJobOptions &dataIn);
   static QFile *GetPersistenceFile(QIODevice::OpenModeFlag mode);
 
+  // Tasks live in the database now, and tasks.bin is imported once and then
+  // renamed (docs/PLAN.md 6.8). The file path is kept rather than deleted:
+  // when there is no SQLite driver the old file is still both read and
+  // written, so a build or an installation without it loses nothing.
+  static bool RestoreFromDatabase(ListOfJobOptions &dataIn);
+  static bool ReadLegacyFile(QList<JobOptions *> &into);
+  bool WriteToDatabase();
+  bool WriteLegacyFile();
+
   QList<JobOptions *> tasks;
   bool PersistToUserData();
 };

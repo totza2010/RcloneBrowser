@@ -30,6 +30,11 @@ enum class JobState {
   Stopped,  // we killed it
 };
 
+// "transfer" | "mount" | "stream". Stored with the run history and reported
+// by the API, so the words are settled in one place rather than at each site
+// that has to write them down.
+QString JobKindToString(JobKind kind);
+
 // What the job is, in words, for whoever is showing it. Derived from the task
 // when the job is created; kept here so an API can report it without asking
 // the window.
@@ -77,6 +82,17 @@ public:
   QString transferMode() const { return mTransferMode; }
   const JobDescription &description() const { return mDescription; }
   QDateTime startedAt() const { return mStartedAt; }
+
+  // Invalid until the job ends. Kept rather than computed on the spot so the
+  // history records when rclone actually stopped, not when someone asked.
+  QDateTime finishedAt() const { return mFinishedAt; }
+  int exitCode() const { return mExitCode; }
+
+  // The log file this job is writing, empty when logging is off or when
+  // rclone has not printed anything yet. Only the path is stored in the
+  // history; the lines stay in the file. See docs/PLAN.md 6.8.
+  QString logPath() const { return mLog.filePath(); }
+  qint64 logBytes() const { return mLog.bytesWritten(); }
 
   JobState state() const { return mState; }
   bool isRunning() const { return mState == JobState::Running; }
@@ -134,6 +150,8 @@ private:
   const QString mTransferMode;
   const QString mRequestId;
   const QDateTime mStartedAt = QDateTime::currentDateTime();
+  QDateTime mFinishedAt;
+  int mExitCode = -1;
 
   QProcess *mProcess = nullptr;
   RcClient *mRc = nullptr;

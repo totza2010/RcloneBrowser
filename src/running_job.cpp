@@ -25,6 +25,18 @@ RunningJob::RunningJob(JobKind kind, const QStringList &args,
       mDescription(description), mTaskId(taskId), mTransferMode(transferMode),
       mRequestId(requestId) {}
 
+QString JobKindToString(JobKind kind) {
+  switch (kind) {
+  case JobKind::Transfer:
+    return QStringLiteral("transfer");
+  case JobKind::Mount:
+    return QStringLiteral("mount");
+  case JobKind::Stream:
+    return QStringLiteral("stream");
+  }
+  return QStringLiteral("transfer");
+}
+
 RunningJob::~RunningJob() {
   if (mRc) {
     mRc->stop();
@@ -167,6 +179,9 @@ void RunningJob::handleFinished(int exitCode) {
       mScriptProcess->state() != QProcess::NotRunning) {
     mScriptProcess->kill();
   }
+
+  mExitCode = exitCode;
+  mFinishedAt = QDateTime::currentDateTime();
 
   // A job the user cancelled is not a job that failed, even though rclone
   // exits non-zero either way.

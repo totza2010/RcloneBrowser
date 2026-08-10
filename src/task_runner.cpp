@@ -1,12 +1,16 @@
 #include "task_runner.h"
 
+#include "database.h"
 #include "job_options.h"
 #include "list_of_job_options.h"
+#include "run_history.h"
 #include "utils.h"
 
+#include <QDateTime>
 #include <QEventLoop>
 #include <QProcess>
 #include <QTextStream>
+#include <QUuid>
 
 namespace {
 
@@ -117,6 +121,42 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
       << "rclone: " << RedactArgs(args).join(QLatin1Char(' ')) << "\n\n";
   out.flush();
 
+  // A run from cron counts as much as one from the window, and this is the
+  // half of "two processes writing the same history" that has no window at
+  // all. transferMode says which one it was, so a run that went wrong can be
+  // told apart from one somebody watched.
+  JobRunRecord history;
+  history.requestId =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  history.taskId = task->uniqueId.toString(QUuid::WithoutBraces);
+  history.taskName = task->description;
+  history.kind = QStringLiteral("transfer");
+  history.transferMode = QStringLiteral("cli");
+  history.info = task->description;
+  history.source = task->source;
+  history.dest = task->dest;
+  history.startedAt = QDateTime::currentMSecsSinceEpoch();
+  if (!RunHistory::recordStarted(history)) {
+    // Said out loud rather than swallowed: a run that leaves no trace looks
+    // exactly like one that never happened, and this is the path nobody is
+    // watching. The transfer goes ahead either way.
+    err << "warning: this run will not be recorded in the history: "
+        << Database::lastError() << "\n";
+    err.flush();
+  }
+
+  // Whatever happens below, the row must not be left saying "running": that
+  // reading is reserved for a run whose process died without a word.
+  struct Ending {
+    JobRunRecord &record;
+    ~Ending() {
+      if (record.state.isEmpty()) {
+        record.state = QStringLiteral("unknown");
+      }
+      RunHistory::recordFinished(record);
+    }
+  } ending{history};
+
   QProcess process;
   process.setProcessChannelMode(QProcess::MergedChannels);
   UseRclonePassword(&process);
@@ -137,6 +177,8 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
   if (!process.waitForStarted(10000)) {
     err << "could not start rclone: " << GetRclone() << "\n"
         << process.errorString() << "\n";
+    history.state = QStringLiteral("error");
+    history.exitCode = RcloneUnavailable;
     return RcloneUnavailable;
   }
 
@@ -157,10 +199,15 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
 
   if (process.exitStatus() != QProcess::NormalExit) {
     err << "rclone did not exit normally: " << process.errorString() << "\n";
+    history.state = QStringLiteral("error");
+    history.exitCode = RcloneCrashed;
     return RcloneCrashed;
   }
 
-  return process.exitCode();
+  history.exitCode = process.exitCode();
+  history.state = history.exitCode == 0 ? QStringLiteral("finished")
+                                        : QStringLiteral("error");
+  return history.exitCode;
 }
 
 } // namespace TaskRunner

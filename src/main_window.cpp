@@ -1,6 +1,9 @@
 #include "main_window.h"
 #include "job_options.h"
+#include "config_store.h"
+#include "history_widget.h"
 #include "job_log.h"
+#include "run_history.h"
 #include "job_options_item.h"
 #include "job_widget.h"
 #include "list_of_job_options.h"
@@ -35,6 +38,11 @@ MainWindow::MainWindow() {
   // only thing worth going on. Done at startup rather than on a timer: the
   // directory is small and this is the one moment nothing is writing to it.
   JobLogWriter::purgeOldLogs();
+
+  // The history has the same problem as the logs -- it grows for ever unless
+  // something trims it -- and the same answer. Done together so the rows and
+  // the files they point at go at the same moment.
+  RunHistory::purge(RunHistory::retentionDays(), RunHistory::retentionRows());
 
 #ifdef Q_OS_MACOS
   // macOS power saving control object
@@ -2042,6 +2050,46 @@ MainWindow::MainWindow() {
   mDownloadIcon = arrowDownIcon;
   mMountIcon = mount1Icon;
 
+  // The history belongs inside Jobs rather than beside it: it is the same
+  // subject seen at a different time. Split here in code rather than in the
+  // .ui file because everything from index 3 onwards is addressed by number
+  // in this file (Queue is 3, Scheduler is 4) and this must not move them.
+  //
+  // What was the whole Jobs page becomes the "Running" half -- toolbar
+  // included, since Stop All, Clean and the two Sort buttons only ever meant
+  // the jobs running now.
+  {
+    // The whole Jobs page becomes the "Running" half untouched -- taken out
+    // of the outer tabs and put back inside a page of its own. Moving the
+    // page rather than its contents is what makes this safe: taking a laid
+    // out page apart and rebuilding it left the toolbar parented to the old
+    // page and drawn underneath, which looked exactly like it had vanished.
+    QWidget *runningPage = ui.tabs->widget(1);
+    ui.tabs->removeTab(1); // does not delete the page
+
+    auto *jobsPage = new QWidget(ui.tabs);
+    auto *jobsLayout = new QVBoxLayout(jobsPage);
+    jobsLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *jobTabs = new QTabWidget(jobsPage);
+    jobTabs->addTab(runningPage, "Running");
+
+    mHistory = new HistoryWidget(jobTabs);
+    const int historyIndex = jobTabs->addTab(mHistory, "History");
+    jobsLayout->addWidget(jobTabs);
+
+    ui.tabs->insertTab(1, jobsPage, "Jobs");
+
+    QObject::connect(jobTabs, &QTabWidget::currentChanged, this,
+                     [this, historyIndex](int index) {
+                       // Cheap, and it means the tab never shows a run that
+                       // ended while the other half was in front.
+                       if (index == historyIndex) {
+                         mHistory->refresh();
+                       }
+                     });
+  }
+
   // remove close button from these tabs
   ui.tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
   ui.tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, nullptr);
@@ -3355,32 +3403,13 @@ void MainWindow::closeEvent(QCloseEvent *ev) {
 void MainWindow::restoreSchedulersFromFile() {
   // make sure that tasks are already listed so we can cross check
 
-  QString filePath = GetConfigDir().absoluteFilePath("scheduler.conf");
-  QFile file(filePath);
-  QTextStream in(&file);
-
-  if (!file.open(QIODevice::ReadOnly)) {
-    return;
-  } else {
-
-    while (!in.atEnd()) {
-
-      QString line = in.readLine();
-
-      // check if corresponding task exist?
-      // get scheduler taskId
-      QStringList args = line.split(",");
-      QString schedulerTaskID = args.at(args.indexOf("mTaskId") + 1);
-
-      // A scheduler whose task has since been deleted is skipped rather than
-      // restored pointing at nothing.
-      if (ListOfJobOptions::getInstance()->find(schedulerTaskID)) {
-        mSchedulersCount++;
-        addScheduler("", "", args);
-      }
+  for (const QStringList &args : ScheduleStore::load()) {
+    // A scheduler whose task has since been deleted is skipped rather than
+    // restored pointing at nothing.
+    if (ListOfJobOptions::getInstance()->find(ScheduleStore::taskIdOf(args))) {
+      mSchedulersCount++;
+      addScheduler("", "", args);
     }
-
-    file.close();
   }
 
   ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
@@ -3398,33 +3427,16 @@ void MainWindow::addTasksToQueue() {
 
   ListOfJobOptions *ljo = ListOfJobOptions::getInstance();
 
-  QString filePath = GetConfigDir().absoluteFilePath("queue.conf");
-  QFile file(filePath);
-  QTextStream in(&file);
-
   QString fileTaskId;
   QString fileRequestId;
 
-  if (!file.open(QIODevice::ReadOnly)) {
-    return;
-  } else {
-
+  {
     QString taskNameDisplay;
 
-    while (!in.atEnd()) {
+    for (const QueueEntry &entry : QueueStore::load()) {
 
-      QString line = in.readLine();
-
-      if (line.indexOf(",") == -1) {
-        // old task file
-        fileTaskId = line;
-        fileRequestId = QUuid::createUuid().toString();
-
-      } else {
-
-        fileTaskId = line.left(line.indexOf(","));
-        fileRequestId = line.right(line.length() - (line.indexOf(",") + 1));
-      }
+      fileTaskId = entry.taskId;
+      fileRequestId = entry.requestId;
 
       for (JobOptions *jo : ljo->getTasks()) {
 
@@ -3482,8 +3494,6 @@ void MainWindow::addTasksToQueue() {
         }
       }
     }
-
-    file.close();
 
     if (mQueueCount == 0) {
       ui.tabs->setTabText(3, QString("Queue"));
@@ -4068,87 +4078,43 @@ void MainWindow::editSelectedTask() {
   // and the Save Task button closes it... so there is nothing more to do here
 }
 
+// The name is kept: the queue is still saved whole on every change, it just
+// no longer goes to queue.conf. See docs/PLAN.md 6.8.
 bool MainWindow::saveQueueFile(void) {
 
   QMutexLocker locker(&mSaveQueueFileMutex);
-  QString filePath = GetConfigDir().absoluteFilePath("queue.conf");
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 1, 0)
-  QFile file(filePath);
-#else
-  QSaveFile file(filePath);
-#endif
-
-  if (!file.open(QIODevice::WriteOnly)) {
-    return false;
-  }
-
-  QTextStream out(&file);
-
-  // loop over ui.queueListWidget
+  QList<QueueEntry> entries;
   for (int i = 0; i < ui.queueListWidget->count(); ++i) {
-    QListWidgetItem *item = ui.queueListWidget->item(i);
+    auto *jobItem =
+        static_cast<JobOptionsListWidgetItem *>(ui.queueListWidget->item(i));
 
-    JobOptionsListWidgetItem *jobItem =
-        static_cast<JobOptionsListWidgetItem *>(item);
-
-    JobOptions *jo = jobItem->GetData();
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 1)
-    out << jo->uniqueId.toString() << "," << jobItem->GetRequestId()
-        << Qt::endl;
-#else
-    out << jo->uniqueId.toString() << "," << jobItem->GetRequestId() << endl;
-#endif
+    QueueEntry entry;
+    entry.taskId = jobItem->GetData()->uniqueId.toString();
+    entry.requestId = jobItem->GetRequestId();
+    entries.append(entry);
   }
 
-  out.flush();
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 1, 0)
-  return out.status() == QTextStream::Ok && file.commit();
-#else
-  return out.status() == QTextStream::Ok;
-#endif
+  return QueueStore::save(entries);
 }
 
 bool MainWindow::saveSchedulerFile(void) {
 
   QMutexLocker locker(&mSaveSchedulerFileMutex);
-  QString filePath = GetConfigDir().absoluteFilePath("scheduler.conf");
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 1, 0)
-  QFile file(filePath);
-#else
-  QSaveFile file(filePath);
-#endif
+  QList<QStringList> schedules;
+  const int schedulersCount = ui.schedulers->count();
 
-  if (!file.open(QIODevice::WriteOnly)) {
-    return false;
-  };
-
-  QTextStream out(&file);
-  int schedulersCount = ui.schedulers->count();
-
+  // Backwards, and two at a time, because that is the order the layout holds
+  // them in and the order the file was written in -- restoring depends on it.
   for (int i = schedulersCount - 2; i >= 0; i = i - 2) {
     QWidget *widget = ui.schedulers->itemAt(i)->widget();
     if (auto scheduler = qobject_cast<SchedulerWidget *>(widget)) {
-      QStringList args = scheduler->getSchedulerParameters();
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 1)
-      out << args.join(",") << Qt::endl;
-#else
-      out << args.join(",") << endl;
-#endif
+      schedules.append(scheduler->getSchedulerParameters());
     }
   }
 
-  out.flush();
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 1, 0)
-  return out.status() == QTextStream::Ok && file.commit();
-#else
-  return out.status() == QTextStream::Ok;
-#endif
+  return ScheduleStore::save(schedules);
 }
 
 void MainWindow::addSavedTransfer(const QString &uniqueId, bool dryRun,

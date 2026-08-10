@@ -1,8 +1,12 @@
+#include "database.h"
 #include "job_options.h"
 #include "list_of_job_options.h"
 #include "utils.h"
 
 #include <QCoreApplication>
+#include <QJsonDocument>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -53,6 +57,43 @@ private:
   static QString taskFilePath() {
     return QDir(appDir()).filePath("tasks.bin");
   }
+  static QString dbPath() { return QDir(appDir()).filePath("tasks-test.db"); }
+
+  // Tasks live in the database now (docs/PLAN.md 6.8), so "is it really
+  // written" has to be asked of the database rather than of the file. Read
+  // with a query of its own so the answer cannot come from the list in
+  // memory.
+  static bool storedTaskNames(QStringList &names) {
+    QSqlDatabase db = Database::connection();
+    if (!db.isOpen()) {
+      return false;
+    }
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("SELECT name FROM task ORDER BY position"))) {
+      return false;
+    }
+    while (query.next()) {
+      names.append(query.value(0).toString());
+    }
+    return true;
+  }
+
+  static bool databaseHolds(const QString &name) {
+    QStringList names;
+    return storedTaskNames(names) && names.contains(name);
+  }
+
+  static QString storedOptionsJson() {
+    QSqlDatabase db = Database::connection();
+    QSqlQuery query(db);
+    QString all;
+    if (query.exec(QStringLiteral("SELECT options FROM task"))) {
+      while (query.next()) {
+        all += query.value(0).toString();
+      }
+    }
+    return all;
+  }
 
   std::unique_ptr<QTemporaryDir> mScratch;
 
@@ -97,15 +138,47 @@ private slots:
              "portable mode did not take effect; the store would read the "
              "real user task file");
 
-    // Start from the golden file rather than whatever a previous run left.
+    // Start from the golden file rather than whatever a previous run left --
+    // and from an empty database, or the import under test would be skipped
+    // because a previous run already did it.
     QFile::remove(taskFilePath());
+    QFile::remove(taskFilePath() + QStringLiteral(".migrated"));
+    QFile::remove(dbPath());
     QVERIFY(QFile::copy(QStringLiteral(RB_FIXTURES_DIR "/tasks_v8.bin"),
                         taskFilePath()));
+
+    Database::setPath(dbPath());
+    QVERIFY2(Database::connection().isOpen(),
+             qPrintable(Database::lastError()));
   }
 
   void cleanupTestCase() {
+    Database::closeForThread();
     QFile::remove(iniPath());
     QFile::remove(taskFilePath());
+    QFile::remove(taskFilePath() + QStringLiteral(".migrated"));
+    QFile::remove(dbPath());
+  }
+
+  // The first read imports tasks.bin and then renames it, so an installation
+  // that has to be rolled back still has the original. Runs before the golden
+  // checks below, which then read what the import produced rather than the
+  // file.
+  void importsTheOldFileOnceAndKeepsIt() {
+    QStringList names;
+    QVERIFY(storedTaskNames(names));
+    QCOMPARE(names.size(), 0); // nothing has read the store yet
+
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), 2);
+
+    QVERIFY(storedTaskNames(names));
+    QCOMPARE(names.size(), 2);
+    QVERIFY(names.contains(QStringLiteral("nightly photos")));
+    QVERIFY(names.contains(QStringLiteral("mount media")));
+
+    // Renamed, not deleted.
+    QVERIFY(!QFile::exists(taskFilePath()));
+    QVERIFY(QFile::exists(taskFilePath() + QStringLiteral(".migrated")));
   }
 
   // Every field of the golden file, so a shift of even one position fails
@@ -157,12 +230,21 @@ private slots:
   // are generated per run and passed through the environment; anything found
   // here would mean they had leaked back into persisted state.
   void goldenFileHoldsNoCredentials() {
-    // Prove the search works before trusting what it fails to find.
-    QVERIFY(fileContains(taskFilePath(), QStringLiteral("nightly photos")));
+    const QString retired = taskFilePath() + QStringLiteral(".migrated");
 
-    QVERIFY(!fileContains(taskFilePath(), QStringLiteral("rc-user")));
-    QVERIFY(!fileContains(taskFilePath(), QStringLiteral("rc-pass")));
-    QVERIFY(!fileContains(taskFilePath(), QStringLiteral("RCLONE_RC_")));
+    // Prove the search works before trusting what it fails to find.
+    QVERIFY(fileContains(retired, QStringLiteral("nightly photos")));
+
+    QVERIFY(!fileContains(retired, QStringLiteral("rc-user")));
+    QVERIFY(!fileContains(retired, QStringLiteral("rc-pass")));
+    QVERIFY(!fileContains(retired, QStringLiteral("RCLONE_RC_")));
+
+    // The same has to hold of where tasks live now.
+    const QString stored = storedOptionsJson();
+    QVERIFY(stored.contains(QStringLiteral("nightly photos")));
+    QVERIFY(!stored.contains(QStringLiteral("rc-user")));
+    QVERIFY(!stored.contains(QStringLiteral("rc-pass")));
+    QVERIFY(!stored.contains(QStringLiteral("RCLONE_RC_")));
   }
 
   // Adding a task and writing it out has to leave the existing ones readable.
@@ -179,11 +261,11 @@ private slots:
 
     QCOMPARE(store->getTasks().size(), 3);
 
-    // Re-read the file itself: the in-memory list would pass even if writing
-    // produced something unreadable.
-    QVERIFY(fileContains(taskFilePath(), QStringLiteral("nightly photos")));
-    QVERIFY(fileContains(taskFilePath(), QStringLiteral("mount media")));
-    QVERIFY(fileContains(taskFilePath(), QStringLiteral("added by test")));
+    // Re-read the store itself: the in-memory list would pass even if
+    // writing produced nothing at all.
+    QVERIFY(databaseHolds(QStringLiteral("nightly photos")));
+    QVERIFY(databaseHolds(QStringLiteral("mount media")));
+    QVERIFY(databaseHolds(QStringLiteral("added by test")));
   }
 
   void forgetRemovesOnlyThatTask() {
@@ -200,8 +282,79 @@ private slots:
     QVERIFY(store->Forget(victim));
     QCOMPARE(store->getTasks().size(), before - 1);
 
-    QVERIFY(!fileContains(taskFilePath(), QStringLiteral("added by test")));
-    QVERIFY(fileContains(taskFilePath(), QStringLiteral("nightly photos")));
+    QVERIFY(!databaseHolds(QStringLiteral("added by test")));
+    QVERIFY(databaseHolds(QStringLiteral("nightly photos")));
+  }
+
+  // The database stores a task as JSON, so anything toJson() forgets is a
+  // setting that silently reverts to its default the next time the
+  // application starts -- the same failure the golden file exists to catch,
+  // one storage format later.
+  void jsonKeepsEverythingTheTaskFileHeld() {
+    const QList<JobOptions *> &tasks =
+        ListOfJobOptions::getInstance()->getTasks();
+    QVERIFY(!tasks.isEmpty());
+
+    for (const JobOptions *original : tasks) {
+      JobOptions round;
+      round.readJson(original->toJson());
+
+      QCOMPARE(round.toJson(), original->toJson());
+
+      // What actually matters: the command rclone is given must come out the
+      // same on the other side of being stored.
+      QCOMPARE(round.getOptions(), original->getOptions());
+      if (original->operation == JobOptions::Mount) {
+        QCOMPARE(round.getMountOptions(), original->getMountOptions());
+      }
+      QCOMPARE(round.uniqueId, original->uniqueId);
+      QCOMPARE(round.description, original->description);
+    }
+
+    // A tripwire for a field added to JobOptions and not to toJson(): the
+    // count has to be changed deliberately, which is the moment to check.
+    QCOMPARE(tasks.at(0)->toJson().size(), 45);
+  }
+
+  // Reading is not writing: a value that survives a round trip in memory can
+  // still be lost on the way through the database column.
+  void aTaskSurvivesBeingWrittenAndReadBack() {
+    ListOfJobOptions *store = ListOfJobOptions::getInstance();
+
+    auto *saved = new JobOptions(true);
+    saved->description = "round trip";
+    saved->operation = JobOptions::Sync;
+    saved->source = "remote:from";
+    saved->dest = "C:/to";
+    saved->mountCacheLevel = JobOptions::Full;
+    saved->maxDepth = 7;
+    saved->excluded = "*.tmp";
+    saved->createEmptySrcDirs = true;
+    saved->uniqueId = QUuid::createUuid();
+    QVERIFY(store->Persist(saved));
+
+    QSqlQuery query(Database::connection());
+    query.prepare(QStringLiteral("SELECT options FROM task WHERE id = ?"));
+    query.addBindValue(saved->uniqueId.toString());
+    QVERIFY(query.exec());
+    QVERIFY(query.next());
+
+    JobOptions reloaded;
+    reloaded.readJson(
+        QJsonDocument::fromJson(query.value(0).toString().toUtf8()).object());
+
+    QCOMPARE(reloaded.description, QStringLiteral("round trip"));
+    QCOMPARE(reloaded.operation, JobOptions::Sync);
+    QCOMPARE(reloaded.jobType, JobOptions::Download);
+    QCOMPARE(reloaded.source, QStringLiteral("remote:from"));
+    QCOMPARE(reloaded.dest, QStringLiteral("C:/to"));
+    QCOMPARE(reloaded.mountCacheLevel, JobOptions::Full);
+    QCOMPARE(reloaded.maxDepth, 7);
+    QCOMPARE(reloaded.excluded, QStringLiteral("*.tmp"));
+    QCOMPARE(reloaded.createEmptySrcDirs, true);
+    QCOMPARE(reloaded.uniqueId, saved->uniqueId);
+
+    QVERIFY(store->Forget(saved));
   }
 
   // A task whose numeric fields were never filled in used to build a command

@@ -327,5 +327,138 @@ QStringList JobOptions::getMountOptions() const {
   return list;
 }
 
+namespace {
+
+// The enums are stored as their numbers, the same values QDataStream wrote.
+// They are pinned to the order of items in the dialogs (see job_options.h),
+// so writing the names instead would only add a second thing to keep in step.
+template <typename Enum>
+Enum readEnum(const QJsonObject &json, const QString &key, Enum fallback) {
+  const QJsonValue value = json.value(key);
+  return value.isDouble() ? static_cast<Enum>(value.toInt())
+                          : fallback;
+}
+
+QString readString(const QJsonObject &json, const QString &key,
+                   const QString &fallback) {
+  const QJsonValue value = json.value(key);
+  return value.isString() ? value.toString() : fallback;
+}
+
+bool readBool(const QJsonObject &json, const QString &key, bool fallback) {
+  const QJsonValue value = json.value(key);
+  return value.isBool() ? value.toBool() : fallback;
+}
+
+} // namespace
+
+QJsonObject JobOptions::toJson() const {
+  QJsonObject json;
+
+  // dryRun is deliberately absent: it is a decision about one run, and
+  // persisting it is how a dry run turns into a real one by surprise.
+  json["description"] = description;
+  json["jobType"] = static_cast<int>(jobType);
+  json["operation"] = static_cast<int>(operation);
+  json["sync"] = sync;
+  json["syncTiming"] = static_cast<int>(syncTiming);
+  json["skipNewer"] = skipNewer;
+  json["skipExisting"] = skipExisting;
+  json["compare"] = compare;
+  json["compareOption"] = static_cast<int>(compareOption);
+  json["verbose"] = verbose;
+  json["sameFilesystem"] = sameFilesystem;
+  json["dontUpdateModified"] = dontUpdateModified;
+  json["transfers"] = transfers;
+  json["checkers"] = checkers;
+  json["bandwidth"] = bandwidth;
+  json["minSize"] = minSize;
+  json["minAge"] = minAge;
+  json["maxAge"] = maxAge;
+  json["maxDepth"] = maxDepth;
+  json["connectTimeout"] = connectTimeout;
+  json["idleTimeout"] = idleTimeout;
+  json["retries"] = retries;
+  json["lowLevelRetries"] = lowLevelRetries;
+  json["deleteExcluded"] = deleteExcluded;
+  json["excluded"] = excluded;
+  json["extra"] = extra;
+  json["DriveSharedWithMe"] = DriveSharedWithMe;
+  json["source"] = source;
+  json["dest"] = dest;
+  json["isFolder"] = isFolder;
+  json["uniqueId"] = uniqueId.toString();
+  json["remoteMode"] = remoteMode;
+  json["remoteType"] = remoteType;
+  json["mountReadOnly"] = mountReadOnly;
+  json["mountCacheLevel"] = static_cast<int>(mountCacheLevel);
+  json["mountVolume"] = mountVolume;
+  json["mountAutoStart"] = mountAutoStart;
+  json["mountRcPort"] = mountRcPort;
+  json["mountScript"] = mountScript;
+  json["mountWinDriveMode"] = mountWinDriveMode;
+  json["included"] = included;
+  json["noTraverse"] = noTraverse;
+  json["createEmptySrcDirs"] = createEmptySrcDirs;
+  json["filtered"] = filtered;
+  json["deleteEmptySrcDirs"] = deleteEmptySrcDirs;
+
+  return json;
+}
+
+void JobOptions::readJson(const QJsonObject &json) {
+  description = readString(json, "description", description);
+  jobType = readEnum(json, "jobType", jobType);
+  operation = readEnum(json, "operation", operation);
+  sync = readBool(json, "sync", sync);
+  syncTiming = readEnum(json, "syncTiming", syncTiming);
+  skipNewer = readBool(json, "skipNewer", skipNewer);
+  skipExisting = readBool(json, "skipExisting", skipExisting);
+  compare = readBool(json, "compare", compare);
+  compareOption = readEnum(json, "compareOption", compareOption);
+  verbose = readBool(json, "verbose", verbose);
+  sameFilesystem = readBool(json, "sameFilesystem", sameFilesystem);
+  dontUpdateModified = readBool(json, "dontUpdateModified", dontUpdateModified);
+  transfers = readString(json, "transfers", transfers);
+  checkers = readString(json, "checkers", checkers);
+  bandwidth = readString(json, "bandwidth", bandwidth);
+  minSize = readString(json, "minSize", minSize);
+  minAge = readString(json, "minAge", minAge);
+  maxAge = readString(json, "maxAge", maxAge);
+  maxDepth = json.value("maxDepth").isDouble() ? json.value("maxDepth").toInt()
+                                               : maxDepth;
+  connectTimeout = readString(json, "connectTimeout", connectTimeout);
+  idleTimeout = readString(json, "idleTimeout", idleTimeout);
+  retries = readString(json, "retries", retries);
+  lowLevelRetries = readString(json, "lowLevelRetries", lowLevelRetries);
+  deleteExcluded = readBool(json, "deleteExcluded", deleteExcluded);
+  excluded = readString(json, "excluded", excluded);
+  extra = readString(json, "extra", extra);
+  DriveSharedWithMe = readBool(json, "DriveSharedWithMe", DriveSharedWithMe);
+  source = readString(json, "source", source);
+  dest = readString(json, "dest", dest);
+  isFolder = readBool(json, "isFolder", isFolder);
+
+  const QString id = readString(json, "uniqueId", QString());
+  if (!id.isEmpty()) {
+    uniqueId = QUuid::fromString(id);
+  }
+
+  remoteMode = readString(json, "remoteMode", remoteMode);
+  remoteType = readString(json, "remoteType", remoteType);
+  mountReadOnly = readBool(json, "mountReadOnly", mountReadOnly);
+  mountCacheLevel = readEnum(json, "mountCacheLevel", mountCacheLevel);
+  mountVolume = readString(json, "mountVolume", mountVolume);
+  mountAutoStart = readBool(json, "mountAutoStart", mountAutoStart);
+  mountRcPort = readString(json, "mountRcPort", mountRcPort);
+  mountScript = readString(json, "mountScript", mountScript);
+  mountWinDriveMode = readBool(json, "mountWinDriveMode", mountWinDriveMode);
+  included = readString(json, "included", included);
+  noTraverse = readBool(json, "noTraverse", noTraverse);
+  createEmptySrcDirs = readBool(json, "createEmptySrcDirs", createEmptySrcDirs);
+  filtered = readString(json, "filtered", filtered);
+  deleteEmptySrcDirs = readBool(json, "deleteEmptySrcDirs", deleteEmptySrcDirs);
+}
+
 SerializationException::SerializationException(QString msg)
     : QException(), Message(msg) {}
