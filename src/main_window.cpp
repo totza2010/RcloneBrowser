@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "job_options.h"
+#include "app_settings.h"
 #include "config_store.h"
 #include "history_widget.h"
 #include "job_log.h"
@@ -1598,13 +1599,10 @@ MainWindow::MainWindow() {
             jobIcon = mUploadIcon;
           }
 
-          // The queue gives the run its id, because the queue is what has to
-          // be able to tell two runs of the same task apart afterwards.
-          const QString requestId =
-              JobQueue::instance().enqueue(jo->uniqueId.toString());
-
-          ui.queueListWidget->addItem(new JobOptionsListWidgetItem(
-              jo, jobIcon, jo->description, requestId));
+          // The queue gives the run its id and announces the change; the row
+          // for it is drawn by refreshQueueView(), not added here as well.
+          Q_UNUSED(jobIcon);
+          JobQueue::instance().enqueue(jo->uniqueId.toString());
         }
 
         if (ui.queueListWidget->count() > 0) {
@@ -2067,6 +2065,17 @@ MainWindow::MainWindow() {
                        addJobCard(job);
                      }
                    });
+
+  // From here the queue drives itself and the tab is drawn from it.
+  QObject::connect(&JobQueue::instance(), &JobQueue::changed, this,
+                   [this]() { refreshQueueView(); });
+  QObject::connect(&JobQueue::instance(), &JobQueue::emptied, this, [this]() {
+    const QString script = AppSettings::queueFinishedScript();
+    if (!script.isEmpty()) {
+      runScript(script);
+    }
+  });
+  JobQueue::instance().setDrivesItself(true);
 
   // remove close button from these tabs
   ui.tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
@@ -3325,6 +3334,8 @@ bool MainWindow::canClose() {
     // make sure terminated job is not removed from the queue
     // we make close process aware that it is quitting
     mAppQuittingStatus = true;
+    // Nothing new from the queue once quitting has begun.
+    JobQueue::instance().setDrivesItself(false);
 
     // Each attempt counts its own delay. Without this a second attempt never
     // reaches 3 and never puts up the "terminating" notice, so a slow quit
@@ -3395,6 +3406,60 @@ void MainWindow::restoreSchedulersFromFile() {
   ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
                              .arg(mSchedulersCount)
                              .arg(mRunningSchedulersCount));
+}
+
+void MainWindow::refreshQueueView() {
+  ListOfJobOptions *store = ListOfJobOptions::getInstance();
+  const QString running = JobQueue::instance().runningRequestId();
+
+  ui.queueListWidget->clear();
+
+  for (const QueueEntry &entry : JobQueue::instance().entries()) {
+    JobOptions *jo = store->find(entry.taskId);
+    if (jo == nullptr) {
+      continue; // the queue drops these itself; do not draw a ghost
+    }
+
+    QIcon icon = mUploadIcon;
+    if (jo->jobType == JobOptions::JobType::Download) {
+      icon = jo->operation == JobOptions::Mount ? mMountIcon : mDownloadIcon;
+    }
+
+    QString name = jo->description;
+    if (jo->operation == JobOptions::Mount && jo->mountAutoStart) {
+      name += "(autostart)";
+    }
+
+    const int schedulersCount = ui.schedulers->count();
+    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
+      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
+      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
+        if (scheduler->getSchedulerRequestId() == entry.requestId) {
+          name += " (*Sch)";
+          break;
+        }
+      }
+    }
+
+    auto *item = new JobOptionsListWidgetItem(jo, icon, name, entry.requestId);
+    if (entry.requestId == running) {
+      item->setBackground(Qt::darkGreen);
+    }
+    ui.queueListWidget->addItem(item);
+  }
+
+  const bool taskRunning = JobQueue::instance().taskIsRunning();
+  const int total = JobQueue::instance().count();
+  if (!JobQueue::instance().isRunning()) {
+    ui.tabs->setTabText(3, total == 0 ? QString("Queue")
+                                      : QString("Queue (%1)").arg(total));
+  } else {
+    ui.tabs->setTabText(3, QString("Queue (%1)>>(%2)")
+                               .arg(total - (taskRunning ? 1 : 0))
+                               .arg(taskRunning ? 1 : 0));
+  }
+
+  setQueueButtons();
 }
 
 void MainWindow::addTasksToQueue() {
@@ -4312,118 +4377,10 @@ void MainWindow::addJobCard(RunningJob *job) {
         // only when not quitting, queue is active and there are tasks in the
         // queue and there is no running other task
 
-        if (!mAppQuittingStatus && mQueueStatus &&
-            ui.queueListWidget->count() > 0) {
-          //            ui.queueListWidget->count() > 0 && mTransferJobCount ==
-          //            0) {
-
-          auto QueueRunningTask = ui.queueListWidget->item(0);
-
-          JobOptionsListWidgetItem *item =
-              static_cast<JobOptionsListWidgetItem *>(QueueRunningTask);
-          JobOptions *jo = item->GetData();
-
-          // check if finished task the same as running from the queue
-          auto transfer = qobject_cast<JobWidget *>(widget);
-
-          // we also have to check requestId - to distinguish between the same
-          // task triggered by queue/scheduler and by user directly if yes we
-          // try to run next one
-          if ((transfer->getUniqueID() == jo->uniqueId.toString()) &&
-              (transfer->getRequestId() == item->GetRequestId())) {
-            ui.queueListWidget->takeItem(0);
-            saveQueueFile(); // tell the queue before any count is read
-            --mQueueCount;
-
-            // queue is still running, even if mQueueCount is 0
-            if (mQueueCount == 0) {
-              mQueueTaskRunning = false;
-              ui.tabs->setTabText(3,
-                                  QString("Queue (%1)>>(0)").arg(mQueueCount));
-              // run queueScript
-              auto settings = GetSettings();
-              bool queueScriptRun =
-                  settings->value("Settings/queueScriptRun", false).toBool();
-
-              if (queueScriptRun) {
-                QString queueScript =
-                    settings->value("Settings/queueScript").toString();
-                if (!queueScript.isEmpty()) {
-                  runScript(queueScript);
-                }
-              }
-            }
-
-            // if there is still task to run
-            if ((ui.queueListWidget->count()) > 0) {
-
-              auto nextTask = ui.queueListWidget->item(0);
-              // check if task is not already running (user could run it
-              // manually)
-
-              bool isAlreadyRunning = false;
-
-              JobOptionsListWidgetItem *item =
-                  static_cast<JobOptionsListWidgetItem *>(nextTask);
-              JobOptions *jo = item->GetData();
-
-              int widgetsCount = ui.jobs->count();
-              for (int j = widgetsCount - 2; j >= 0; j = j - 2) {
-                QWidget *widget = ui.jobs->itemAt(j)->widget();
-                if (auto transfer = qobject_cast<JobWidget *>(widget)) {
-                  if ((transfer->getUniqueID() == jo->uniqueId.toString()) &&
-                      (transfer->isRunning)) {
-                    isAlreadyRunning = true;
-                    break;
-                  }
-                }
-              }
-
-              // if the same task not running and nothing else running
-              if (!isAlreadyRunning && mTransferJobCount == 0) {
-                mQueueTaskRunning = true;
-                runItem(item->GetData(), "queue", item->GetRequestId());
-
-                ui.tabs->setTabText(
-                    3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-
-                ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-              } else {
-
-                ui.tabs->setTabText(
-                    3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-
-                mQueueTaskRunning = false;
-              }
-            }
-            saveQueueFile();
-          } else {
-            // finished task was not one from the queue
-            // queue is active and have some tasks and if there is nothing else
-            // running we start top task from the queue
-            if (!mQueueTaskRunning) {
-              auto nextTask = ui.queueListWidget->item(0);
-
-              JobOptionsListWidgetItem *item =
-                  static_cast<JobOptionsListWidgetItem *>(nextTask);
-
-              if (mTransferJobCount == 0) {
-
-                mQueueTaskRunning = true;
-                runItem(item->GetData(), "queue", item->GetRequestId());
-                ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-                ui.tabs->setTabText(
-                    3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-              }
-
-            } else {
-
-              // mQueueTaskRunning = false;
-              ui.tabs->setTabText(
-                  3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-            }
-          }
-        }
+        // The queue moves itself on now: it hears the job end from
+        // JobRegistry, drops its head entry and gives the next one its turn.
+        // What stood here was that decision written out by hand, together
+        // with the rows and the tab text refreshQueueView() draws instead.
 
         setTasksButtons();
 

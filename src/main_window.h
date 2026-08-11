@@ -166,6 +166,10 @@ private:
   // nowhere. See docs/QUEUE-MOVE.md block C.
   void addJobCard(RunningJob *job);
 
+  // Draws the queue tab from JobQueue: rows, tab text, buttons. Fifteen
+  // places used to write that tab text; this is the one left.
+  void refreshQueueView();
+
   void addTasksToQueue();
 
   void restoreSchedulersFromFile();
