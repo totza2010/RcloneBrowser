@@ -10,6 +10,7 @@
 #include <QSystemTrayIcon>
 
 class HistoryWidget;
+class RunningJob;
 class JobWidget;
 
 class MainWindow : public QMainWindow {
@@ -157,6 +158,13 @@ private:
 
   // if waiting for processes we show dialog - this is used to calculate delay
   int mQuitInfoDelay = 0;
+
+  // Makes the card for a job that is already running. Called for every
+  // transfer JobRegistry announces, whoever started it -- the window, the
+  // queue, or later the API. Before this the card was made by the same
+  // function that started the job, so a job started anywhere else appeared
+  // nowhere. See docs/QUEUE-MOVE.md block C.
+  void addJobCard(RunningJob *job);
 
   void addTasksToQueue();
 

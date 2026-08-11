@@ -2060,6 +2060,14 @@ MainWindow::MainWindow() {
                      });
   }
 
+  // Every transfer gets a card, whoever started it.
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
+                   [this](RunningJob *job) {
+                     if (job->kind() == JobKind::Transfer) {
+                       addJobCard(job);
+                     }
+                   });
+
   // remove close button from these tabs
   ui.tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
   ui.tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, nullptr);
@@ -4199,10 +4207,15 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
 
   // The job owns the process, the remote control and the log; the card only
   // shows what the job reports. See docs/API.md S2.
-  RunningJob *job = JobRegistry::instance().start(
+  //
+  // The card is not made here: JobRegistry announces the job and the handler
+  // for that makes one. That way a job the queue starts gets a card too.
+  JobRegistry::instance().start(
       JobKind::Transfer, args, JobDescription{message, source, dest}, uniqueId,
       transferMode, requestId);
+}
 
+void MainWindow::addJobCard(RunningJob *job) {
   auto widget = new JobWidget(job);
 
   auto line = new QFrame();
