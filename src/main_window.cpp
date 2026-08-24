@@ -3583,205 +3583,40 @@ void MainWindow::listTasks() {
     ui.buttonSortTask->setEnabled(false);
   }
 
-  // update ui.queueListWidget when task changed
-  QString uniqueId_queue;
-  QString uniqueId_task;
-  bool itemFound = false;
-
-  // for every item in queue
-  if (ui.queueListWidget->count() > 0) {
-    for (int i = 0; i < ui.queueListWidget->count(); i++) {
-
-      ui.queueListWidget->item(i);
-
-      JobOptionsListWidgetItem *item_queue =
-          static_cast<JobOptionsListWidgetItem *>(ui.queueListWidget->item(i));
-      JobOptions *jo_queue = item_queue->GetData();
-      uniqueId_queue = jo_queue->uniqueId.toString();
-      // preserve requestId
-      QString requestId = item_queue->GetRequestId();
-
-      // if no corresponding item found in the queue means task has been deleted
-      // and have to be removed from the queue as well
-      itemFound = false;
-
-      if (ui.tasksListWidget->count() > 0) {
-
-        // check if corresponding item in the task list
-        for (int j = 0; j < ui.tasksListWidget->count(); j++) {
-
-          JobOptionsListWidgetItem *item_task =
-              static_cast<JobOptionsListWidgetItem *>(
-                  ui.tasksListWidget->item(j));
-          JobOptions *jo_task = item_task->GetData();
-
-          uniqueId_task = jo_task->uniqueId.toString();
-
-          // uniqueId never changes, name can be edited so we check Id
-          if (uniqueId_queue == uniqueId_task) {
-            itemFound = true;
-            // update ui.queueListWidget
-
-            ui.queueListWidget->takeItem(i);
-            saveQueueFile(); // tell the queue before any count is read
-
-            QIcon jobIcon = mDownloadIcon;
-
-            if (jo_task->jobType == JobOptions::JobType::Download) {
-              if (jo_task->operation == JobOptions::Mount) {
-                jobIcon = mMountIcon;
-              } else {
-                jobIcon = mDownloadIcon;
-              }
-            }
-            if (jo_task->jobType == JobOptions::JobType::Upload) {
-              jobIcon = mUploadIcon;
-            }
-
-            // check if task is from scheduler
-            bool transferModeSch = false;
-            int schedulersCount = ui.schedulers->count();
-            for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-              QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-              if (auto scheduler =
-                      qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-                if (requestId == scheduler->getSchedulerRequestId()) {
-                  transferModeSch = true;
-                }
-              }
-            }
-
-            QString taskNameDisplay = jo_task->description;
-            if (transferModeSch) {
-
-              taskNameDisplay = taskNameDisplay + " (*Sch)";
-            }
-
-            JobOptionsListWidgetItem *item_insert =
-                new JobOptionsListWidgetItem(jo_task, jobIcon, taskNameDisplay,
-                                             requestId);
-
-            ui.queueListWidget->insertItem(i, item_insert);
-
-            if (i == 0 && mQueueStatus) {
-              ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-            }
-          }
-        } // for j
-      }
-
-      // remove item from ui.queueListWidget if removed from tasks
-      if (mQueueStatus) {
-        // running queue
-        if (!itemFound) {
-          // only if already running leave it
-          // never should happen - as not possible to delete already running
-          if (i != 0) {
-            --mQueueCount;
-            ui.queueListWidget->takeItem(i);
-            saveQueueFile(); // tell the queue before any count is read
-            if (mQueueCount == 0) {
-              ui.tabs->setTabText(3,
-                                  QString("Queue (%1)>>(0)").arg(mQueueCount));
-            } else {
-              ui.tabs->setTabText(
-                  3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-            }
-          }
-        }
-
-      } else {
-        // stopped queue
-        if (!itemFound) {
-          --mQueueCount;
-          ui.queueListWidget->takeItem(i);
-          saveQueueFile(); // tell the queue before any count is read
-          if (mQueueCount == 0) {
-            ui.tabs->setTabText(3, QString("Queue"));
-          } else {
-            ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-          }
-        }
-
-      } // mQueueStatus
-    }   // for i
-
-    saveQueueFile();
-  }
-
-  // update schedulers tasks names and add "(*Sch)" to tasks' names
-
-  // loop over all tasks
-  for (int i = 0; i < ui.tasksListWidget->count(); i = i + 1) {
-    JobOptionsListWidgetItem *item =
+  // A task the scheduler points at is marked in the task list, and the
+  // schedule is told the task's name has changed. Cut away with block 9 by
+  // mistake and put back: the marker is how somebody sees, in the list they
+  // are about to delete from, that a schedule depends on this one.
+  for (int i = 0; i < ui.tasksListWidget->count(); ++i) {
+    auto *item =
         static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(i));
-    JobOptions *joTasks = item->GetData();
+    JobOptions *task = item->GetData();
 
-    // loop over all schedulers
-    int schedulersCount = ui.schedulers->count();
+    const int schedulersCount = ui.schedulers->count();
     for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
       QWidget *widget = ui.schedulers->itemAt(j)->widget();
-
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(widget)) {
-
-        if (joTasks->uniqueId.toString() == scheduler->getSchedulerTaskId()) {
-
-          // update task name in scheduler
-
-          scheduler->updateTaskName(joTasks->description);
-
-          // update task name in tasks list + " (scheduled)"
-          ui.tasksListWidget->takeItem(i);
-
-          QIcon jobIcon = mDownloadIcon;
-
-          if (joTasks->jobType == JobOptions::JobType::Download) {
-            if (joTasks->operation == JobOptions::Mount) {
-              jobIcon = mMountIcon;
-            } else {
-              jobIcon = mDownloadIcon;
-            }
-          }
-          if (joTasks->jobType == JobOptions::JobType::Upload) {
-            jobIcon = mUploadIcon;
-          }
-
-          JobOptionsListWidgetItem *item_insert = new JobOptionsListWidgetItem(
-              joTasks, jobIcon, joTasks->description + " (*Sch)",
-              "placeholder");
-
-          ui.tasksListWidget->insertItem(i, item_insert);
-        }
+      auto *scheduler = qobject_cast<SchedulerWidget *>(widget);
+      if (scheduler == nullptr ||
+          scheduler->getSchedulerTaskId() != task->uniqueId.toString()) {
+        continue;
       }
+
+      // The schedule reads the name by id now, so this only nudges what is
+      // already on screen.
+      scheduler->updateTaskName(task->description);
+
+      if (!item->text().endsWith(QStringLiteral(" (*Sch)"))) {
+        item->setText(task->description + QStringLiteral(" (*Sch)"));
+      }
+      break;
     }
   }
 
-  // restore active tasks colours
-  int widgetsCount = ui.jobs->count();
-  for (int k = 0; k < ui.tasksListWidget->count(); k = k + 1) {
-    JobOptionsListWidgetItem *item =
-        static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(k));
-
-    JobOptions *joTasks = item->GetData();
-
-    for (int j = widgetsCount - 2; j >= 0; j = j - 2) {
-      QWidget *widget = ui.jobs->itemAt(j)->widget();
-
-      if (auto transfer = qobject_cast<JobWidget *>(widget)) {
-        if ((transfer->getUniqueID() == joTasks->uniqueId.toString()) &&
-            (transfer->isRunning)) {
-          ui.tasksListWidget->item(k)->setBackground(Qt::darkGreen);
-        }
-      }
-
-      if (auto mount = qobject_cast<MountWidget *>(widget)) {
-        if ((mount->getUniqueID() == joTasks->uniqueId.toString()) &&
-            (mount->isRunning)) {
-          ui.tasksListWidget->item(k)->setBackground(Qt::darkGreen);
-        }
-      }
-    }
-  }
+  // The queue tab is a picture of the queue, so a task being renamed,
+  // re-iconed or deleted needs one thing: draw it again. What stood here
+  // rebuilt each row by hand and took entries out for tasks that had gone,
+  // which the queue already does for itself. See docs/QUEUE-MOVE.md block 9.
+  refreshQueueView();
 
   ui.queueListWidget->setFocus();
   setQueueButtons();

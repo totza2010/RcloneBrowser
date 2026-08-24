@@ -52,6 +52,10 @@ private:
 
   QString enhanceCron(QString cron);
 
+  // The task's name as it is spelled now, looked up by id. mTaskName is only
+  // the copy saved when the schedule was made, kept for when the task is gone.
+  QString currentTaskName() const;
+
   QDateTime nextRun();
 
   // list of scheduler parameters to be persistent in file

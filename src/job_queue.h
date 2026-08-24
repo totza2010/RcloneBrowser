@@ -68,6 +68,13 @@ public:
 
   // Reads the stored queue. Entries whose task no longer exists are dropped,
   // exactly as the file-reading code used to skip them.
+  // Drops entries whose task no longer exists. Returns how many went.
+  //
+  // A task can be deleted while the queue is paused, and until now the entry
+  // for it sat there until something tried to start it -- so the tab counted
+  // a run that could never happen.
+  int dropMissingTasks();
+
   void load();
   bool save();
 

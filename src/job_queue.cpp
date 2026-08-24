@@ -31,6 +31,12 @@ JobQueue::JobQueue(QObject *parent) : QObject(parent) {
 
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
                    [this](RunningJob *) { syncRunningFromRegistry(); });
+
+  // A task that is deleted takes its queued runs with it. Waiting until
+  // something tried to start one left the count wrong in the meantime.
+  QObject::connect(ListOfJobOptions::getInstance(),
+                   &ListOfJobOptions::tasksListUpdated, this,
+                   [this]() { dropMissingTasks(); });
 }
 
 JobOptions *JobQueue::taskFor(const QueueEntry &entry) const {
@@ -240,6 +246,29 @@ void JobQueue::syncRunningFromRegistry() {
     mRunningRequestId = running;
     emit changed();
   }
+}
+
+int JobQueue::dropMissingTasks() {
+  int dropped = 0;
+  for (int i = mEntries.size() - 1; i >= 0; --i) {
+    if (taskFor(mEntries[i]) != nullptr) {
+      continue;
+    }
+    // The one that is running is left alone: its job is still going, and the
+    // task being gone does not stop what has already started.
+    if (mEntries[i].requestId == mRunningRequestId) {
+      continue;
+    }
+    qCDebug(rbQueue) << "dropping entry whose task is gone request="
+                     << mEntries[i].requestId;
+    mEntries.removeAt(i);
+    ++dropped;
+  }
+  if (dropped > 0) {
+    save();
+    emit changed();
+  }
+  return dropped;
 }
 
 void JobQueue::load() {

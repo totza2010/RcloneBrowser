@@ -1,4 +1,5 @@
 #include "scheduler_widget.h"
+#include "list_of_job_options.h"
 #include "schedule.h"
 #include "qcron.h"
 #include "utils.h"
@@ -533,13 +534,28 @@ void SchedulerWidget::applyScreenToSettings() {
   mExecutionMode = QString::number(ui.cb_executionMode->currentIndex());
 }
 
+// The name to show for the task this schedule points at.
+//
+// A schedule is tied to a task by its id; the name is only how the task is
+// spelled today, and it can be edited. Looking it up means a renamed task
+// reads correctly here instead of keeping the name it had when the schedule
+// was made. The copy that was saved is the fallback: it is all there is left
+// once the task has been deleted.
+QString SchedulerWidget::currentTaskName() const {
+  if (const JobOptions *task =
+          ListOfJobOptions::getInstance()->find(mTaskId)) {
+    return task->description;
+  }
+  return mTaskName;
+}
+
 void SchedulerWidget::applySettingsToScreen() {
 
   // use with updateInfoFields() to update all fields
 
   //  QString mTaskId;
   //  QString mTaskName; //b64
-  ui.taskName->setText(mTaskName);
+  ui.taskName->setText(currentTaskName());
 
   //  QString mSchedulerName; //b64
   ui.schedulerName->setText(mSchedulerName);
@@ -727,7 +743,7 @@ void SchedulerWidget::applyArgsToScheduler(QStringList args) {
 void SchedulerWidget::updateTaskName(const QString newTaskName) {
 
   mTaskName = newTaskName;
-  ui.taskName->setText(mTaskName);
+  ui.taskName->setText(currentTaskName());
 }
 
 void SchedulerWidget::stopScheduler() {

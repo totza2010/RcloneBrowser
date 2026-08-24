@@ -318,6 +318,29 @@ private slots:
     QVERIFY(!queue.taskIsRunning());
   }
 
+  // Reported from the running application: deleting a task took its row out
+  // of the queue but the tab still counted it, because the entry only went
+  // when something tried to start it.
+  void deletingATaskTakesItsQueuedRunsWithIt() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    JobOptions *doomed = makeCopyTask("about to go", dest.path());
+    JobOptions *kept = makeCopyTask("staying", dest.path());
+    queue.enqueue(doomed->uniqueId.toString());
+    const QString survives = queue.enqueue(kept->uniqueId.toString());
+    QCOMPARE(queue.count(), 2);
+
+    // Persist() and Forget() both announce the list has changed, which is
+    // what the queue listens to.
+    ListOfJobOptions::getInstance()->Forget(doomed);
+
+    QCOMPARE(queue.count(), 1);
+    QCOMPARE(queue.entries().first().requestId, survives);
+  }
+
   // The whole point of S3.
   void aQueueRunsItselfToTheEndWithNoWidget() {
     JobQueue &queue = JobQueue::instance();
