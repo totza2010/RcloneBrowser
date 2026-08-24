@@ -534,8 +534,11 @@ MainWindow::MainWindow() {
   ui.actionStop->setStatusTip("Stop all selected tasks");
 
   ui.actionEdit->setStatusTip("Edit selected task");
+  // Both reasons, because the button is greyed out for either and naming
+  // only one of them makes the other look like a fault.
   ui.actionDelete->setStatusTip(
-      "Delete selected tasks - only not running tasks can be deleted.");
+      "Delete selected tasks - a task cannot be deleted while it is running "
+      "or while a schedule points at it.");
 
   ui.actionAddToQueue->setStatusTip("Add selected transfer tasks to the queue");
   ui.actionAddToScheduler->setStatusTip(
@@ -3426,16 +3429,10 @@ void MainWindow::refreshQueueView() {
       name += "(autostart)";
     }
 
-    const int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-        if (scheduler->getSchedulerRequestId() == entry.requestId) {
-          name += " (*Sch)";
-          break;
-        }
-      }
-    }
+    // No "(*Sch)" here. In the task list it means "a schedule points at this
+    // task"; on a queue row it meant "this run came from the schedule" --
+    // a different thing wearing the same badge. One meaning, in the one place
+    // it belongs.
 
     auto *item = new JobOptionsListWidgetItem(jo, icon, name, entry.requestId);
     if (entry.requestId == running) {
