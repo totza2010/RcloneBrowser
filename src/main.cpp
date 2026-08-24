@@ -1,4 +1,5 @@
 #include "database.h"
+#include "debug_log.h"
 #include "main_window.h"
 #include "task_runner.h"
 #include "utils.h"
@@ -154,6 +155,9 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
   app.setApplicationName("rclone-browser");
   app.setOrganizationName("rclone-browser");
 
+  // After the names are set, because where the log goes depends on them.
+  DebugLog::install();
+
   // Closed here rather than in main(): QtSql needs a QCoreApplication to be
   // alive to take a connection down, and this one dies with this function.
   // Every early return below leaves through this.
@@ -222,6 +226,8 @@ int main(int argc, char *argv[]) {
   app.setApplicationName("rclone-browser");
   app.setOrganizationName("rclone-browser");
   app.setWindowIcon(QIcon(":/icons/icon.png"));
+
+  DebugLog::install();
 
 // initialize SSL libraries
 // see: https://github.com/linuxdeploy/linuxdeploy-plugin-qt/issues/57

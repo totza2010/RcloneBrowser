@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
 #include "run_history.h"
@@ -94,6 +95,9 @@ RunningJob *StartTask(JobOptions *task, const QString &transferMode,
   const QStringList args = isMount ? task->getMountOptions()
                                    : task->getOptions();
 
+  qCDebug(rbJob) << "start task" << task->description << "mode=" << transferMode
+                 << "dryRun=" << dryRun << "request=" << requestId;
+
   RunningJob *job = JobRegistry::instance().start(
       isMount ? JobKind::Mount : JobKind::Transfer, args,
       DescribeTask(*task, transferMode, dryRun), task->uniqueId.toString(),
@@ -154,6 +158,11 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
   mJobs.append(job);
 
   QObject::connect(job, &RunningJob::finished, this, [this, job](JobState) {
+    qCDebug(rbJob) << "job ended" << JobKindToString(job->kind())
+                   << "request=" << job->requestId()
+                   << "status=" << job->finalStatus()
+                   << "exit=" << job->exitCode()
+                   << "bytes=" << job->stats().bytes;
     JobRunRecord record = recordFor(job);
     record.state = job->finalStatus();
     record.exitCode = job->exitCode();

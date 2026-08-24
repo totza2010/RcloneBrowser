@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "running_job.h"
 #include "utils.h"
 
@@ -116,6 +117,9 @@ bool RunningJob::start() {
                      handleFinished(1);
                    });
 
+  qCDebug(rbJob) << "running" << GetRclone() << "with" << mArgs.size()
+                 << "arguments, kind=" << JobKindToString(mKind);
+
   UseRclonePassword(mProcess);
   UseRcCredentials(mProcess, mRcUser, mRcPass);
 
@@ -149,6 +153,7 @@ void RunningJob::handleOutput() {
         if (mRc && !mRc->isRunning()) {
           mRc->start(port, mRcUser, mRcPass);
         }
+        qCDebug(rbJob) << "remote control on port" << mRcPort;
         emit rcPortDiscovered(mRcPort);
         startMountScript();
       }

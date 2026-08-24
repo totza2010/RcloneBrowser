@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "list_of_job_options.h"
 #include "database.h"
 #include <QDataStream>
@@ -191,6 +192,7 @@ bool ListOfJobOptions::RestoreFromDatabase(ListOfJobOptions &dataIn) {
   }
 
   QSqlQuery query(db);
+  qCDebug(rbDb) << "reading tasks from the database";
   if (!query.exec(QStringLiteral(
           "SELECT options FROM task ORDER BY position, name"))) {
     return false;

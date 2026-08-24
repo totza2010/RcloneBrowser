@@ -42,6 +42,7 @@ endif()
 set(CORE_SOURCE
   utils.cpp
   app_settings.cpp
+  debug_log.cpp
   job_options.cpp
   list_of_job_options.cpp
   rclone_capabilities.cpp
@@ -68,6 +69,7 @@ set(CORE_SOURCE
 set(CORE_HEADER
   utils.h
   app_settings.h
+  debug_log.h
   job_options.h
   list_of_job_options.h
   rclone_capabilities.h

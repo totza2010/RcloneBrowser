@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "database.h"
 #include "utils.h"
 
@@ -287,9 +288,12 @@ QSqlDatabase Database::connection() {
   }
 
   if (!ok) {
+    qCWarning(rbDb) << "could not open" << file << ":" << lastError();
     QSqlDatabase::removeDatabase(name);
     return QSqlDatabase();
   }
+
+  qCDebug(rbDb) << "opened" << file << "schema" << kSchemaVersion;
 
   tConnectionName = name;
   return QSqlDatabase::database(name, false);

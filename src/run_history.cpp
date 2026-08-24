@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "run_history.h"
 #include "app_settings.h"
 #include "database.h"
@@ -201,6 +202,8 @@ int RunHistory::retentionDays() {
 int RunHistory::retentionRows() { return AppSettings::historyMaxRuns(); }
 
 int RunHistory::purge(int keepDays, int keepRows) {
+  qCDebug(rbDb) << "purging history keepDays=" << keepDays
+                << "keepRows=" << keepRows;
   QSqlDatabase db = Database::connection();
   if (!db.isOpen()) {
     return 0;

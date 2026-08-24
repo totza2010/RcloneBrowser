@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "task_runner.h"
 
 #include "database.h"
@@ -204,6 +205,7 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
     return RcloneCrashed;
   }
 
+  qCDebug(rbApp) << "headless run finished exit=" << process.exitCode();
   history.exitCode = process.exitCode();
   history.state = history.exitCode == 0 ? QStringLiteral("finished")
                                         : QStringLiteral("error");

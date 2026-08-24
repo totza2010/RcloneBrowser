@@ -1,3 +1,4 @@
+#include "debug_log.h"
 #include "config_store.h"
 #include "database.h"
 #include "utils.h"
@@ -91,6 +92,7 @@ QList<QueueEntry> QueueStore::load() {
 
   if (tableIsEmpty(db, QStringLiteral("queue_entry"))) {
     const QList<QueueEntry> legacy = readLegacyQueue();
+    qCDebug(rbDb) << "importing queue.conf entries=" << legacy.size();
     if (!legacy.isEmpty() && save(legacy)) {
       retire(QStringLiteral("queue.conf"));
       return legacy;
@@ -159,6 +161,7 @@ QList<QStringList> ScheduleStore::load() {
 
   if (tableIsEmpty(db, QStringLiteral("schedule"))) {
     const QList<QStringList> legacy = readLegacySchedules();
+    qCDebug(rbDb) << "importing scheduler.conf entries=" << legacy.size();
     if (!legacy.isEmpty() && save(legacy)) {
       retire(QStringLiteral("scheduler.conf"));
       return legacy;

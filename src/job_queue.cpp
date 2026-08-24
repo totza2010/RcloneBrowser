@@ -1,5 +1,6 @@
 #include "job_queue.h"
 #include "app_settings.h"
+#include "debug_log.h"
 #include "job_options.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
@@ -42,6 +43,8 @@ QString JobQueue::enqueue(const QString &taskId, bool dryRun) {
   entry.requestId = QUuid::createUuid().toString();
   entry.dryRun = dryRun;
 
+  qCDebug(rbQueue) << "enqueue task=" << taskId << "request=" << entry.requestId
+                   << "count=" << mEntries.size() + 1;
   mEntries.append(entry);
   save();
   emit changed();
@@ -60,6 +63,7 @@ void JobQueue::remove(const QString &requestId) {
     return;
   }
   const int before = mEntries.size();
+  qCDebug(rbQueue) << "remove request=" << requestId << "count=" << before;
   for (int i = 0; i < mEntries.size(); ++i) {
     if (mEntries[i].requestId == requestId) {
       mEntries.removeAt(i);
@@ -172,6 +176,9 @@ bool JobQueue::advance() {
     }
   }
 
+  qCDebug(rbQueue) << "starting task=" << entry.taskId
+                   << "request=" << entry.requestId
+                   << "waiting=" << mEntries.size() - 1;
   mRunningRequestId = entry.requestId;
   StartTask(task, QStringLiteral("queue"), entry.requestId, entry.dryRun);
 
@@ -181,6 +188,9 @@ bool JobQueue::advance() {
 }
 
 void JobQueue::jobFinished(const QString &requestId) {
+  qCDebug(rbQueue) << "job ended request=" << requestId
+                   << "wasOurs=" << (requestId == mRunningRequestId)
+                   << "queueRunning=" << mRunning << "count=" << mEntries.size();
   if (!requestId.isEmpty() && requestId == mRunningRequestId) {
     mRunningRequestId.clear();
 
