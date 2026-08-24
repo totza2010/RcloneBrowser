@@ -995,12 +995,11 @@ MainWindow::MainWindow() {
         if ((mQueueStatus == true) && mQueueTaskRunning &&
             (ui.queueListWidget->count() > 0)) {
           queueActive = true;
-          mQueueStatus = false;
-          /// remove top task from queue + save it
-          ui.queueListWidget->takeItem(0);
-          saveQueueFile(); // tell the queue before any count is read
-          --mQueueCount;
-          saveQueueFile();
+          // Pause before the jobs are killed so the queue does not start the
+          // next one in the middle of stopping everything. The entry whose
+          // job is killed stays: a paused queue keeps what it holds, which is
+          // how Stop puts a task back in line rather than out of it.
+          JobQueue::instance().pause();
 
           if (mQueueCount == 0) {
             ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
@@ -1882,8 +1881,9 @@ MainWindow::MainWindow() {
         // The queue is told which run is leaving, not which row: rows are
         // what shows it. It refuses to drop the one that is running,
         // which is the same thing the greyed-out button has said.
+        // Only the queue is told. The row goes when the view redraws --
+        // taking it out here as well took the next one with it.
         JobQueue::instance().remove(requestId);
-        ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
 
         if (ui.queueListWidget->currentRow() == 0 ||
             ui.queueListWidget->currentRow() ==
@@ -1939,8 +1939,9 @@ MainWindow::MainWindow() {
         }
       }
 
+      // Only the queue is told. The row goes when the view redraws --
+      // taking it out here as well took the next one with it.
       JobQueue::instance().remove(requestId);
-      ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
 
       if (ui.queueListWidget->currentRow() == ui.queueListWidget->count() - 1) {
         ui.buttonDownQueue->setEnabled(false);
@@ -1970,33 +1971,24 @@ MainWindow::MainWindow() {
   });
 
   QObject::connect(ui.actionDownQueue, &QAction::triggered, this, [=]() {
-    auto item = ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
-    saveQueueFile(); // tell the queue before any count is read
-    ui.queueListWidget->insertItem(ui.queueListWidget->currentRow() + 1, item);
-    ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
-
-    saveQueueFile();
+    // Reordering belongs to the queue. Taking the row out and putting it back
+    // moved what was on screen while the queue kept the old order, and the
+    // next redraw undid it -- the same double-handling that made Remove take
+    // two entries at once.
+    const int row = ui.queueListWidget->currentRow();
+    if (JobQueue::instance().move(row, row + 1)) {
+      ui.queueListWidget->setCurrentRow(row + 1);
+    }
   });
+
 
   QObject::connect(ui.actionUpQueue, &QAction::triggered, this, [=]() {
-    if (ui.queueListWidget->currentRow() == ui.queueListWidget->count() - 1) {
-      // last row needs special treatment
-      auto item =
-          ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
-          saveQueueFile(); // tell the queue before any count is read
-      ui.queueListWidget->insertItem(ui.queueListWidget->currentRow(), item);
-      ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
-    } else {
-      auto item =
-          ui.queueListWidget->takeItem(ui.queueListWidget->currentRow());
-          saveQueueFile(); // tell the queue before any count is read
-      ui.queueListWidget->insertItem(ui.queueListWidget->currentRow() - 1,
-                                     item);
-      ui.queueListWidget->setCurrentRow(ui.queueListWidget->row(item));
+    const int row = ui.queueListWidget->currentRow();
+    if (JobQueue::instance().move(row, row - 1)) {
+      ui.queueListWidget->setCurrentRow(row - 1);
     }
-
-    saveQueueFile();
   });
+
 
   QObject::connect(ui.queueListWidget, &QListWidget::itemChanged, this,
                    [=]() { setQueueButtons(); });
@@ -3412,6 +3404,10 @@ void MainWindow::refreshQueueView() {
   ListOfJobOptions *store = ListOfJobOptions::getInstance();
   const QString running = JobQueue::instance().runningRequestId();
 
+  // Redrawing must not move the user's selection, or the buttons that act on
+  // "the selected row" would act on whatever landed there.
+  const int wasSelected = ui.queueListWidget->currentRow();
+
   ui.queueListWidget->clear();
 
   for (const QueueEntry &entry : JobQueue::instance().entries()) {
@@ -3446,6 +3442,10 @@ void MainWindow::refreshQueueView() {
       item->setBackground(Qt::darkGreen);
     }
     ui.queueListWidget->addItem(item);
+  }
+
+  if (wasSelected >= 0 && wasSelected < ui.queueListWidget->count()) {
+    ui.queueListWidget->setCurrentRow(wasSelected);
   }
 
   const bool taskRunning = JobQueue::instance().taskIsRunning();
