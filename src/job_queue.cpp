@@ -291,6 +291,12 @@ void JobQueue::load() {
   // after a restart this is what notices a job the window has just started.
   syncRunningFromRegistry();
   emit changed();
+
+  // And then carry on. Starting the application with a queue left running
+  // used to leave it sitting there: the wheel was taken before the entries
+  // were read, and reading them told nobody. Nothing happens here unless
+  // every condition for starting the head entry holds.
+  advance();
 }
 
 bool JobQueue::save() { return QueueStore::save(mEntries); }

@@ -341,6 +341,30 @@ private slots:
     QCOMPARE(queue.entries().first().requestId, survives);
   }
 
+  // Reported from the running application: closing it with the queue going
+  // and opening it again left the queue full and idle. Reading the entries
+  // has to be followed by giving the head one its turn.
+  void aQueueLeftRunningCarriesOnAfterARestart() {
+    JobQueue &queue = JobQueue::instance();
+    queue.setDrivesItself(true);
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    queue.pause();
+    queue.enqueue(makeCopyTask("after restart", dest.path())->uniqueId
+                      .toString());
+    queue.start(); // recorded as running, and saved
+    QVERIFY2(waitForQueue(), "the queue did not finish before the restart");
+
+    // Queue something new, then read the list the way a restart does.
+    queue.enqueue(
+        makeCopyTask("second run", dest.path())->uniqueId.toString());
+    queue.load();
+
+    QVERIFY(queue.isRunning());
+    QVERIFY2(waitForQueue(), "reading the queue back did not start it");
+  }
+
   // The whole point of S3.
   void aQueueRunsItselfToTheEndWithNoWidget() {
     JobQueue &queue = JobQueue::instance();

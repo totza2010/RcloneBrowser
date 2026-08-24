@@ -2,6 +2,7 @@
 #include "job_options.h"
 #include "app_settings.h"
 #include "config_store.h"
+#include "debug_log.h"
 #include "history_widget.h"
 #include "job_log.h"
 #include "run_history.h"
@@ -563,8 +564,9 @@ MainWindow::MainWindow() {
   ui.buttonStopAllJobs->setEnabled(false);
   ui.buttonCleanNotRunning->setEnabled(false);
 
-  // initial queue status
+  // The words; setQueueButtons() decides which of the two is showing.
   ui.labelQueueInfoStop->setText("Queue is not running.");
+  ui.labelQueueInfoStart->setText("Queue is running.");
   setQueueButtons();
 
   ui.tabs->setTabText(4, QString("Scheduler (0)>>(0)"));
@@ -1570,8 +1572,6 @@ MainWindow::MainWindow() {
     }
 
     // if queue is empty we have to try to start first task
-    bool isQueueEmpty = (ui.queueListWidget->count() == 0);
-
     if (items.count() > 0) {
       int button = QMessageBox::question(
           this, "Add to the queue",
@@ -1619,130 +1619,24 @@ MainWindow::MainWindow() {
       }
     }
 
-    // if queue was empty we start first task if queue is running and there is
-    // no other transfer job running
-    if (mQueueStatus && isQueueEmpty && (mTransferJobCount == 0)) {
-
-      if (mQueueCount > 0) {
-
-        JobOptionsListWidgetItem *item =
-            static_cast<JobOptionsListWidgetItem *>(
-                ui.queueListWidget->item(0));
-
-        runItem(item->GetData(), "queue", item->GetRequestId());
-        ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-        mQueueTaskRunning = true;
-        ui.tabs->setTabText(3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-      }
-
-    } else {
-
-      if (mQueueStatus) {
-
-        if (mQueueTaskRunning) {
-          ui.tabs->setTabText(3,
-                              QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-        } else {
-
-          ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-        }
-
-      } else {
-        ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-      }
-    }
+    // enqueue() has already started the head entry if this was the moment,
+    // and refreshQueueView() has drawn the tab. What stood here did both by
+    // hand, in four branches.
   });
 
   //!!!  QObject::connect(ui.actionStartQueue
   QObject::connect(ui.actionStartQueue, &QAction::triggered, this, [=]() {
+    // start() switches the queue on, remembers it, and gives the head entry
+    // its turn. refreshQueueView() draws the buttons, the labels and the tab
+    // from the queue afterwards -- all of which was written out here.
     JobQueue::instance().start();
 
-    ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-
-    ui.buttonStopQueue->setEnabled(true);
-    ui.buttonStartQueue->setEnabled(false);
-
-    ui.buttonPurgeQueue->setEnabled(false);
-
-    if (mQueueCount > 1) {
-      ui.buttonPurgeQueue->setEnabled(true);
-    } else {
-      ui.buttonPurgeQueue->setEnabled(false);
-    }
-
-    if (ui.queueListWidget->currentRow() == 0 ||
-        ui.queueListWidget->currentRow() == ui.queueListWidget->count() - 1) {
-      ui.buttonDownQueue->setEnabled(false);
-    } else {
-      ui.buttonDownQueue->setEnabled(true);
-    }
-
-    if (ui.queueListWidget->currentRow() == 1 ||
-        ui.queueListWidget->currentRow() == 0) {
-      ui.buttonUpQueue->setEnabled(false);
-    } else {
-      ui.buttonUpQueue->setEnabled(true);
-    }
-
-    if (ui.queueListWidget->currentRow() == 0) {
-
-      ui.buttonRemoveFromQueue->setEnabled(false);
-      ui.buttonUpQueue->setEnabled(false);
-      ui.buttonDownQueue->setEnabled(false);
-
-    } else {
-      ui.buttonRemoveFromQueue->setEnabled(true);
-    }
-
-    if (mQueueCount == 0) {
-      ui.buttonRemoveFromQueue->setEnabled(false);
-      ui.buttonPurgeQueue->setEnabled(false);
-      ui.buttonUpQueue->setEnabled(false);
-      ui.buttonDownQueue->setEnabled(false);
-    }
-
-    ui.labelQueueInfoStart->setText("Queue is running.");
-    ui.labelQueueInfoStart->show();
-    ui.labelQueueInfoStop->hide();
-
-    // if not empty and nothing else running try to start first task
-    if (mQueueCount > 0 && mTransferJobCount == 0) {
-      JobOptionsListWidgetItem *item =
-          static_cast<JobOptionsListWidgetItem *>(ui.queueListWidget->item(0));
-
-      // start only when not running already
-      //      if (!isAlreadyRunning) {
-      mQueueTaskRunning = true;
-      runItem(item->GetData(), "queue", item->GetRequestId());
-      ui.tabs->setTabText(3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-      ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-      ui.queueListWidget->item(0)->setSelected(false);
-      //      }
-    }
   });
 
   QObject::connect(ui.actionStopQueue, &QAction::triggered, this, [=]() {
     // Pausing, and remembering that it is paused, is the queue's own job.
     JobQueue::instance().pause();
 
-    if (ui.queueListWidget->count() > 0) {
-      ui.queueListWidget->item(0)->setBackground(QBrush());
-    }
-
-    ui.buttonStopQueue->setEnabled(false);
-    ui.buttonStartQueue->setEnabled(true);
-    ui.buttonPurgeQueue->setEnabled(true);
-    ui.buttonRemoveFromQueue->setEnabled(true);
-
-    if (mQueueCount == 0) {
-      ui.buttonRemoveFromQueue->setEnabled(false);
-      ui.buttonPurgeQueue->setEnabled(false);
-      ui.buttonUpQueue->setEnabled(false);
-      ui.buttonDownQueue->setEnabled(false);
-      ui.tabs->setTabText(3, QString("Queue"));
-    } else {
-      ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-    }
 
     if (!(ui.queueListWidget->item(0) == nullptr)) {
       JobOptionsListWidgetItem *item =
@@ -1767,9 +1661,6 @@ MainWindow::MainWindow() {
       }
     }
 
-    ui.labelQueueInfoStop->setText("Queue is not running.");
-    ui.labelQueueInfoStop->show();
-    ui.labelQueueInfoStart->hide();
   });
 
   //!!! QObject::connect(ui.actionPurgeQueue
@@ -2528,6 +2419,19 @@ void MainWindow::setTasksButtons() {
 }
 
 void MainWindow::setQueueButtons() {
+
+  // Start and Stop belong here too. They used to be set inside each handler,
+  // so once the handlers stopped doing it by hand nothing set them at all and
+  // the pair could say the opposite of what the queue was doing. Every button
+  // on this tab is a reading of the queue, in one place.
+  const bool running = JobQueue::instance().isRunning();
+  ui.buttonStartQueue->setEnabled(!running);
+  ui.buttonStopQueue->setEnabled(running);
+  ui.actionStartQueue->setEnabled(!running);
+  ui.actionStopQueue->setEnabled(running);
+
+  ui.labelQueueInfoStart->setVisible(running);
+  ui.labelQueueInfoStop->setVisible(!running);
 
   if (ui.queueListWidget->selectedItems().empty()) {
 
@@ -3483,21 +3387,15 @@ void MainWindow::addTasksToQueue() {
     }
   }
 
+  // The words themselves; which of the two shows is setQueueButtons's answer.
   ui.labelQueueInfoStop->setText("Queue is not running.");
-  ui.labelQueueInfoStop->show();
-  ui.labelQueueInfoStart->hide();
+  ui.labelQueueInfoStart->setText("Queue is running.");
 
-  ui.buttonStopQueue->setEnabled(false);
-  ui.buttonStartQueue->setEnabled(true);
-  ui.buttonDownQueue->setEnabled(false);
-  ui.buttonUpQueue->setEnabled(false);
-  ui.buttonRemoveFromQueue->setEnabled(false);
-
-  if (ui.queueListWidget->count() > 0) {
-    ui.buttonPurgeQueue->setEnabled(true);
-  } else {
-    ui.buttonPurgeQueue->setEnabled(false);
-  }
+  // Every button on this tab is a reading of the queue, so it is read once,
+  // in the one place that does it. Setting them here as well is what left
+  // Start clickable and Stop greyed out while the queue was going: this runs
+  // after setQueueButtons() and simply overwrote its answer.
+  setQueueButtons();
 }
 
 void MainWindow::listTasks() {
