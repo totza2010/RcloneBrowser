@@ -365,6 +365,120 @@ private slots:
     QVERIFY2(waitForQueue(), "reading the queue back did not start it");
   }
 
+  // The scheduler bug: enqueue() minted its own id, so a schedule held one
+  // and the queue another, and everything that matches on it broke quietly.
+  void aCallerCanNameTheRunItself() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    JobOptions *task = makeCopyTask("named by its caller", dest.path());
+
+    const QString mine = QStringLiteral("{a-schedule-remembers-this}");
+    const QString given = queue.enqueue(task->uniqueId.toString(), false, mine);
+
+    QCOMPARE(given, mine);
+    QCOMPARE(queue.entries().first().requestId, mine);
+
+    // And it survives being written out and read back, or the schedule would
+    // lose track of its run at the next restart.
+    queue.load();
+    QCOMPARE(queue.entries().first().requestId, mine);
+  }
+
+  // A job that is nothing to do with the queue must not disturb it. Two runs
+  // of the same task are told apart by request id, which is the whole reason
+  // there is one.
+  void aJobThatIsNotOursLeavesTheQueueAlone() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    JobOptions *task = makeCopyTask("queued", dest.path());
+    const QString ours = queue.enqueue(task->uniqueId.toString());
+    QCOMPARE(queue.count(), 1);
+
+    queue.jobFinished(QStringLiteral("{someone-elses-run}"));
+
+    QCOMPARE(queue.count(), 1);
+    QCOMPARE(queue.entries().first().requestId, ours);
+  }
+
+  // dryRun is per-entry and has to come back the same, or a dry run turns
+  // into a real one at the next start.
+  void aDryRunStaysADryRunAcrossARestart() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    queue.enqueue(makeCopyTask("real", dest.path())->uniqueId.toString(),
+                  false);
+    queue.enqueue(makeCopyTask("dry", dest.path())->uniqueId.toString(), true);
+
+    queue.load();
+
+    QCOMPARE(queue.count(), 2);
+    QCOMPARE(queue.entries()[0].dryRun, false);
+    QCOMPARE(queue.entries()[1].dryRun, true);
+  }
+
+  // The order is the queue. Anything that rewrites the list has to put it
+  // back in the same order it was read.
+  void theOrderSurvivesBeingWrittenAndReadBack() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+
+    QTemporaryDir dest;
+    QVERIFY(dest.isValid());
+    QStringList expected;
+    for (int i = 0; i < 5; ++i) {
+      expected << queue.enqueue(
+          makeCopyTask(QStringLiteral("t%1").arg(i), dest.path())
+              ->uniqueId.toString());
+    }
+
+    QVERIFY(queue.move(4, 0));
+    expected.move(4, 0);
+
+    queue.load();
+
+    QStringList back;
+    for (const QueueEntry &entry : queue.entries()) {
+      back << entry.requestId;
+    }
+    QCOMPARE(back, expected);
+  }
+
+  // One transfer at a time is what a queue means, and a job somebody started
+  // by hand counts as that one.
+  void nothingStartsWhileAnotherTransferIsGoing() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+    queue.setDrivesItself(true);
+
+    QTemporaryDir byHand, queued;
+    QVERIFY(byHand.isValid() && queued.isValid());
+
+    JobOptions *other = makeCopyTask("started by hand", byHand.path());
+    JobOptions *waiting = makeCopyTask("waiting its turn", queued.path());
+    queue.enqueue(waiting->uniqueId.toString());
+
+    // Started outside the queue, with an id the queue knows nothing about.
+    StartTask(other, QStringLiteral("task"),
+              QUuid::createUuid().toString());
+    QVERIFY(JobRegistry::instance().runningCount(JobKind::Transfer) > 0);
+
+    QSignalSpy started(&queue, &JobQueue::taskStarted);
+    queue.start();
+    QCOMPARE(started.count(), 0); // the other one is in the way
+
+    QVERIFY2(waitForQueue(), "the queue did not finish once the way was clear");
+    QCOMPARE(started.count(), 1);
+  }
+
   // The whole point of S3.
   void aQueueRunsItselfToTheEndWithNoWidget() {
     JobQueue &queue = JobQueue::instance();
