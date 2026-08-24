@@ -43,10 +43,12 @@ JobOptions *JobQueue::taskFor(const QueueEntry &entry) const {
   return ListOfJobOptions::getInstance()->find(entry.taskId);
 }
 
-QString JobQueue::enqueue(const QString &taskId, bool dryRun) {
+QString JobQueue::enqueue(const QString &taskId, bool dryRun,
+                          const QString &requestId) {
   QueueEntry entry;
   entry.taskId = taskId;
-  entry.requestId = QUuid::createUuid().toString();
+  entry.requestId =
+      requestId.isEmpty() ? QUuid::createUuid().toString() : requestId;
   entry.dryRun = dryRun;
 
   qCDebug(rbQueue) << "enqueue task=" << taskId << "request=" << entry.requestId

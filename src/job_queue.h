@@ -32,7 +32,11 @@ public:
   // Adds a task to the back and returns the request id given to it. The id
   // is what tells two runs of the same task apart -- one from the queue and
   // one the user started by hand.
-  QString enqueue(const QString &taskId, bool dryRun = false);
+  // requestId lets a caller that already has one -- a schedule, which has to
+  // recognise its own run when the job ends -- keep it. Left empty, the queue
+  // mints one.
+  QString enqueue(const QString &taskId, bool dryRun = false,
+                  const QString &requestId = QString());
 
   void remove(const QString &requestId);
 

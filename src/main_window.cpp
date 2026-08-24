@@ -3958,79 +3958,15 @@ void MainWindow::addSavedTransfer(const QString &uniqueId, bool dryRun,
 
 
   if (!addToQueue) {
-
     // run immediately
     runItem(joTask, "task", QUuid::createUuid().toString(), false);
     return;
-  } else {
-    // add to queue
-
-    bool isQueueEmpty = (ui.queueListWidget->count() == 0);
-
-    QIcon jobIcon;
-
-    if (joTask->jobType == JobOptions::JobType::Download) {
-      if (joTask->operation == JobOptions::Mount) {
-        jobIcon = mMountIcon;
-      } else {
-        jobIcon = mDownloadIcon;
-      }
-    }
-    if (joTask->jobType == JobOptions::JobType::Upload) {
-      jobIcon = mUploadIcon;
-    }
-
-    JobOptionsListWidgetItem *newitem =
-        new JobOptionsListWidgetItem(joTask, jobIcon, joTask->description,
-                                     QUuid::createUuid().toString());
-
-    ui.queueListWidget->addItem(newitem);
-    mQueueCount = mQueueCount + 1;
-
-    // if queue was empty we start first taks if queue is running and
-    // there is no other transfer job running
-    if (mQueueStatus && isQueueEmpty && (mTransferJobCount == 0)) {
-
-      if (mQueueCount > 0) {
-
-        JobOptionsListWidgetItem *item =
-            static_cast<JobOptionsListWidgetItem *>(
-                ui.queueListWidget->item(0));
-
-        runItem(item->GetData(), "scheduler", item->GetRequestId());
-        ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-        mQueueTaskRunning = true;
-        ui.tabs->setTabText(
-            3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-      }
-
-    } else {
-
-      if (mQueueStatus) {
-
-        if (mQueueCount == 0) {
-          ui.tabs->setTabText(3,
-                              QString("Queue (%1)>>(0)").arg(mQueueCount));
-        } else {
-          if (!mQueueTaskRunning) {
-            ui.tabs->setTabText(
-                3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-          } else {
-            ui.tabs->setTabText(
-                3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-          }
-        }
-      } else {
-        if (mQueueCount == 0) {
-          ui.tabs->setTabText(3, QString("Queue"));
-        } else {
-          ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-        }
-      }
-    }
-    saveQueueFile();
-    return;
   }
+
+  // Into the queue. The queue gives the run its id, saves itself, tells the
+  // view to redraw and decides whether this is the moment to start it -- all
+  // of which stood written out here. See docs/QUEUE-MOVE.md block 10.
+  JobQueue::instance().enqueue(joTask->uniqueId.toString());
 }
 
 void MainWindow::addTransfer(const QString &message, const QString &source,
@@ -4520,51 +4456,22 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
       }
     }
 
-    // remove from the queue
-    // for every item in queue
-    if (ui.queueListWidget->count() > 0) {
-      for (int i = 0; i < ui.queueListWidget->count(); i++) {
-
-        JobOptionsListWidgetItem *item_queue =
-            static_cast<JobOptionsListWidgetItem *>(
-                ui.queueListWidget->item(i));
-
-        if (item_queue->GetRequestId() == requestID) {
-
-          --mQueueCount;
-          ui.queueListWidget->takeItem(i);
-          saveQueueFile(); // tell the queue before any count is read
-          widget->updateTaskStatus(requestID, "removed from the queue");
-          mRunningSchedulersCount--;
-          ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                     .arg(mSchedulersCount)
-                                     .arg(mRunningSchedulersCount));
-
-          break;
-        }
+    // The schedule is being stopped, so its queued run goes with it. The
+    // queue takes the entry out and the view follows; the tab text it used to
+    // work out by hand is drawn from the queue now.
+    for (const QueueEntry &entry : JobQueue::instance().entries()) {
+      if (entry.requestId != requestID) {
+        continue;
       }
-
-      if (mQueueStatus) {
-
-        if (mQueueCount == 0) {
-          ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-        } else {
-
-          if (!mQueueTaskRunning) {
-            ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-          } else {
-            ui.tabs->setTabText(
-                3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-          }
-        }
-      } else {
-        if (mQueueCount == 0) {
-          ui.tabs->setTabText(3, QString("Queue"));
-        } else {
-          ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-        }
-      }
+      JobQueue::instance().remove(requestID);
+      widget->updateTaskStatus(requestID, "removed from the queue");
+      mRunningSchedulersCount--;
+      ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
+                                 .arg(mSchedulersCount)
+                                 .arg(mRunningSchedulersCount));
+      break;
     }
+
     mDoNotSort = false;
     sortJobs();
   });
@@ -4646,75 +4553,20 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
             }
           }
 
-          bool isQueueEmpty = (ui.queueListWidget->count() == 0);
-
-          QIcon jobIcon;
-
-          if (joTask->jobType == JobOptions::JobType::Download) {
-            if (joTask->operation == JobOptions::Mount) {
-              jobIcon = mMountIcon;
-            } else {
-              jobIcon = mDownloadIcon;
-            }
-          }
-          if (joTask->jobType == JobOptions::JobType::Upload) {
-            jobIcon = mUploadIcon;
-          }
-
-          JobOptionsListWidgetItem *newitem = new JobOptionsListWidgetItem(
-              joTask, jobIcon, joTask->description + " (*Sch)", requestID);
-
-          ui.queueListWidget->addItem(newitem);
-          mQueueCount = mQueueCount + 1;
+          // The queue takes it from here: it gives the run its id, saves,
+          // redraws and starts it if this is the moment. What stood here was
+          // all of that written out. See docs/QUEUE-MOVE.md block 12.
+          //
+          // The request id is the schedule's, so that a run it asked for can
+          // be matched back to it afterwards.
+          JobQueue::instance().enqueue(joTask->uniqueId.toString(), false,
+                                       requestID);
 
           widget->updateTaskStatus(requestID, "in the queue");
           mRunningSchedulersCount++;
           ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
                                      .arg(mSchedulersCount)
                                      .arg(mRunningSchedulersCount));
-
-          // if queue was empty we start first taks if queue is running and
-          // there is no other transfer job running
-          if (mQueueStatus && isQueueEmpty && (mTransferJobCount == 0)) {
-
-            if (mQueueCount > 0) {
-
-              JobOptionsListWidgetItem *item =
-                  static_cast<JobOptionsListWidgetItem *>(
-                      ui.queueListWidget->item(0));
-
-              runItem(item->GetData(), "scheduler", item->GetRequestId());
-              ui.queueListWidget->item(0)->setBackground(Qt::darkGreen);
-              mQueueTaskRunning = true;
-              ui.tabs->setTabText(
-                  3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-            }
-
-          } else {
-
-            if (mQueueStatus) {
-
-              if (mQueueCount == 0) {
-                ui.tabs->setTabText(
-                    3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-              } else {
-                if (!mQueueTaskRunning) {
-                  ui.tabs->setTabText(
-                      3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-                } else {
-                  ui.tabs->setTabText(
-                      3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-                }
-              }
-            } else {
-              if (mQueueCount == 0) {
-                ui.tabs->setTabText(3, QString("Queue"));
-              } else {
-                ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-              }
-            }
-          }
-          saveQueueFile();
         }
       }
     }
