@@ -3463,95 +3463,32 @@ void MainWindow::refreshQueueView() {
 }
 
 void MainWindow::addTasksToQueue() {
-  // restore queue from file
-  // ignore no more existing
-
+  // Reads the stored queue once. Everything that used to be built here --
+  // the rows, their icons, the "(*Sch)" marker, the tab text -- is drawn by
+  // refreshQueueView() from the queue itself, which is what the load()
+  // below sets off. See docs/QUEUE-MOVE.md block 8.
   JobQueue::instance().load();
 
-  ui.queueListWidget->clear();
-
-  auto items = ui.tasksListWidget->selectedItems();
-
-  ListOfJobOptions *ljo = ListOfJobOptions::getInstance();
-
-  QString fileTaskId;
-  QString fileRequestId;
-
-  {
-    QString taskNameDisplay;
-
-    for (const QueueEntry &entry : QueueStore::load()) {
-
-      fileTaskId = entry.taskId;
-      fileRequestId = entry.requestId;
-
-      for (JobOptions *jo : ljo->getTasks()) {
-
-        QIcon jobIcon = mDownloadIcon;
-
-        if (jo->jobType == JobOptions::JobType::Download) {
-          if (jo->operation == JobOptions::Mount) {
-            jobIcon = mMountIcon;
-          } else {
-            jobIcon = mDownloadIcon;
-          }
-        }
-        if (jo->jobType == JobOptions::JobType::Upload) {
-          jobIcon = mUploadIcon;
-        }
-
-        if (jo->operation == JobOptions::Mount) {
-          if (jo->mountAutoStart) {
-            taskNameDisplay = jo->description + "(autostart)";
-          } else {
-            taskNameDisplay = jo->description;
-          }
-        } else {
-          taskNameDisplay = jo->description;
-        }
-
-        // check if task is from scheduler
-        bool transferModeSch = false;
-        int schedulersCount = ui.schedulers->count();
-        for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-          QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-          if (auto scheduler =
-                  qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-            if (fileRequestId == scheduler->getSchedulerRequestId()) {
-              transferModeSch = true;
-              scheduler->updateTaskStatus(fileRequestId, "in the queue");
-            }
-          }
-        }
-
-        if (jo->uniqueId.toString() == fileTaskId) {
-          if (transferModeSch) {
-            taskNameDisplay = taskNameDisplay + " (*Sch)";
-            mRunningSchedulersCount++;
-            ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                       .arg(mSchedulersCount)
-                                       .arg(mRunningSchedulersCount));
-          }
-
-          JobOptionsListWidgetItem *item = new JobOptionsListWidgetItem(
-              jo, jobIcon, taskNameDisplay, fileRequestId);
-
-          ++mQueueCount;
-          ui.queueListWidget->addItem(item);
+  // Schedulers still want to know that a run of theirs is waiting.
+  for (const QueueEntry &entry : JobQueue::instance().entries()) {
+    const int schedulersCount = ui.schedulers->count();
+    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
+      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
+      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
+        if (scheduler->getSchedulerRequestId() == entry.requestId) {
+          scheduler->updateTaskStatus(entry.requestId, "in the queue");
+          mRunningSchedulersCount++;
+          ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
+                                     .arg(mSchedulersCount)
+                                     .arg(mRunningSchedulersCount));
         }
       }
     }
-
-    if (mQueueCount == 0) {
-      ui.tabs->setTabText(3, QString("Queue"));
-    } else {
-      ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-    }
-
-    ui.labelQueueInfoStop->setText("Queue is not running.");
-    ui.labelQueueInfoStop->show();
-    ui.labelQueueInfoStart->hide();
   }
+
+  ui.labelQueueInfoStop->setText("Queue is not running.");
+  ui.labelQueueInfoStop->show();
+  ui.labelQueueInfoStart->hide();
 
   ui.buttonStopQueue->setEnabled(false);
   ui.buttonStartQueue->setEnabled(true);
