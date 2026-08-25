@@ -22,6 +22,20 @@ Q_DECLARE_LOGGING_CATEGORY(rbJob)
 Q_DECLARE_LOGGING_CATEGORY(rbDb)
 Q_DECLARE_LOGGING_CATEGORY(rbApp)
 
+// How to read the queue lines, because two of the numbers are measured at a
+// moment that is easy to guess wrong:
+//
+//   enqueue   count      the list *after* this one was added
+//   starting  waiting    the list *before* this one starts, so it does not
+//                        count the entry being started
+//   job ended count      the list *before* the entry is taken out, so
+//                        "count=3" means three were queued when it ended,
+//                        not three left afterwards
+//   clear     kept/of    how many stayed (the running one) out of how many
+//
+// A purge and two removals leave the same count behind; the difference is
+// that removals say so, one line each.
+
 namespace DebugLog {
 
 // Starts capturing, if the user asked for it. Call once, early in main(),
