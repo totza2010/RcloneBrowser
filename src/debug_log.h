@@ -11,6 +11,32 @@
 //
 // This is not the job log. That records what rclone said about one transfer
 // (job_log.h); this records what the application did.
+//
+// A folder per subject, under logs/:
+//
+//   logs/all/all.txt              everything, in the order it happened
+//   logs/queue/queue.txt          rb.queue
+//   logs/scheduler/scheduler.txt  rb.sched
+//   logs/jobs/jobs.txt            rb.job -- what the program did about a job
+//   logs/database/database.txt    rb.db
+//   logs/app/app.txt              rb.app, and anything else, Qt's own included
+//   logs/transfers/               what rclone said, one file per run (job_log.h)
+//
+// Folders rather than one flat directory because each of these keeps its
+// rotations beside it: six subjects at ten generations apiece is seventy
+// files to read past before finding the one that matters.
+//
+// Both the combined file and the split ones, on purpose. Splitting alone
+// would have made the queue and scheduler faults harder to find rather than
+// easier: what settled them was following one request id from rb.sched to
+// rb.queue to rb.job, and that story only exists where the lines are in one
+// order. The split files are for reading a subsystem on its own.
+//
+// Each grows to a set size and is then rotated -- queue.txt becomes
+// queue.0.txt, queue.0.txt becomes queue.1.txt, and so on. The name of the
+// current file never changes, which is the point: "the queue log" is always
+// queue.txt rather than a file named after the moment a run happened to
+// start, which you would have to go looking for.
 
 #include <QLoggingCategory>
 #include <QString>
@@ -58,6 +84,10 @@ Q_DECLARE_LOGGING_CATEGORY(rbApp)
 // that is what makes "the schedule asked" and "the queue started it" one
 // story rather than two.
 //
+// TEST: (V-23) tick Preferences -> Misc. -> Diagnostics and start the
+// program normally, with no RB_DEBUG set: the files must appear, split by
+// subsystem, and rotate rather than growing without limit.
+//
 // TEST: (V-22) run with RB_DEBUG=1 and let a schedule come due. Every
 // schedule must log "check" once a minute whether or not anything happens,
 // and a minute that comes due must be followed by either "fired" or "held".
@@ -67,25 +97,33 @@ namespace DebugLog {
 // Starts capturing, if the user asked for it. Call once, early in main(),
 // before anything that might have something to say.
 //
-// Turned on by the setting, or by RB_DEBUG=1 in the environment for a single
-// run that leaves the setting alone -- which is what a support request wants:
-// no clicking through a dialog to reproduce something once.
+// Turned on by the setting in Preferences, or by RB_DEBUG=1 in the
+// environment for a single run that leaves the setting alone -- which is
+// what a support request wants. The setting is the ordinary way in: tick the
+// box and every run from then on writes a log, with no special command and
+// nothing to remember to undo.
 void install();
 
 bool isEnabled();
 
-// Where this run is being written, empty when it is off.
+// Where the combined file is, empty when logging is off.
 QString filePath();
 
 // The directory the files go in: alongside the job logs, because somebody
 // collecting evidence wants both.
 QString logDir();
 
-// Turns it on or off for the next run. The current run is not disturbed,
-// because a message handler swapped mid-run loses whatever was in flight.
+// Turns capturing on or off now, without touching the setting. Use this for
+// a temporary trace; setEnabledForNextRun() is what a preference writes.
 void setEnabled(bool on);
 
-// Deletes debug logs older than the job-log retention. Called at startup.
+// Writes the setting and applies it immediately, so that ticking the box and
+// reproducing the problem is one step rather than two.
+void setEnabledForNextRun(bool on);
+
+// Deletes rotated logs older than the job-log retention. The file each
+// subsystem is currently writing is never touched however old it looks.
+// Called at startup.
 int purgeOldLogs();
 
 } // namespace DebugLog

@@ -1302,6 +1302,104 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="groupBox_debugLog">
+         <property name="title">
+          <string>Diagnostics</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_debugLog">
+          <item>
+           <widget class="QCheckBox" name="cb_debugLog">
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Write a log of what the application itself is doing, split by subsystem: queue.txt, scheduler.txt, jobs.txt, database.txt, app.txt, plus rclone-browser.txt with everything in one order.&lt;/p&gt;&lt;p&gt;Passwords and tokens are removed. Paths and remote names are not.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>Write a debug log</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_debugLog">
+            <item>
+             <widget class="QLabel" name="label_logMaxFileKb">
+              <property name="text">
+               <string>Start a new file after</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="logMaxFileKb">
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How large one log file may grow before it is rotated. 1024 KB is one megabyte; the default of 5120 KB is five.&lt;/p&gt;&lt;p&gt;Small values are allowed on purpose, so that rotation can be watched happening rather than waited out.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="suffix">
+               <string> KB</string>
+              </property>
+              <property name="minimum">
+               <number>16</number>
+              </property>
+              <property name="maximum">
+               <number>1048576</number>
+              </property>
+              <property name="singleStep">
+               <number>256</number>
+              </property>
+              <property name="value">
+               <number>5120</number>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_logKeepFiles">
+              <property name="text">
+               <string>, keeping</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="logKeepFiles">
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How many older files to keep for each subsystem. Zero keeps only the one being written.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="suffix">
+               <string> older files</string>
+              </property>
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>99</number>
+              </property>
+              <property name="value">
+               <number>10</number>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer_debugLog">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QPushButton" name="openLogFolder">
+            <property name="text">
+             <string>Open log folder</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer_14">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

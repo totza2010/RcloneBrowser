@@ -1,9 +1,13 @@
 #include "preferences_dialog.h"
+#include "app_settings.h"
 #include "completers.h"
+#include "debug_log.h"
 #include "rclone_flags.h"
 #include "utils.h"
+#include <QDesktopServices>
 #include <QFileDialog>
 #include <QSystemTrayIcon>
+#include <QUrl>
 
 PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
@@ -430,6 +434,17 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   ui.https_proxy->setText(settings->value("Settings/https_proxy").toString());
   ui.no_proxy->setText(settings->value("Settings/no_proxy").toString());
 
+  ui.cb_debugLog->setChecked(AppSettings::debugLog());
+  ui.logMaxFileKb->setValue(AppSettings::logMaxFileKb());
+  ui.logKeepFiles->setValue(AppSettings::logKeepFiles());
+
+  // The one thing somebody who has just ticked the box wants next.
+  QObject::connect(ui.openLogFolder, &QPushButton::clicked, this, [=]() {
+    const QString dir = DebugLog::logDir();
+    QDir().mkpath(dir);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+  });
+
   ui.cb_preemptiveLoading->setChecked(
       settings->value("Settings/preemptiveLoading", true).toBool());
   if ((settings->value("Settings/preemptiveLoadingLevel").toString()) == "2") {
@@ -704,6 +719,18 @@ bool PreferencesDialog::getUseProxy() const {
 
 bool PreferencesDialog::getPreemptiveLoading() const {
   return ui.cb_preemptiveLoading->isChecked();
+}
+
+bool PreferencesDialog::getDebugLog() const {
+  return ui.cb_debugLog->isChecked();
+}
+
+int PreferencesDialog::getLogMaxFileKb() const {
+  return ui.logMaxFileKb->value();
+}
+
+int PreferencesDialog::getLogKeepFiles() const {
+  return ui.logKeepFiles->value();
 }
 
 bool PreferencesDialog::getDarkMode() const { return ui.darkMode->isChecked(); }

@@ -53,6 +53,13 @@ public:
   bool getPreemptiveLoading() const;
   QString getPreemptiveLoadingLevel() const;
 
+  // Diagnostics. Turning the log on takes effect at once rather than at the
+  // next start, so that ticking the box and reproducing the problem is one
+  // step; see DebugLog::setEnabledForNextRun().
+  bool getDebugLog() const;
+  int getLogMaxFileKb() const;
+  int getLogKeepFiles() const;
+
   QString getQueueScript() const;
   QString getTransferOnScript() const;
   QString getTransferOffScript() const;

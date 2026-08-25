@@ -35,6 +35,34 @@ bool AppSettings::logToFile() {
       .toBool();
 }
 
+bool AppSettings::debugLog() {
+  return GetSettings()->value("Settings/debugLog", Default::kDebugLog).toBool();
+}
+
+void AppSettings::setDebugLog(bool on) {
+  GetSettings()->setValue("Settings/debugLog", on);
+}
+
+int AppSettings::logMaxFileKb() {
+  // Zero would mean a file that rotates on every line, which is not a
+  // sensible reading of "no limit" for something that rotates rather than
+  // expires. The floor is a size a header and a few lines still fit inside,
+  // so that a file set that small rolls over rather than thrashing.
+  const int kb =
+      GetSettings()->value("Settings/logMaxFileKb", Default::kLogMaxFileKb)
+          .toInt();
+  return kb < Default::kLogMinFileKb ? Default::kLogMinFileKb : kb;
+}
+
+int AppSettings::logKeepFiles() {
+  // Zero is allowed and means "only the one being written", which is a
+  // reasonable thing to ask for on a small disk.
+  return nonNegative(
+      GetSettings()->value("Settings/logKeepFiles", Default::kLogKeepFiles)
+          .toInt(),
+      Default::kLogKeepFiles);
+}
+
 int AppSettings::logRetentionDays() {
   return nonNegative(GetSettings()
                          ->value("Settings/logRetentionDays",

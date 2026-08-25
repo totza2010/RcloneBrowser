@@ -37,9 +37,15 @@ public:
 
   bool reachedSizeLimit() const { return mTruncated; }
 
-  // Where logs are written. Follows the configuration directory, so portable
-  // installations keep theirs alongside the executable.
+  // Where logs are written -- logs/transfers, a folder of its own so that a
+  // listing does not mix these with the application's own log. Follows the
+  // configuration directory, so portable installations keep theirs alongside
+  // the executable.
   static QString logDir();
+
+  // Where they used to be written, kept only so that purging still reaches
+  // the ones already on disk.
+  static QString legacyLogDir();
 
   // Whether the user wants logs at all, and how many days to keep.
   static bool isEnabled();

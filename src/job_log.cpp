@@ -15,6 +15,18 @@ constexpr qint64 kMaxBytes = 50LL * 1024 * 1024;
 } // namespace
 
 QString JobLogWriter::logDir() {
+  // A folder of its own. These used to sit loose in logs/ alongside the
+  // application's own files, so a directory listing mixed "what rclone said
+  // about one transfer" with "what the program was thinking" -- two things
+  // that are read for completely different reasons.
+  //
+  // Runs recorded before this hold their full path in the history (S13), so
+  // they still open from where they are; only new ones land here.
+  return QDir(GetConfigDir().filePath(QStringLiteral("logs")))
+      .filePath(QStringLiteral("transfers"));
+}
+
+QString JobLogWriter::legacyLogDir() {
   return GetConfigDir().filePath(QStringLiteral("logs"));
 }
 
@@ -156,18 +168,25 @@ int JobLogWriter::purgeOldLogs() {
     return 0; // keep everything
   }
 
-  QDir dir(logDir());
-  if (!dir.exists()) {
-    return 0;
-  }
-
   const QDateTime cutoff = QDateTime::currentDateTime().addDays(-days);
   int removed = 0;
-  const QFileInfoList entries =
-      dir.entryInfoList(QStringList() << QStringLiteral("*.log"), QDir::Files);
-  for (const QFileInfo &info : entries) {
-    if (info.lastModified() < cutoff && QFile::remove(info.absoluteFilePath())) {
-      ++removed;
+
+  // Both places: the folder these are written to now, and the one they used
+  // to sit in. A job log that was old enough to go yesterday is still old
+  // enough today, and leaving them behind would mean the retention setting
+  // quietly stopped applying to everything already on disk.
+  for (const QString &where : {logDir(), legacyLogDir()}) {
+    QDir dir(where);
+    if (!dir.exists()) {
+      continue;
+    }
+    const QFileInfoList entries =
+        dir.entryInfoList(QStringList() << QStringLiteral("*.log"), QDir::Files);
+    for (const QFileInfo &info : entries) {
+      if (info.lastModified() < cutoff &&
+          QFile::remove(info.absoluteFilePath())) {
+        ++removed;
+      }
     }
   }
   return removed;

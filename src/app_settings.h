@@ -54,6 +54,28 @@ void setSchedulerIsRunning(bool running);
 // instead of two.
 QString queueFinishedScript();
 
+// Whether the application writes its own debug log. Off by default: it says
+// a great deal and most runs have nothing to explain.
+//
+// This is the setting the checkbox in Preferences writes. RB_DEBUG=1 in the
+// environment still forces it on for one run without touching the setting,
+// which is what a support request wants -- but wanting a log should not
+// require knowing that.
+bool debugLog();
+void setDebugLog(bool on);
+
+// How large one log file may grow before it is rotated, and how many of the
+// older ones are kept. Per file, and there is one file per subsystem plus
+// the combined one, so the worst case is roughly
+// (subsystems + 1) x keep x size.
+//
+// In kilobytes rather than megabytes because a megabyte is the wrong unit at
+// the bottom of the range: checking that rotation works at all meant writing
+// a megabyte of log first, which takes long enough that nobody does it. The
+// floor is low enough to watch a file roll over in a minute.
+int logMaxFileKb();
+int logKeepFiles();
+
 // The defaults, in one place. Exposed so a test can say what it expects
 // rather than repeating the number.
 namespace Default {
@@ -61,6 +83,10 @@ constexpr bool kLogToFile = true;
 constexpr int kLogRetentionDays = 7;
 constexpr int kHistoryRetentionDays = 90;
 constexpr int kHistoryMaxRuns = 2000;
+constexpr bool kDebugLog = false;
+constexpr int kLogMaxFileKb = 5 * 1024;
+constexpr int kLogMinFileKb = 16;
+constexpr int kLogKeepFiles = 10;
 } // namespace Default
 
 } // namespace AppSettings

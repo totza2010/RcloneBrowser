@@ -640,6 +640,12 @@ MainWindow::MainWindow() {
                          dialog.getHttpsProxy().trimmed());
       settings->setValue("Settings/no_proxy", dialog.getNoProxy().trimmed());
 
+      // The sizes first, so that switching the log on picks them up rather
+      // than opening its files under the old ones.
+      settings->setValue("Settings/logMaxFileKb", dialog.getLogMaxFileKb());
+      settings->setValue("Settings/logKeepFiles", dialog.getLogKeepFiles());
+      DebugLog::setEnabledForNextRun(dialog.getDebugLog());
+
       settings->setValue("Settings/preemptiveLoading",
                          dialog.getPreemptiveLoading());
       settings->setValue("Settings/preemptiveLoadingLevel",
