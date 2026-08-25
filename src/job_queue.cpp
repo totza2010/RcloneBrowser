@@ -93,6 +93,8 @@ bool JobQueue::move(int from, int to) {
   if (taskIsRunning() && (from == 0 || to == 0)) {
     return false;
   }
+  qCDebug(rbQueue) << "move from=" << from << "to=" << to
+                   << "count=" << mEntries.size();
   mEntries.move(from, to);
   save();
   emit changed();
@@ -109,6 +111,7 @@ void JobQueue::clear() {
   if (kept.size() == mEntries.size()) {
     return;
   }
+  qCDebug(rbQueue) << "clear kept=" << kept.size() << "of" << mEntries.size();
   mEntries = kept;
   save();
   emit changed();
@@ -118,6 +121,7 @@ void JobQueue::start() {
   if (mRunning) {
     return;
   }
+  qCDebug(rbQueue) << "started, count=" << mEntries.size();
   mRunning = true;
   AppSettings::setQueueIsRunning(true);
   emit changed();
@@ -128,6 +132,7 @@ void JobQueue::pause() {
   if (!mRunning) {
     return;
   }
+  qCDebug(rbQueue) << "paused, count=" << mEntries.size();
   mRunning = false;
   AppSettings::setQueueIsRunning(false);
   emit changed();
@@ -277,6 +282,7 @@ void JobQueue::load() {
   mEntries.clear();
   mRunningRequestId.clear();
 
+  qCDebug(rbQueue) << "reading the stored queue";
   for (const QueueEntry &entry : QueueStore::load()) {
     // An entry whose task has since been deleted is skipped, the same as the
     // file-reading code always did.
