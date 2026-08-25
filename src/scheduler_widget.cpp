@@ -98,8 +98,10 @@ SchedulerWidget::SchedulerWidget(const QString &taskId, const QString &taskName,
 
   ui.saveStatus->hide();
 
-  // start timer based scheduler
-  QTimer::singleShot(5000, Qt::VeryCoarseTimer, this, SLOT(checkSchedule()));
+  // No timer here any more. Every schedule used to run one, so N schedules
+  // meant N clocks that could disagree about what minute it was, and the
+  // answer to "is anything due" existed only while a window did. MainWindow
+  // keeps the one clock now, and asks SchedulerStore.
 
   QObject::connect(ui.start, &QPushButton::clicked, this, [=]() {
     mSchedulerStatus = "activated";
@@ -470,66 +472,51 @@ SchedulerWidget::SchedulerWidget(const QString &taskId, const QString &taskName,
 
 SchedulerWidget::~SchedulerWidget() {}
 
-void SchedulerWidget::checkSchedule(void) {
+void SchedulerWidget::refreshNextRun(void) {
+  const QDateTime now = QDateTime::currentDateTime();
+  const qint64 diff = mNextRun.secsTo(now);
 
-  QDateTime nowDateTime = QDateTime::currentDateTime();
-  qint64 diff = mNextRun.secsTo(nowDateTime);
-
-  // Every check says so, due or not. "It never ran" is the complaint this
-  // has to answer, and without this line "not due yet" and "nothing is
-  // checking at all" look identical: both are silence. See debug_log.h.
+  // Every tick says so, due or not. "It never ran" is the complaint this has
+  // to answer, and without this line "not due yet" and "nothing is checking
+  // at all" look identical: both are silence. See debug_log.h.
   qCDebug(rbSched) << "check" << mSchedulerName
                    << "next=" << mNextRun.toString(Qt::ISODate)
                    << "in=" << -diff << "s"
                    << "status=" << mSchedulerStatus;
 
-  if (diff >= 0 && diff < 60) {
-
-    mNextRun = nextRun();
-    updateInfoFields();
-
-    if (!mGlobalStop && (mSchedulerStatus == "activated") && !mTaskRunning) {
-      mRequestId = QUuid::createUuid().toString();
-      mManualStart = false;
-      qCDebug(rbSched) << "fired" << mSchedulerName
-                       << "request=" << mRequestId
-                       << "mode=" << (mExecutionMode == "1" ? "queue" : "now");
-      emit runTask();
-    } else {
-      // Which of the three said no. Guessing from the screen afterwards does
-      // not work: by then the next run has already been moved on.
-      qCDebug(rbSched) << "held" << mSchedulerName << "reason="
-                       << (mGlobalStop           ? "scheduler stopped"
-                           : mSchedulerStatus != "activated"
-                               ? "schedule paused"
-                               : "its task is still running");
-    }
-  }
-
-  // reschedule if missed becasue e.g. sleep/hibernation
+  // A minute that went by without anyone looking -- the machine was asleep --
+  // is not run late. Saying so is the difference between "it is not due yet"
+  // and "it was due and nobody was there".
   if (diff > 60) {
     qCDebug(rbSched) << "missed" << mSchedulerName << "by=" << diff << "s";
-    mNextRun = nextRun();
-    updateInfoFields();
   }
 
-  // set next check at full minute
-  QDateTime dt_start = QDateTime::currentDateTime();
-  QTime time = dt_start.time();
+  if (diff >= 0) {
+    mNextRun = nextRun();
+  }
+  updateInfoFields();
+}
 
-  time.setHMS(time.hour(), time.minute() + 1, 0, 0);
-  dt_start.setTime(time);
+void SchedulerWidget::startScheduledRun(void) {
+  // Whether the schedule is switched on, and whether its minute has come, is
+  // the store's to say -- it said so to get here. What is left is the one
+  // thing only this schedule knows: whether the run it asked for last time
+  // is still going.
+  if (mGlobalStop || mTaskRunning) {
+    qCDebug(rbSched) << "held" << mSchedulerName << "reason="
+                     << (mGlobalStop ? "scheduler stopped"
+                                     : "its task is still running");
+    return;
+  }
 
-  diff = QDateTime::currentDateTime().msecsTo(dt_start);
+  mRequestId = QUuid::createUuid().toString();
+  mManualStart = false;
+  qCDebug(rbSched) << "fired" << mSchedulerName << "request=" << mRequestId
+                   << "mode=" << (mExecutionMode == "1" ? "queue" : "now");
+  emit runTask();
 
-  if (diff < 0) {
-    diff = 0;
-  };
-
-  QTimer::singleShot(diff + 1000, Qt::VeryCoarseTimer, this,
-                     SLOT(checkSchedule()));
-
-  return;
+  mNextRun = nextRun();
+  updateInfoFields();
 }
 
 void SchedulerWidget::applyScreenToSettings() {
@@ -797,6 +784,8 @@ void SchedulerWidget::startScheduler() {
   applySettingsToScreen();
   updateInfoFields();
 }
+
+QString SchedulerWidget::getSchedulerId() { return mSchedulerId; }
 
 QString SchedulerWidget::getSchedulerTaskId() { return mTaskId; }
 

@@ -26,6 +26,16 @@ public:
   void update(const Schedule &schedule);
   void remove(const QString &id);
 
+  // Replaces the whole list and saves it, in the given order -- restoring
+  // depends on the order, so it is kept rather than sorted.
+  //
+  // This is what the window calls when a schedule is edited, added or
+  // deleted: it hands over what it has and the store is what writes the
+  // file. Schedules that are no longer listed take their "last fired"
+  // memory with them, so an id that comes back is not held to a minute the
+  // one before it already used.
+  bool setAll(const QList<Schedule> &schedules);
+
   // Whether the scheduler as a whole is switched on. A switched-off
   // scheduler keeps its schedules and starts nothing, the same as a paused
   // queue. Remembered across restarts, as it always has been.

@@ -3,6 +3,8 @@
 #include "app_settings.h"
 #include "config_store.h"
 
+#include <QSet>
+
 SchedulerStore &SchedulerStore::instance() {
   static SchedulerStore store;
   return store;
@@ -50,6 +52,29 @@ void SchedulerStore::remove(const QString &id) {
       return;
     }
   }
+}
+
+bool SchedulerStore::setAll(const QList<Schedule> &schedules) {
+  mSchedules = schedules;
+
+  // Forget the firing history of anything that is no longer here. Keeping it
+  // would mean a schedule deleted and made again under the same id could not
+  // fire in the minute its predecessor did.
+  QSet<QString> live;
+  for (const Schedule &schedule : mSchedules) {
+    live.insert(schedule.id);
+  }
+  for (auto it = mLastFired.begin(); it != mLastFired.end();) {
+    if (live.contains(it.key())) {
+      ++it;
+    } else {
+      it = mLastFired.erase(it);
+    }
+  }
+
+  const bool ok = save();
+  emit changed();
+  return ok;
 }
 
 bool SchedulerStore::isRunning() const {

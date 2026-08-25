@@ -331,6 +331,61 @@ private slots:
     QObject::disconnect(&store, &SchedulerStore::changed, &store, nullptr);
   }
 
+  // The window hands over the whole list whenever anything about a schedule
+  // changes, because the list it holds is the widgets on the tab. What it
+  // hands over has to come back in the same order, or restoring reorders the
+  // tab every time the program starts.
+  void setAllKeepsTheOrderItWasGiven() {
+    SchedulerStore &store = SchedulerStore::instance();
+    store.load();
+
+    QList<Schedule> given;
+    for (int i = 0; i < 4; ++i) {
+      Schedule schedule;
+      schedule.id = QStringLiteral("s%1").arg(i);
+      schedule.taskId = QStringLiteral("t%1").arg(i);
+      schedule.name = QStringLiteral("number %1").arg(i);
+      given.append(schedule);
+    }
+    QVERIFY(store.setAll(given));
+
+    QCOMPARE(store.count(), 4);
+    for (int i = 0; i < 4; ++i) {
+      QCOMPARE(store.schedules().at(i).id, QStringLiteral("s%1").arg(i));
+    }
+
+    // And the order survives being written and read again.
+    store.load();
+    QCOMPARE(store.count(), 4);
+    for (int i = 0; i < 4; ++i) {
+      QCOMPARE(store.schedules().at(i).id, QStringLiteral("s%1").arg(i));
+      QCOMPARE(store.schedules().at(i).name, QStringLiteral("number %1").arg(i));
+    }
+  }
+
+  // A schedule that goes must not leave anything behind that would change
+  // how the next one with that id behaves.
+  void aScheduleThatIsRemovedForgetsWhenItLastFired() {
+    SchedulerStore &store = SchedulerStore::instance();
+
+    Schedule armed;
+    armed.id = QStringLiteral("recycled");
+    armed.taskId = QStringLiteral("t1");
+    armed.hour = 7;
+    armed.active = true;
+    QVERIFY(store.setAll({armed}));
+
+    const QDateTime at(QDate(2026, 8, 10), QTime(7, 0));
+    QCOMPARE(store.due(at).size(), 1);
+    QVERIFY2(store.due(at).isEmpty(), "it fired twice in one minute");
+
+    // Deleted, then made again under the same id in that same minute.
+    QVERIFY(store.setAll({}));
+    QVERIFY(store.setAll({armed}));
+
+    QCOMPARE(store.due(at).size(), 1);
+  }
+
   void schedulesSurviveARestart() {
     SchedulerStore &store = SchedulerStore::instance();
     store.load();

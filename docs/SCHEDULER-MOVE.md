@@ -45,8 +45,8 @@ for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
 | 3 | 6 จุด "notify schedulers" | บอกทุกตารางว่างานเปลี่ยนสถานะ | `notifySchedulers()` → store ฟัง `JobRegistry` เอง | ✅ **ทำแล้ว (ตัวกลาง)** |
 | 4 | `actionStartScheduler` / `actionStopScheduler` + 4 จุดอ่าน setting | เปิด/ปิดทั้งระบบ | `SchedulerStore::start()` / `pause()` / `isRunning()` | ✅ **ทำแล้ว (ของจริง)** |
 | 5 | `actionAddToScheduler` | สร้างตารางใหม่ | `add(Schedule)` | ⬜ |
-| 6 | `restoreSchedulersFromFile()` / `saveSchedulerFile()` | อ่าน/เขียนตอนเปิด-ปิด | `load()` / `save()` | ⬜ |
-| 7 | `SchedulerWidget::checkSchedule()` × N | ถึงเวลาหรือยัง | `due()` ตัวเดียว | ⬜ |
+| 6 | `restoreSchedulersFromFile()` / `saveSchedulerFile()` | อ่าน/เขียนตอนเปิด-ปิด | `load()` / `setAll()` | ✅ **ทำแล้ว (ของจริง)** |
+| 7 | `SchedulerWidget::checkSchedule()` × N | ถึงเวลาหรือยัง | `due()` + นาฬิกาเดียว | ✅ **ทำแล้ว (ของจริง)** |
 | 8 | `SchedulerWidget::runTask` handler | ส่งงานเข้าคิว/รันทันที | `enqueue()` (มีอยู่แล้ว) | ⬜ |
 | 9 | 23 ฟิลด์ใน widget | ตัวตารางเวลาเอง | `Schedule` | ⬜ |
 
@@ -61,6 +61,58 @@ for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
 จะถูกรันย้อนหลังทันทีที่เปิดกลับมา** เพราะไม่ได้จดว่าเห็นนาทีนั้นแล้ว
 ของเดิมไม่เป็นแบบนั้น (widget เลื่อน `mNextRun` ไปเรื่อยๆ แม้ตอนหยุด)
 จึงต้องจด `mLastFired` ก่อนแล้วค่อย `continue` — มี test คุมไว้แล้ว
+
+## บล็อก 6 — store เป็นคนอ่านและเขียนไฟล์ (ทำแล้ว)
+
+เมื่อก่อน `saveSchedulerFile()` เดิน layout เก็บ `QStringList` ดิบแล้วเขียนลง `ScheduleStore` เอง
+และ `restoreSchedulersFromFile()` อ่าน `QStringList` ดิบมาสร้าง widget
+**การอ่านกับการวาดเป็นการกระทำเดียวกัน** จึงลิสต์ตารางเวลาไม่ได้ถ้าไม่มีหน้าต่าง
+
+ตอนนี้:
+
+```cpp
+// เขียน: หน้าต่างส่งของให้ store แล้ว store เป็นคนบันทึก
+QList<Schedule> schedules;
+for (SchedulerWidget *w : schedulerWidgets())
+  schedules.append(Schedule::fromArgs(w->getSchedulerParameters()));
+return SchedulerStore::instance().setAll(schedules);
+
+// อ่าน: store อ่านไฟล์ หน้าต่างแค่วาดตามที่ store มี
+SchedulerStore::instance().load();
+for (const Schedule &s : SchedulerStore::instance().schedules()) ...
+```
+
+**ความเสี่ยงคือรูปแบบที่บันทึกเปลี่ยน** เพราะของที่เขียนลงไฟล์ตอนนี้คือ `Schedule::toArgs()`
+ไม่ใช่ `getSchedulerParameters()` ของ widget โดยตรง
+
+ยืนยันด้วยการเทียบไบต์: คัดลอก `rclone-browser.db` ไว้ → เปิดโปรแกรม → dump ตาราง `schedule`
+เทียบกับของเดิม → **IDENTICAL** ทั้งสองแถว รวม base64 ทุกช่องและ `position`
+
+นี่คือผลตอบแทนของ test `writingItBackProducesTheSameThing` ที่เขียนไว้ตอน S13 —
+มันการันตี round trip ไว้ก่อนที่จะมีใครต้องใช้
+
+## บล็อก 7 — นาฬิกาเดียว (ทำแล้ว)
+
+เมื่อก่อน **ทุก `SchedulerWidget` มี `QTimer` ของตัวเอง** และตัดสินใจเองว่าถึงเวลาหรือยัง
+มี 5 ตาราง = 5 นาฬิกา ที่อาจไม่ตรงกันว่าตอนนี้นาทีอะไร และ "มีอะไรถึงเวลาบ้าง"
+ตอบได้เฉพาะตอนมีหน้าต่างเปิดอยู่
+
+ตอนนี้ `MainWindow::checkSchedules()` เป็นนาฬิกาเดียว:
+
+```
+ถาม SchedulerStore::due(now) ครั้งเดียว
+  → ตารางไหนถึงเวลา หา widget ตาม id แล้วสั่ง startScheduledRun()
+  → ทุก widget refreshNextRun() เพื่อให้ตัวนับถอยหลังเดิน
+  → ตั้งนาฬิกาครั้งถัดไปที่นาทีถัดไป + 1 วินาที
+```
+
+**การแบ่งหน้าที่:** store ตอบว่า "เปิดอยู่ไหม / ถึงนาทีหรือยัง / นาทีนี้ยิงไปแล้วหรือยัง"
+widget ตอบแค่เรื่องเดียวที่มันรู้คนเดียว คือ **งานรอบที่แล้วยังวิ่งอยู่ไหม**
+
+ยืนยันแล้วว่า tick ที่วินาที `:01` ทุกนาที และ**ทุกตารางมี timestamp ตรงกันระดับมิลลิวินาที**
+ซึ่งเป็นหลักฐานว่าเป็นนาฬิกาเดียวจริง ไม่ใช่หลายตัวบังเอิญใกล้กัน
+
+⚠️ **เส้นทางการยิงจริงยังไม่ได้ทดสอบ** — ดู `VERIFY.md` V-22 ข้อ 3
 
 ## ขั้น 0 — วางเครื่องวัดก่อน (ทำแล้ว)
 

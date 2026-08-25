@@ -1846,6 +1846,12 @@ MainWindow::MainWindow() {
     refreshSchedulerView();
   }
 
+  // Start the one clock. The same five seconds each widget used to wait
+  // before its first look, so a schedule due in the minute the program starts
+  // in behaves as it always has.
+  QTimer::singleShot(5000, Qt::VeryCoarseTimer, this,
+                     &MainWindow::checkSchedules);
+
   // Whether the queue was left running is the queue's own memory, not a key
   // this window reads for itself.
   if (JobQueue::instance().isRunning()) {
@@ -3125,12 +3131,17 @@ void MainWindow::closeEvent(QCloseEvent *ev) {
 void MainWindow::restoreSchedulersFromFile() {
   // make sure that tasks are already listed so we can cross check
 
-  for (const QStringList &args : ScheduleStore::load()) {
+  // The store reads the file; this only builds a row for each schedule it
+  // found. Reading and drawing were the same act before, which is why the
+  // schedules could not be listed without a window to list them in.
+  SchedulerStore::instance().load();
+
+  for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
     // A scheduler whose task has since been deleted is skipped rather than
     // restored pointing at nothing.
-    if (ListOfJobOptions::getInstance()->find(ScheduleStore::taskIdOf(args))) {
+    if (ListOfJobOptions::getInstance()->find(schedule.taskId)) {
       mSchedulersCount++;
-      addScheduler("", "", args);
+      addScheduler("", "", schedule.toArgs());
     }
   }
 
@@ -3164,6 +3175,50 @@ void MainWindow::refreshSchedulerView() {
 
   ui.labelSchedulerInfoStart->setVisible(schedulerRunning);
   ui.labelSchedulerInfoStop->setVisible(!schedulerRunning);
+}
+
+void MainWindow::checkSchedules() {
+  // Ask once, for all of them. What comes back is what the store decided is
+  // due, which already accounts for the scheduler being switched off and for
+  // a minute having fired already.
+  const QList<Schedule> due =
+      SchedulerStore::instance().due(QDateTime::currentDateTime());
+
+  for (const Schedule &schedule : due) {
+    bool found = false;
+    for (SchedulerWidget *widget : schedulerWidgets()) {
+      if (widget->getSchedulerId() == schedule.id) {
+        widget->startScheduledRun();
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      // The store knows about a schedule the tab does not -- which happens
+      // when its task was deleted, because restoring skips those. Saying so
+      // is better than a run that quietly never happens.
+      qCDebug(rbSched) << "due but not on the tab" << schedule.name
+                       << "task=" << schedule.taskId;
+    }
+  }
+
+  // The countdown on every card, whether or not anything was due.
+  for (SchedulerWidget *widget : schedulerWidgets()) {
+    widget->refreshNextRun();
+  }
+
+  // On the next full minute, plus a second, so a schedule set for 07:00 is
+  // looked at inside the minute it names rather than on its edge.
+  QDateTime next = QDateTime::currentDateTime();
+  next.setTime(QTime(next.time().hour(), next.time().minute()));
+  next = next.addSecs(60);
+
+  qint64 wait = QDateTime::currentDateTime().msecsTo(next);
+  if (wait < 0) {
+    wait = 0;
+  }
+  QTimer::singleShot(wait + 1000, Qt::VeryCoarseTimer, this,
+                     &MainWindow::checkSchedules);
 }
 
 QList<SchedulerWidget *> MainWindow::schedulerWidgets() const {
@@ -3698,14 +3753,20 @@ bool MainWindow::saveSchedulerFile(void) {
 
   QMutexLocker locker(&mSaveSchedulerFileMutex);
 
-  QList<QStringList> schedules;
+  // The window still holds the schedules -- they are the widgets on the tab
+  // -- but it no longer writes them. It hands them over and the store is
+  // what saves, so anything else that wants to know what the schedules are
+  // can ask the store rather than this window. See docs/SCHEDULER-MOVE.md
+  // block 6.
+  //
   // The order the layout holds them in is the order the file is written in,
   // and restoring depends on it -- schedulerWidgets() keeps that order.
+  QList<Schedule> schedules;
   for (SchedulerWidget *scheduler : schedulerWidgets()) {
-    schedules.append(scheduler->getSchedulerParameters());
+    schedules.append(Schedule::fromArgs(scheduler->getSchedulerParameters()));
   }
 
-  return ScheduleStore::save(schedules);
+  return SchedulerStore::instance().setAll(schedules);
 }
 
 void MainWindow::addSavedTransfer(const QString &uniqueId, bool dryRun,

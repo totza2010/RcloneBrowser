@@ -22,9 +22,25 @@ public:
   bool isRunning = true;
   // return all scheduler parameters so we can store it
   QStringList getSchedulerParameters();
+  QString getSchedulerId();
   QString getSchedulerTaskId();
   QString getSchedulerRequestId();
   int getExecutionMode();
+
+  // Asks this schedule to start its run, because something decided its
+  // minute has come. Refused, with a reason in the log, when its own task is
+  // still going from last time -- the one condition that is this schedule's
+  // to know rather than the store's.
+  //
+  // The deciding used to be here: every widget ran a timer of its own and
+  // worked out whether it was due. One clock for all of them means they
+  // cannot disagree, and means the answer exists without a window. See
+  // docs/SCHEDULER-MOVE.md block 7.
+  void startScheduledRun();
+
+  // Redraws "next run" from the current settings. Called on the same tick
+  // that looks for due schedules, so the tab keeps counting down.
+  void refreshNextRun();
   void updateTaskName(const QString newTaskName);
   void updateTaskStatus(const QString requestID, const QString taskStatus);
   void stopScheduler();
@@ -93,7 +109,4 @@ private:
   bool mGlobalStop = false;
   QDateTime mNextRun;
 
-private slots:
-
-  void checkSchedule(void);
 };
