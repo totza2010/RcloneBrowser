@@ -65,7 +65,8 @@ QList<Schedule> SchedulerStore::due(const QDateTime &now) {
     if (mLastFired.value(schedule.id) == minute) {
       continue;
     }
-    qCDebug(rbApp) << "schedule due" << schedule.name << "task=" << schedule.taskName;
+    qCDebug(rbSched) << "due" << schedule.name
+                     << "task=" << schedule.taskName;
     mLastFired[schedule.id] = minute;
     ready.append(schedule);
   }

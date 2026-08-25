@@ -1,4 +1,5 @@
 #include "scheduler_widget.h"
+#include "debug_log.h"
 #include "list_of_job_options.h"
 #include "schedule.h"
 #include "qcron.h"
@@ -474,6 +475,14 @@ void SchedulerWidget::checkSchedule(void) {
   QDateTime nowDateTime = QDateTime::currentDateTime();
   qint64 diff = mNextRun.secsTo(nowDateTime);
 
+  // Every check says so, due or not. "It never ran" is the complaint this
+  // has to answer, and without this line "not due yet" and "nothing is
+  // checking at all" look identical: both are silence. See debug_log.h.
+  qCDebug(rbSched) << "check" << mSchedulerName
+                   << "next=" << mNextRun.toString(Qt::ISODate)
+                   << "in=" << -diff << "s"
+                   << "status=" << mSchedulerStatus;
+
   if (diff >= 0 && diff < 60) {
 
     mNextRun = nextRun();
@@ -482,12 +491,24 @@ void SchedulerWidget::checkSchedule(void) {
     if (!mGlobalStop && (mSchedulerStatus == "activated") && !mTaskRunning) {
       mRequestId = QUuid::createUuid().toString();
       mManualStart = false;
+      qCDebug(rbSched) << "fired" << mSchedulerName
+                       << "request=" << mRequestId
+                       << "mode=" << (mExecutionMode == "1" ? "queue" : "now");
       emit runTask();
+    } else {
+      // Which of the three said no. Guessing from the screen afterwards does
+      // not work: by then the next run has already been moved on.
+      qCDebug(rbSched) << "held" << mSchedulerName << "reason="
+                       << (mGlobalStop           ? "scheduler stopped"
+                           : mSchedulerStatus != "activated"
+                               ? "schedule paused"
+                               : "its task is still running");
     }
   }
 
   // reschedule if missed becasue e.g. sleep/hibernation
   if (diff > 60) {
+    qCDebug(rbSched) << "missed" << mSchedulerName << "by=" << diff << "s";
     mNextRun = nextRun();
     updateInfoFields();
   }
@@ -794,6 +815,15 @@ QString SchedulerWidget::enhanceCron(QString cron) {
 
 void SchedulerWidget::updateTaskStatus(const QString requestID,
                                        const QString taskStatus) {
+
+  // A schedule only listens to news about the run it asked for. That is
+  // right, and it is also how one gets stuck showing "in the queue" forever:
+  // the run ended under an id it does not recognise and it never hears. Both
+  // the hearing and the ignoring are worth a line, because the difference
+  // between them is the whole diagnosis.
+  qCDebug(rbSched) << (requestID == mRequestId ? "status" : "status ignored")
+                   << mSchedulerName << taskStatus << "request=" << requestID
+                   << "waitingFor=" << mRequestId;
 
   if (requestID == mRequestId) {
 

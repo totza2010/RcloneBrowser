@@ -11,6 +11,7 @@
 #include <QTextStream>
 
 Q_LOGGING_CATEGORY(rbQueue, "rb.queue")
+Q_LOGGING_CATEGORY(rbSched, "rb.sched")
 Q_LOGGING_CATEGORY(rbJob, "rb.job")
 Q_LOGGING_CATEGORY(rbDb, "rb.db")
 Q_LOGGING_CATEGORY(rbApp, "rb.app")

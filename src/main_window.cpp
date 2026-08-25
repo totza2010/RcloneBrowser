@@ -4351,6 +4351,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
     mDoNotSort = true;
     // when quitting (waiting for unmount) don't start new tasks
     if (mAppQuittingStatus) {
+      qCDebug(rbSched) << "run refused: the application is quitting";
       mDoNotSort = false;
       return;
     }
@@ -4359,6 +4360,11 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
     QString requestID = widget->getSchedulerRequestId();
     int executionMode = widget->getExecutionMode();
 
+    // A schedule pointing at a task that no longer exists falls straight
+    // through the loop below and does nothing at all -- no message, no
+    // status, nothing the person waiting for the run could see.
+    bool foundTask = false;
+
     // find task based on taskID
     for (int k = 0; k < ui.tasksListWidget->count(); k = k + 1) {
       JobOptionsListWidgetItem *item =
@@ -4366,9 +4372,12 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
       JobOptions *joTask = item->GetData();
 
       if (taskID == joTask->uniqueId.toString()) {
+        foundTask = true;
 
         if (executionMode == 0) {
           // run immediately
+          qCDebug(rbSched) << "starting now task=" << joTask->description
+                           << "request=" << requestID;
           mRunningSchedulersCount++;
           ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
                                      .arg(mSchedulersCount)
@@ -4390,6 +4399,9 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
             JobOptions *jo_queue = item_queue->GetData();
             QString uniqueId_queue = jo_queue->uniqueId.toString();
             if (taskID == uniqueId_queue) {
+              qCDebug(rbSched)
+                  << "not queued: that task is already waiting task="
+                  << joTask->description << "request=" << requestID;
               widget->updateTaskStatus(requestID, "task already in the queue");
               mDoNotSort = false;
               return;
@@ -4402,6 +4414,8 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
           //
           // The request id is the schedule's, so that a run it asked for can
           // be matched back to it afterwards.
+          qCDebug(rbSched) << "queueing task=" << joTask->description
+                           << "request=" << requestID;
           JobQueue::instance().enqueue(joTask->uniqueId.toString(), false,
                                        requestID);
 
@@ -4412,6 +4426,10 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
                                      .arg(mRunningSchedulersCount));
         }
       }
+    }
+    if (!foundTask) {
+      qCDebug(rbSched) << "run refused: no such task task=" << taskID
+                       << "request=" << requestID;
     }
     mDoNotSort = false;
     sortJobs();
