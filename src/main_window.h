@@ -106,7 +106,6 @@ private:
   QueueRunningFlag mQueueStatus;
 
   // number of schedulers
-  int mSchedulersCount = 0;
   int mRunningSchedulersCount = 0;
 
   // number of queued tasks

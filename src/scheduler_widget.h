@@ -2,6 +2,7 @@
 
 #include "hours_spinbox.h"
 #include "minutes_spinbox.h"
+#include "schedule.h"
 #include "ui_scheduler_widget.h"
 
 class SchedulerWidget : public QWidget {
@@ -22,6 +23,12 @@ public:
   bool isRunning = true;
   // return all scheduler parameters so we can store it
   QStringList getSchedulerParameters();
+
+  // What this card is showing, as data. The stored form is Schedule's to
+  // decide; this widget only says what it holds. See
+  // docs/SCHEDULER-MOVE.md block 9.
+  Schedule toSchedule() const;
+
   QString getSchedulerId();
   QString getSchedulerTaskId();
   QString getSchedulerRequestId();
@@ -63,6 +70,7 @@ private:
 
   void applySettingsToScreen();
   void applyArgsToScheduler(QStringList args);
+  void applySchedule(const Schedule &schedule);
   void applyScreenToSettings();
   void updateInfoFields();
 

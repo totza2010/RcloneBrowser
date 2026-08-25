@@ -628,124 +628,87 @@ void SchedulerWidget::applySettingsToScreen() {
   }
 }
 
-QStringList SchedulerWidget::getSchedulerParameters() {
+// What this schedule is, as data.
+//
+// Building the stored form by hand here was a second implementation of the
+// format -- which fields there are, which of them are base64, what order they
+// go in -- kept in step with Schedule::toArgs() by nothing but care. Two
+// spellings of one format is one too many; this is the view describing
+// itself, and the core deciding how that is written down.
+Schedule SchedulerWidget::toSchedule() const {
+  Schedule schedule;
 
-  QStringList schedulerArgs;
+  schedule.id = mSchedulerId;
+  schedule.name = mSchedulerName;
+  schedule.taskId = mTaskId;
+  schedule.taskName = mTaskName;
+  schedule.requestId = mRequestId;
+  schedule.active = mSchedulerStatus == "activated";
 
-  schedulerArgs << "mSchedulerId" << mSchedulerId;
-  schedulerArgs << "mSchedulerName" << mSchedulerName.toUtf8().toBase64();
-  schedulerArgs << "mTaskId" << mTaskId;
-  schedulerArgs << "mTaskName" << mTaskName.toUtf8().toBase64();
-  schedulerArgs << "mLastRun" << mLastRun.toUtf8().toBase64();
-  schedulerArgs << "mRequestId" << mRequestId;
-  schedulerArgs << "mLastRunFinished" << mLastRunFinished.toUtf8().toBase64();
-  schedulerArgs << "mLastRunStatus" << mLastRunStatus.toUtf8().toBase64();
-  schedulerArgs << "mSchedulerStatus" << mSchedulerStatus;
+  schedule.dailyMode = mDailyState;
+  schedule.monday = mDailyMon;
+  schedule.tuesday = mDailyTue;
+  schedule.wednesday = mDailyWed;
+  schedule.thursday = mDailyThu;
+  schedule.friday = mDailyFri;
+  schedule.saturday = mDailySat;
+  schedule.sunday = mDailySun;
+  schedule.hour = mDailyHour.toInt();
+  schedule.minute = mDailyMinute.toInt();
 
-  schedulerArgs << "mDailyState" << QVariant(mDailyState).toString();
-  schedulerArgs << "mDailyMon" << QVariant(mDailyMon).toString();
-  schedulerArgs << "mDailyTue" << QVariant(mDailyTue).toString();
-  schedulerArgs << "mDailyWed" << QVariant(mDailyWed).toString();
-  schedulerArgs << "mDailyThu" << QVariant(mDailyThu).toString();
-  schedulerArgs << "mDailyFri" << QVariant(mDailyFri).toString();
-  schedulerArgs << "mDailySat" << QVariant(mDailySat).toString();
-  schedulerArgs << "mDailySun" << QVariant(mDailySun).toString();
-  schedulerArgs << "mDailyHour" << mDailyHour;
-  schedulerArgs << "mDailyMinute" << mDailyMinute;
+  schedule.cronMode = mCronState;
+  schedule.cron = mCron;
+  schedule.executionMode = mExecutionMode.toInt();
 
-  schedulerArgs << "mCronState" << QVariant(mCronState).toString();
-  schedulerArgs << "mCron" << mCron.toUtf8().toBase64();
-  schedulerArgs << "mExecutionMode" << mExecutionMode;
+  schedule.lastRun = mLastRun;
+  schedule.lastFinished = mLastRunFinished;
+  schedule.lastStatus = mLastRunStatus;
 
-  return schedulerArgs;
+  return schedule;
 }
 
+QStringList SchedulerWidget::getSchedulerParameters() {
+  return toSchedule().toArgs();
+}
+
+// The other half of the same thing: the core reads the stored form, this
+// spreads it over the fields the screen is drawn from. Seventy-five lines of
+// if-chains stood here, one per field, each repeating whether that field was
+// base64.
 void SchedulerWidget::applyArgsToScheduler(QStringList args) {
+  applySchedule(Schedule::fromArgs(args));
+}
 
-  int argsLength = args.count();
+void SchedulerWidget::applySchedule(const Schedule &schedule) {
+  mSchedulerId = schedule.id;
+  mSchedulerName = schedule.name;
+  mTaskId = schedule.taskId;
+  mTaskName = schedule.taskName;
+  mRequestId = schedule.requestId;
+  mSchedulerStatus = schedule.active ? "activated" : "paused";
 
-  QString arg;
-  QString argValue;
+  mDailyState = schedule.dailyMode;
+  mDailyMon = schedule.monday;
+  mDailyTue = schedule.tuesday;
+  mDailyWed = schedule.wednesday;
+  mDailyThu = schedule.thursday;
+  mDailyFri = schedule.friday;
+  mDailySat = schedule.saturday;
+  mDailySun = schedule.sunday;
 
-  for (int i = 0; i < argsLength; i = i + 2) {
+  // Written back with the leading zero the file has always carried, so that
+  // a schedule read and saved without being touched is unchanged on disk.
+  mDailyHour = QStringLiteral("%1").arg(schedule.hour, 2, 10, QLatin1Char('0'));
+  mDailyMinute =
+      QStringLiteral("%1").arg(schedule.minute, 2, 10, QLatin1Char('0'));
 
-    arg = args.at(i);
-    argValue = args.at(i + 1);
+  mCronState = schedule.cronMode;
+  mCron = schedule.cron;
+  mExecutionMode = QString::number(schedule.executionMode);
 
-    if (arg == "mSchedulerId") {
-      mSchedulerId = argValue;
-    }
-    if (arg == "mSchedulerName") {
-      mSchedulerName = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-    if (arg == "mTaskId") {
-      mTaskId = argValue;
-    }
-    if (arg == "mTaskName") {
-      mTaskName = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-    if (arg == "mLastRun") {
-      mLastRun = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-    if (arg == "mRequestId") {
-      mRequestId = argValue;
-    }
-    if (arg == "mLastRunFinished") {
-      mLastRunFinished = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-    if (arg == "mLastRunStatus") {
-      mLastRunStatus = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-
-    if (arg == "mSchedulerStatus") {
-      mSchedulerStatus = argValue;
-    }
-
-    if (arg == "mDailyState") {
-      mDailyState = QVariant(argValue).toBool();
-    }
-
-    if (arg == "mDailyMon") {
-      mDailyMon = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailyTue") {
-      mDailyTue = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailyWed") {
-      mDailyWed = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailyThu") {
-      mDailyThu = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailyFri") {
-      mDailyFri = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailySat") {
-      mDailySat = QVariant(argValue).toBool();
-    }
-    if (arg == "mDailySun") {
-      mDailySun = QVariant(argValue).toBool();
-    }
-
-    if (arg == "mDailyHour") {
-      mDailyHour = argValue;
-    }
-
-    if (arg == "mDailyMinute") {
-      mDailyMinute = argValue;
-    }
-
-    if (arg == "mCronState") {
-      mCronState = QVariant(argValue).toBool();
-    }
-    if (arg == "mCron") {
-      mCron = (QString)QByteArray::fromBase64(argValue.toUtf8());
-    }
-    if (arg == "mExecutionMode") {
-      mExecutionMode = argValue;
-    }
-  }
-  return;
+  mLastRun = schedule.lastRun;
+  mLastRunFinished = schedule.lastFinished;
+  mLastRunStatus = schedule.lastStatus;
 }
 
 void SchedulerWidget::updateTaskName(const QString newTaskName) {

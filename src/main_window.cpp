@@ -1460,7 +1460,6 @@ MainWindow::MainWindow() {
           JobOptions *jo = item->GetData();
 
           jo->uniqueId.toString();
-          mSchedulersCount++;
           QStringList args;
           args << "NewScheduler";
           addScheduler(jo->uniqueId.toString(), jo->description, args);
@@ -3140,7 +3139,6 @@ void MainWindow::restoreSchedulersFromFile() {
     // A scheduler whose task has since been deleted is skipped rather than
     // restored pointing at nothing.
     if (ListOfJobOptions::getInstance()->find(schedule.taskId)) {
-      mSchedulersCount++;
       addScheduler("", "", schedule.toArgs());
     }
   }
@@ -3164,11 +3162,16 @@ void MainWindow::restoreSchedulersFromFile() {
 void MainWindow::refreshSchedulerView() {
   const bool schedulerRunning = SchedulerStore::instance().isRunning();
 
+  // Counted rather than tallied. A running total of something already on
+  // screen is a second copy of the truth, and the two drift: every place
+  // that added a schedule had to remember to add one here too.
+  const int schedules = schedulerWidgets().size();
+
   ui.tabs->setTabText(4, schedulerRunning
                              ? QString("Scheduler (%1)>>(%2)")
-                                   .arg(mSchedulersCount)
+                                   .arg(schedules)
                                    .arg(mRunningSchedulersCount)
-                             : QString("Scheduler (%1)").arg(mSchedulersCount));
+                             : QString("Scheduler (%1)").arg(schedules));
 
   ui.buttonStartScheduler->setEnabled(!schedulerRunning);
   ui.buttonStopScheduler->setEnabled(schedulerRunning);
@@ -4191,8 +4194,6 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
     widget->deleteLater();
     delete line;
 
-    mSchedulersCount--;
-
     // The test that used to stand here chose between two spellings of the
     // tab text and nothing else, so with one place writing the tab there is
     // nothing left for it to decide.
@@ -4304,77 +4305,66 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
       return;
     }
 
-    QString taskID = widget->getSchedulerTaskId();
-    QString requestID = widget->getSchedulerRequestId();
-    int executionMode = widget->getExecutionMode();
+    const QString taskID = widget->getSchedulerTaskId();
+    const QString requestID = widget->getSchedulerRequestId();
+    const int executionMode = widget->getExecutionMode();
 
-    // A schedule pointing at a task that no longer exists falls straight
-    // through the loop below and does nothing at all -- no message, no
-    // status, nothing the person waiting for the run could see.
-    bool foundTask = false;
-
-    // find task based on taskID
-    for (int k = 0; k < ui.tasksListWidget->count(); k = k + 1) {
-      JobOptionsListWidgetItem *item =
-          static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(k));
-      JobOptions *joTask = item->GetData();
-
-      if (taskID == joTask->uniqueId.toString()) {
-        foundTask = true;
-
-        if (executionMode == 0) {
-          // run immediately
-          qCDebug(rbSched) << "starting now task=" << joTask->description
-                           << "request=" << requestID;
-          mRunningSchedulersCount++;
-          refreshSchedulerView();
-
-          runItem(item->GetData(), "scheduler", requestID);
-        }
-
-        if (executionMode == 1) {
-          // add to the queue
-
-          // if the same task is already in the queue we skip adding another one
-          int queueCount = ui.queueListWidget->count();
-          for (int i = 0; i < queueCount; i++) {
-            JobOptionsListWidgetItem *item_queue =
-                static_cast<JobOptionsListWidgetItem *>(
-                    ui.queueListWidget->item(i));
-
-            JobOptions *jo_queue = item_queue->GetData();
-            QString uniqueId_queue = jo_queue->uniqueId.toString();
-            if (taskID == uniqueId_queue) {
-              qCDebug(rbSched)
-                  << "not queued: that task is already waiting task="
-                  << joTask->description << "request=" << requestID;
-              widget->updateTaskStatus(requestID, "task already in the queue");
-              mDoNotSort = false;
-              return;
-            }
-          }
-
-          // The queue takes it from here: it gives the run its id, saves,
-          // redraws and starts it if this is the moment. What stood here was
-          // all of that written out. See docs/QUEUE-MOVE.md block 12.
-          //
-          // The request id is the schedule's, so that a run it asked for can
-          // be matched back to it afterwards.
-          qCDebug(rbSched) << "queueing task=" << joTask->description
-                           << "request=" << requestID;
-          JobQueue::instance().enqueue(joTask->uniqueId.toString(), false,
-                                       requestID);
-
-          widget->updateTaskStatus(requestID, "in the queue");
-          mRunningSchedulersCount++;
-          refreshSchedulerView();
-        }
-      }
-    }
-    if (!foundTask) {
+    // The task is looked up by id rather than by walking the rows of the
+    // task list. A row is how a task is shown; it is not what a task is, and
+    // a schedule has never pointed at one. See docs/SCHEDULER-MOVE.md
+    // block 8.
+    JobOptions *joTask = ListOfJobOptions::getInstance()->find(taskID);
+    if (joTask == nullptr) {
+      // Falling out of the search loop was all this used to do: no message,
+      // no status, nothing the person waiting for the run could see. It
+      // still does not run, but now it says so and the schedule stops
+      // waiting for a run that is never coming.
       qCDebug(rbSched) << "run refused: no such task task=" << taskID
                        << "request=" << requestID;
+      widget->updateTaskStatus(requestID, "error");
+      mDoNotSort = false;
+      return;
     }
+
+    if (executionMode == 0) {
+      // run immediately
+      qCDebug(rbSched) << "starting now task=" << joTask->description
+                       << "request=" << requestID;
+      mRunningSchedulersCount++;
+      refreshSchedulerView();
+
+      runItem(joTask, "scheduler", requestID);
+    }
+
+    if (executionMode == 1) {
+      // If the same task is already waiting, a second run of it would have
+      // two copies writing the same destination. Asked of the queue rather
+      // than of the rows drawn from it.
+      for (const QueueEntry &entry : JobQueue::instance().entries()) {
+        if (entry.taskId == taskID) {
+          qCDebug(rbSched) << "not queued: that task is already waiting task="
+                           << joTask->description << "request=" << requestID;
+          widget->updateTaskStatus(requestID, "task already in the queue");
+          mDoNotSort = false;
+          return;
+        }
+      }
+
+      // The queue takes it from here: it gives the run its id, saves,
+      // redraws and starts it if this is the moment. What stood here was
+      // all of that written out. See docs/QUEUE-MOVE.md block 12.
+      //
+      // The request id is the schedule's, so that a run it asked for can
+      // be matched back to it afterwards.
+      qCDebug(rbSched) << "queueing task=" << joTask->description
+                       << "request=" << requestID;
+      JobQueue::instance().enqueue(taskID, false, requestID);
+
+      widget->updateTaskStatus(requestID, "in the queue");
+      mRunningSchedulersCount++;
+      refreshSchedulerView();
+    }
+
     mDoNotSort = false;
     sortJobs();
   });
