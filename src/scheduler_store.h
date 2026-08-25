@@ -26,6 +26,17 @@ public:
   void update(const Schedule &schedule);
   void remove(const QString &id);
 
+  // Whether the scheduler as a whole is switched on. A switched-off
+  // scheduler keeps its schedules and starts nothing, the same as a paused
+  // queue. Remembered across restarts, as it always has been.
+  //
+  // This used to be a settings key read in six places in the window, so
+  // "is the scheduler on" could only be answered by something with a window
+  // -- and the tab, the buttons and the labels each decided it again.
+  bool isRunning() const;
+  void start();
+  void pause();
+
   // Everything that is active and whose next run is not in the future.
   // Returns the schedules that should be started now, and records the check
   // so that the same minute cannot fire twice.

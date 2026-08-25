@@ -1,3 +1,4 @@
+#include "app_settings.h"
 #include "database.h"
 #include "schedule.h"
 #include "scheduler_store.h"
@@ -273,6 +274,61 @@ private slots:
 
     // The next day it is due again.
     QCOMPARE(store.due(at.addDays(1)).size(), 1);
+  }
+
+  // The global switch. It was a settings key the window read in six places,
+  // so nothing without a window could tell whether the scheduler was on --
+  // and every one of those six places decided again what that meant.
+  void nothingRunsWhileTheSchedulerIsSwitchedOff() {
+    SchedulerStore &store = SchedulerStore::instance();
+    store.load();
+    for (const Schedule &existing : store.schedules()) {
+      store.remove(existing.id);
+    }
+
+    Schedule armed;
+    armed.id = QStringLiteral("armed");
+    armed.taskId = QStringLiteral("t1");
+    armed.hour = 7;
+    armed.active = true;
+    store.add(armed);
+
+    QVERIFY2(store.isRunning(), "the scheduler starts switched on");
+
+    store.pause();
+    QVERIFY(!store.isRunning());
+
+    const QDateTime at(QDate(2026, 8, 10), QTime(7, 0));
+    QVERIFY2(store.due(at).isEmpty(), "a switched-off scheduler ran something");
+
+    // And the minute that went by while it was off is not run late when it
+    // comes back on: 07:00 means 07:00, not "next time anyone looks".
+    store.start();
+    QVERIFY(store.isRunning());
+    QVERIFY2(store.due(at.addSecs(30)).isEmpty(),
+             "switching back on ran a minute that had already gone");
+
+    // The next day it is due again as usual.
+    QCOMPARE(store.due(at.addDays(1)).size(), 1);
+  }
+
+  void theSwitchIsRememberedAndOnByDefault() {
+    SchedulerStore &store = SchedulerStore::instance();
+
+    store.pause();
+    QVERIFY(!store.isRunning());
+    QVERIFY(!AppSettings::schedulerIsRunning());
+
+    // Switching to what it already is must not be reported as a change --
+    // the tab and the buttons are redrawn from this.
+    int changes = 0;
+    QObject::connect(&store, &SchedulerStore::changed, &store,
+                     [&changes]() { ++changes; });
+    store.pause();
+    QCOMPARE(changes, 0);
+    store.start();
+    QCOMPARE(changes, 1);
+    QObject::disconnect(&store, &SchedulerStore::changed, &store, nullptr);
   }
 
   void schedulesSurviveARestart() {

@@ -1,5 +1,6 @@
 #include "debug_log.h"
 #include "scheduler_store.h"
+#include "app_settings.h"
 #include "config_store.h"
 
 SchedulerStore &SchedulerStore::instance() {
@@ -51,7 +52,34 @@ void SchedulerStore::remove(const QString &id) {
   }
 }
 
+bool SchedulerStore::isRunning() const {
+  return AppSettings::schedulerIsRunning();
+}
+
+void SchedulerStore::start() {
+  if (isRunning()) {
+    return;
+  }
+  qCDebug(rbSched) << "scheduler switched on, schedules=" << mSchedules.size();
+  AppSettings::setSchedulerIsRunning(true);
+  emit changed();
+}
+
+void SchedulerStore::pause() {
+  if (!isRunning()) {
+    return;
+  }
+  qCDebug(rbSched) << "scheduler switched off, schedules=" << mSchedules.size();
+  AppSettings::setSchedulerIsRunning(false);
+  emit changed();
+}
+
 QList<Schedule> SchedulerStore::due(const QDateTime &now) {
+  // Nothing runs while the scheduler is switched off. Until now that test was
+  // the window's, so a schedule could come due with nothing to stop it if
+  // anything but the window ever asked.
+  const bool running = isRunning();
+
   // The minute is the unit a schedule is written in, so it is the unit this
   // remembers. Whoever asks may ask every second.
   const QDateTime minute(now.date(), QTime(now.time().hour(),
@@ -65,9 +93,18 @@ QList<Schedule> SchedulerStore::due(const QDateTime &now) {
     if (mLastFired.value(schedule.id) == minute) {
       continue;
     }
+
+    // Marked as seen even when the scheduler is off, so that switching it
+    // back on part way through a minute does not run that minute late. A
+    // schedule set for 07:00 means 07:00, not "the next time anyone looks".
+    mLastFired[schedule.id] = minute;
+
+    if (!running) {
+      qCDebug(rbSched) << "due but the scheduler is off" << schedule.name;
+      continue;
+    }
     qCDebug(rbSched) << "due" << schedule.name
                      << "task=" << schedule.taskName;
-    mLastFired[schedule.id] = minute;
     ready.append(schedule);
   }
   return ready;

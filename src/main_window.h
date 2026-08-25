@@ -174,6 +174,27 @@ private:
 
   void restoreSchedulersFromFile();
 
+  // Draws the Scheduler tab from the counters and the global on/off, and is
+  // the only thing that does. See docs/SCHEDULER-MOVE.md.
+  void refreshSchedulerView();
+
+  // Every schedule on the tab, in the order they are shown.
+  //
+  // The list of schedules is the widgets in a layout, with a separator line
+  // between each pair, so reading it meant "walk backwards two at a time and
+  // cast" -- written out sixteen times. This is the one copy until
+  // SchedulerStore holds the list for real.
+  QList<class SchedulerWidget *> schedulerWidgets() const;
+
+  // Whether any schedule points at this task. Two places ask, and both used
+  // to walk the layout to find out.
+  bool taskIsScheduled(const QString &taskId) const;
+
+  // Tells every schedule what became of a run, and moves the count of
+  // schedules with something going if one of them owns that run.
+  void notifySchedulers(const QString &requestId, const QString &status,
+                        int runningDelta = 0);
+
   void sortJobs();
   bool mJobsTimeSortOrder = false;
   bool mJobsStatusSortOrder = false;

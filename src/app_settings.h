@@ -42,6 +42,12 @@ int historyMaxRuns();
 bool queueIsRunning();
 void setQueueIsRunning(bool running);
 
+// The same for the scheduler as a whole: whether it is switched on. Unlike
+// the queue this has always defaulted to on, which is why the default is
+// stated here rather than left to whoever asks.
+bool schedulerIsRunning();
+void setSchedulerIsRunning(bool running);
+
 // A script to run when the queue empties, if the user asked for one. Returns
 // an empty string when there is nothing to run -- including when a path is
 // set but the feature is switched off, so callers have one thing to check

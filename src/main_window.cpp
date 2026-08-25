@@ -6,6 +6,7 @@
 #include "history_widget.h"
 #include "job_log.h"
 #include "run_history.h"
+#include "scheduler_store.h"
 #include "job_options_item.h"
 #include "job_widget.h"
 #include "list_of_job_options.h"
@@ -560,7 +561,6 @@ MainWindow::MainWindow() {
   ui.buttonStartScheduler->setStatusTip(
       "Start all previously active schedulers");
 
-  ui.buttonStartScheduler->setEnabled(false);
   ui.buttonStopAllJobs->setEnabled(false);
   ui.buttonCleanNotRunning->setEnabled(false);
 
@@ -569,11 +569,12 @@ MainWindow::MainWindow() {
   ui.labelQueueInfoStart->setText("Queue is running.");
   setQueueButtons();
 
-  ui.tabs->setTabText(4, QString("Scheduler (0)>>(0)"));
+  // The words; refreshSchedulerView() decides which of the two is showing,
+  // and writes the tab. Starting from a hard-coded "(0)>>(0)" meant the tab
+  // claimed the scheduler was running before anything had read the setting.
   ui.labelSchedulerInfoStart->setText("Scheduler is running.");
   ui.labelSchedulerInfoStop->setText("Scheduler is not running.");
-  ui.labelSchedulerInfoStart->show();
-  ui.labelSchedulerInfoStop->hide();
+  refreshSchedulerView();
 
   QObject::connect(ui.preferences, &QAction::triggered, this, [=]() {
     PreferencesDialog dialog(this);
@@ -857,7 +858,6 @@ MainWindow::MainWindow() {
         bool isMount = false;
         bool isRunning = false;
         bool isScheduled = false;
-        int schedulersCount = ui.schedulers->count();
 
         if (items.count() > 0) {
 
@@ -889,19 +889,7 @@ MainWindow::MainWindow() {
               }
 
               if (!isScheduled) {
-                for (int k = schedulersCount - 2; k >= 0; k = k - 2) {
-                  QWidget *widget = ui.schedulers->itemAt(k)->widget();
-                  if (auto scheduler =
-                          qobject_cast<SchedulerWidget *>(widget)) {
-
-                    if (scheduler->getSchedulerTaskId() ==
-                        jo->uniqueId.toString()) {
-
-                      isScheduled = true;
-                      break;
-                    }
-                  }
-                }
+                isScheduled = taskIsScheduled(jo->uniqueId.toString());
               }
             }
           }
@@ -1361,27 +1349,13 @@ MainWindow::MainWindow() {
   //!!! QObject::connect(ui.actionStartScheduler
   QObject::connect(ui.actionStartScheduler, &QAction::triggered, this, [=]() {
     mDoNotSort = true;
-    auto settings = GetSettings();
-    settings->setValue("Settings/schedulerStatus", "true");
+    SchedulerStore::instance().start();
 
-    int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-
-        scheduler->startScheduler();
-      }
+    for (SchedulerWidget *scheduler : schedulerWidgets()) {
+      scheduler->startScheduler();
     }
 
-    ui.buttonStartScheduler->setEnabled(false);
-    ui.buttonStopScheduler->setEnabled(true);
-
-    ui.labelSchedulerInfoStart->show();
-    ui.labelSchedulerInfoStop->hide();
-
-    ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                               .arg(mSchedulersCount)
-                               .arg(mRunningSchedulersCount));
+    refreshSchedulerView();
     mDoNotSort = false;
     sortJobs();
   });
@@ -1389,25 +1363,13 @@ MainWindow::MainWindow() {
   //!!!  QObject::connect(ui.actionStopScheduler
   QObject::connect(ui.actionStopScheduler, &QAction::triggered, this, [=]() {
     mDoNotSort = true;
-    auto settings = GetSettings();
-    settings->setValue("Settings/schedulerStatus", "false");
+    SchedulerStore::instance().pause();
 
-    int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-
-        scheduler->stopScheduler();
-      }
+    for (SchedulerWidget *scheduler : schedulerWidgets()) {
+      scheduler->stopScheduler();
     }
 
-    ui.buttonStartScheduler->setEnabled(true);
-    ui.buttonStopScheduler->setEnabled(false);
-
-    ui.labelSchedulerInfoStart->hide();
-    ui.labelSchedulerInfoStop->show();
-
-    ui.tabs->setTabText(4, QString("Scheduler (%1)").arg(mSchedulersCount));
+    refreshSchedulerView();
     mDoNotSort = false;
     sortJobs();
   });
@@ -1503,25 +1465,16 @@ MainWindow::MainWindow() {
           args << "NewScheduler";
           addScheduler(jo->uniqueId.toString(), jo->description, args);
 
-          if ((settings->value("Settings/schedulerStatus").toBool())) {
-
-            ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                       .arg(mSchedulersCount)
-                                       .arg(mRunningSchedulersCount));
-          } else {
-            ui.tabs->setTabText(
-                4, QString("Scheduler (%1)").arg(mSchedulersCount));
-
-            int schedulersCount = ui.schedulers->count();
-            for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-              QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-              if (auto scheduler =
-                      qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-
-                scheduler->stopScheduler();
-              }
+          // A schedule added while the scheduler is switched off has to
+          // start out switched off as well, or it would go off before anyone
+          // turned the scheduler on. The two branches used to differ in how
+          // they wrote the tab too, which was never the point of the test.
+          if (!SchedulerStore::instance().isRunning()) {
+            for (SchedulerWidget *scheduler : schedulerWidgets()) {
+              scheduler->stopScheduler();
             }
           }
+          refreshSchedulerView();
         }
         listTasks();
         //        saveSchedulerFile();
@@ -1674,22 +1627,7 @@ MainWindow::MainWindow() {
                   ui.queueListWidget->item(first));
           const QString requestId = item_queue->GetRequestId();
 
-          // notify schedulers
-          int schedulersCount = ui.schedulers->count();
-          for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-            QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-            if (auto scheduler =
-                    qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-              scheduler->updateTaskStatus(requestId, "removed from the queue");
-
-              if (scheduler->getSchedulerRequestId() == requestId) {
-                mRunningSchedulersCount--;
-                ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                           .arg(mSchedulersCount)
-                                           .arg(mRunningSchedulersCount));
-              }
-            }
-          }
+          notifySchedulers(requestId, "removed from the queue", -1);
 
           ui.queueListWidget->takeItem(first);
         }
@@ -1720,22 +1658,7 @@ MainWindow::MainWindow() {
 
         QString requestId = item_queue->GetRequestId();
 
-        // notify schedulers
-        int schedulersCount = ui.schedulers->count();
-        for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-          QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-          if (auto scheduler =
-                  qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-            scheduler->updateTaskStatus(requestId, "removed from the queue");
-
-            if (scheduler->getSchedulerRequestId() == requestId) {
-              mRunningSchedulersCount--;
-              ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                         .arg(mSchedulersCount)
-                                         .arg(mRunningSchedulersCount));
-            }
-          }
-        }
+        notifySchedulers(requestId, "removed from the queue", -1);
 
         // The queue is told which run is leaving, not which row: rows are
         // what shows it. It refuses to drop the one that is running,
@@ -1771,21 +1694,7 @@ MainWindow::MainWindow() {
 
       QString requestId = item_queue->GetRequestId();
 
-      // notify schedulers
-      int schedulersCount = ui.schedulers->count();
-      for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-        QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-        if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-          scheduler->updateTaskStatus(requestId, "removed from the queue");
-
-          if (scheduler->getSchedulerRequestId() == requestId) {
-            mRunningSchedulersCount--;
-            ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                       .arg(mSchedulersCount)
-                                       .arg(mRunningSchedulersCount));
-          }
-        }
-      }
+      notifySchedulers(requestId, "removed from the queue", -1);
 
       // Only the queue is told. The row goes when the view redraws --
       // taking it out here as well took the next one with it.
@@ -1928,24 +1837,13 @@ MainWindow::MainWindow() {
     addTasksToQueue();
   }
 
-  if (!(settings->value("Settings/schedulerStatus").toBool())) {
+  if (!SchedulerStore::instance().isRunning()) {
 
-    int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-
-        scheduler->stopScheduler();
-      }
+    for (SchedulerWidget *scheduler : schedulerWidgets()) {
+      scheduler->stopScheduler();
     }
 
-    ui.buttonStartScheduler->setEnabled(true);
-    ui.buttonStopScheduler->setEnabled(false);
-
-    ui.labelSchedulerInfoStart->hide();
-    ui.labelSchedulerInfoStop->show();
-
-    ui.tabs->setTabText(4, QString("Scheduler (%1)").arg(mSchedulersCount));
+    refreshSchedulerView();
   }
 
   // Whether the queue was left running is the queue's own memory, not a key
@@ -2280,7 +2178,6 @@ void MainWindow::setTasksButtons() {
   bool isRunning = false;
   int isNotRunning = items.count();
   bool isScheduled = false;
-  int schedulersCount = ui.schedulers->count();
 
   if (items.count() > 0) {
 
@@ -2290,17 +2187,7 @@ void MainWindow::setTasksButtons() {
       JobOptions *jo = item->GetData();
 
       if (!isScheduled) {
-        for (int i = schedulersCount - 2; i >= 0; i = i - 2) {
-          QWidget *widget = ui.schedulers->itemAt(i)->widget();
-          if (auto scheduler = qobject_cast<SchedulerWidget *>(widget)) {
-
-            if (scheduler->getSchedulerTaskId() == jo->uniqueId.toString()) {
-
-              isScheduled = true;
-              break;
-            }
-          }
-        }
+        isScheduled = taskIsScheduled(jo->uniqueId.toString());
       }
 
       if (jo->operation == JobOptions::Mount) {
@@ -3247,9 +3134,82 @@ void MainWindow::restoreSchedulersFromFile() {
     }
   }
 
-  ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                             .arg(mSchedulersCount)
-                             .arg(mRunningSchedulersCount));
+  refreshSchedulerView();
+}
+
+// The one place the Scheduler tab, its two labels and its two buttons are
+// written.
+//
+// This same paragraph was spelled out at nineteen call sites, and they did
+// not all spell it the same way -- the short form "Scheduler (2)" when the
+// scheduler is stopped, the long "Scheduler (2)>>(1)" when it is running.
+// Which one a given site used depended on which one the person editing it
+// happened to copy. Restoring on startup, for instance, wrote the long form
+// unconditionally, and was only corrected a moment later by the code that
+// switches a stopped scheduler off.
+//
+// The rule was never in doubt; it just had nowhere to live. See
+// docs/SCHEDULER-MOVE.md block 1.
+void MainWindow::refreshSchedulerView() {
+  const bool schedulerRunning = SchedulerStore::instance().isRunning();
+
+  ui.tabs->setTabText(4, schedulerRunning
+                             ? QString("Scheduler (%1)>>(%2)")
+                                   .arg(mSchedulersCount)
+                                   .arg(mRunningSchedulersCount)
+                             : QString("Scheduler (%1)").arg(mSchedulersCount));
+
+  ui.buttonStartScheduler->setEnabled(!schedulerRunning);
+  ui.buttonStopScheduler->setEnabled(schedulerRunning);
+
+  ui.labelSchedulerInfoStart->setVisible(schedulerRunning);
+  ui.labelSchedulerInfoStop->setVisible(!schedulerRunning);
+}
+
+QList<SchedulerWidget *> MainWindow::schedulerWidgets() const {
+  QList<SchedulerWidget *> found;
+  // Backwards and two at a time, because every schedule is followed by a
+  // separator line in the same layout. Nothing about a schedule requires
+  // that; it is how the tab is drawn, and it is the reason the list of
+  // schedules cannot be read by anything that is not this window.
+  for (int j = ui.schedulers->count() - 2; j >= 0; j = j - 2) {
+    if (auto *scheduler = qobject_cast<SchedulerWidget *>(
+            ui.schedulers->itemAt(j)->widget())) {
+      found.append(scheduler);
+    }
+  }
+  return found;
+}
+
+bool MainWindow::taskIsScheduled(const QString &taskId) const {
+  for (SchedulerWidget *scheduler : schedulerWidgets()) {
+    if (scheduler->getSchedulerTaskId() == taskId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void MainWindow::notifySchedulers(const QString &requestId,
+                                  const QString &status, int runningDelta) {
+  // A schedule keeps what it is told only if the run is the one it asked for
+  // (see SchedulerWidget::updateTaskStatus), so telling all of them is the
+  // same as picking the right one -- and the log now says which happened.
+  bool owned = false;
+  for (SchedulerWidget *scheduler : schedulerWidgets()) {
+    scheduler->updateTaskStatus(requestId, status);
+    if (scheduler->getSchedulerRequestId() == requestId) {
+      owned = true;
+    }
+  }
+
+  // Once, not once for every schedule that matched. Request ids are unique,
+  // so the two only differ if something has already gone wrong -- and then
+  // counting twice hides it rather than showing it.
+  if (owned) {
+    mRunningSchedulersCount += runningDelta;
+  }
+  refreshSchedulerView();
 }
 
 void MainWindow::refreshQueueView() {
@@ -3317,19 +3277,7 @@ void MainWindow::addTasksToQueue() {
 
   // Schedulers still want to know that a run of theirs is waiting.
   for (const QueueEntry &entry : JobQueue::instance().entries()) {
-    const int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-        if (scheduler->getSchedulerRequestId() == entry.requestId) {
-          scheduler->updateTaskStatus(entry.requestId, "in the queue");
-          mRunningSchedulersCount++;
-          ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                     .arg(mSchedulersCount)
-                                     .arg(mRunningSchedulersCount));
-        }
-      }
-    }
+    notifySchedulers(entry.requestId, "in the queue", 1);
   }
 
   // The words themselves; which of the two shows is setQueueButtons's answer.
@@ -3432,12 +3380,8 @@ void MainWindow::listTasks() {
         static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(i));
     JobOptions *task = item->GetData();
 
-    const int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *widget = ui.schedulers->itemAt(j)->widget();
-      auto *scheduler = qobject_cast<SchedulerWidget *>(widget);
-      if (scheduler == nullptr ||
-          scheduler->getSchedulerTaskId() != task->uniqueId.toString()) {
+    for (SchedulerWidget *scheduler : schedulerWidgets()) {
+      if (scheduler->getSchedulerTaskId() != task->uniqueId.toString()) {
         continue;
       }
 
@@ -3586,13 +3530,9 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
     // check if run item is from scheduler
 
     bool transferModeSch = false;
-    int schedulersCount = ui.schedulers->count();
-    for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-      QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-      if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-        if (requestId == scheduler->getSchedulerRequestId()) {
-          transferModeSch = true;
-        }
+    for (SchedulerWidget *scheduler : schedulerWidgets()) {
+      if (requestId == scheduler->getSchedulerRequestId()) {
+        transferModeSch = true;
       }
     }
 
@@ -3616,9 +3556,7 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
       if (alreadyRunning) {
         schedulerTaskStatus = "already running";
         mRunningSchedulersCount--;
-        ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                   .arg(mSchedulersCount)
-                                   .arg(mRunningSchedulersCount));
+        refreshSchedulerView();
 
       } else {
         info = QString("Scheduled task: \"%1\", %2 from %3")
@@ -3630,14 +3568,7 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
         schedulerTaskStatus = "running";
       }
 
-      // notify schedulers
-      int schedulersCount = ui.schedulers->count();
-      for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-        QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-        if (auto scheduler = qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-          scheduler->updateTaskStatus(requestId, schedulerTaskStatus);
-        }
-      }
+      notifySchedulers(requestId, schedulerTaskStatus);
 
     } else {
 
@@ -3768,15 +3699,10 @@ bool MainWindow::saveSchedulerFile(void) {
   QMutexLocker locker(&mSaveSchedulerFileMutex);
 
   QList<QStringList> schedules;
-  const int schedulersCount = ui.schedulers->count();
-
-  // Backwards, and two at a time, because that is the order the layout holds
-  // them in and the order the file was written in -- restoring depends on it.
-  for (int i = schedulersCount - 2; i >= 0; i = i - 2) {
-    QWidget *widget = ui.schedulers->itemAt(i)->widget();
-    if (auto scheduler = qobject_cast<SchedulerWidget *>(widget)) {
-      schedules.append(scheduler->getSchedulerParameters());
-    }
+  // The order the layout holds them in is the order the file is written in,
+  // and restoring depends on it -- schedulerWidgets() keeps that order.
+  for (SchedulerWidget *scheduler : schedulerWidgets()) {
+    schedules.append(scheduler->getSchedulerParameters());
   }
 
   return ScheduleStore::save(schedules);
@@ -3933,25 +3859,8 @@ void MainWindow::addJobCard(RunningJob *job) {
         setTasksButtons();
 
         // notify schedulers about finished task
-        int schedulersCount = ui.schedulers->count();
-        for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-          QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-          if (auto scheduler =
-                  qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-            // jobFinalStatus = stopped, error, finished
-
-            if (transfer->getRequestId() ==
-                scheduler->getSchedulerRequestId()) {
-              mRunningSchedulersCount--;
-              ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                         .arg(mSchedulersCount)
-                                         .arg(mRunningSchedulersCount));
-
-              scheduler->updateTaskStatus(transfer->getRequestId(),
-                                          jobFinalStatus);
-            }
-          }
-        }
+        // jobFinalStatus = stopped, error, finished
+        notifySchedulers(transfer->getRequestId(), jobFinalStatus, -1);
 
         // if queue was stopped task terminated but still in the queue
         // then scheduled task is "in the queue" not "stopped"
@@ -3964,26 +3873,14 @@ void MainWindow::addJobCard(RunningJob *job) {
                 static_cast<JobOptionsListWidgetItem *>(
                     ui.queueListWidget->item(0));
 
-            int schedulersCount = ui.schedulers->count();
-            for (int j = schedulersCount - 2; j >= 0; j = j - 2) {
-              QWidget *schedulerWidget = ui.schedulers->itemAt(j)->widget();
-
-              if (auto scheduler =
-                      qobject_cast<SchedulerWidget *>(schedulerWidget)) {
-                // jobFinalStatus = stopped, error, finished
-                scheduler->updateTaskStatus(item_queue->GetRequestId(),
-                                            "in the queue");
-
-                if (transfer->getRequestId() ==
-                        scheduler->getSchedulerRequestId() &&
-                    transfer->getRequestId() == item_queue->GetRequestId()) {
-                  mRunningSchedulersCount++;
-                  ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                             .arg(mSchedulersCount)
-                                             .arg(mRunningSchedulersCount));
-                }
-              }
-            }
+            // The run did not really end: the queue was stopped, so it is
+            // waiting again rather than over. Only the schedule that owns it
+            // and only when the entry at the head is that same run.
+            notifySchedulers(item_queue->GetRequestId(), "in the queue",
+                             transfer->getRequestId() ==
+                                     item_queue->GetRequestId()
+                                 ? 1
+                                 : 0);
           }
         }
 
@@ -4235,16 +4132,10 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
 
     mSchedulersCount--;
 
-    auto settings = GetSettings();
-    if ((settings->value("Settings/schedulerStatus").toBool())) {
-
-      ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                 .arg(mSchedulersCount)
-                                 .arg(mRunningSchedulersCount));
-    } else {
-
-      ui.tabs->setTabText(4, QString("Scheduler (%1)").arg(mSchedulersCount));
-    }
+    // The test that used to stand here chose between two spellings of the
+    // tab text and nothing else, so with one place writing the tab there is
+    // nothing left for it to decide.
+    refreshSchedulerView();
 
     saveSchedulerFile();
     if (ui.schedulers->count() == 2) {
@@ -4274,9 +4165,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
             emit transfer->cancel();
 
             //               mRunningSchedulersCount--;
-            ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                       .arg(mSchedulersCount)
-                                       .arg(mRunningSchedulersCount));
+            refreshSchedulerView();
 
             if (ui.queueListWidget->count() > 0) {
               for (int i = 0; i < ui.queueListWidget->count(); i++) {
@@ -4309,9 +4198,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
       JobQueue::instance().remove(requestID);
       widget->updateTaskStatus(requestID, "removed from the queue");
       mRunningSchedulersCount--;
-      ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                 .arg(mSchedulersCount)
-                                 .arg(mRunningSchedulersCount));
+      refreshSchedulerView();
       break;
     }
 
@@ -4379,9 +4266,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
           qCDebug(rbSched) << "starting now task=" << joTask->description
                            << "request=" << requestID;
           mRunningSchedulersCount++;
-          ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                     .arg(mSchedulersCount)
-                                     .arg(mRunningSchedulersCount));
+          refreshSchedulerView();
 
           runItem(item->GetData(), "scheduler", requestID);
         }
@@ -4421,9 +4306,7 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
 
           widget->updateTaskStatus(requestID, "in the queue");
           mRunningSchedulersCount++;
-          ui.tabs->setTabText(4, QString("Scheduler (%1)>>(%2)")
-                                     .arg(mSchedulersCount)
-                                     .arg(mRunningSchedulersCount));
+          refreshSchedulerView();
         }
       }
     }

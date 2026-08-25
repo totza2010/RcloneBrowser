@@ -71,6 +71,18 @@ void AppSettings::setQueueIsRunning(bool running) {
                                   : QStringLiteral("false"));
 }
 
+bool AppSettings::schedulerIsRunning() {
+  // True when the key has never been written: the scheduler has always
+  // started switched on, and main() writes the default for the same reason.
+  return GetSettings()->value("Settings/schedulerStatus", true).toBool();
+}
+
+void AppSettings::setSchedulerIsRunning(bool running) {
+  GetSettings()->setValue("Settings/schedulerStatus",
+                          running ? QStringLiteral("true")
+                                  : QStringLiteral("false"));
+}
+
 QString AppSettings::queueFinishedScript() {
   auto settings = GetSettings();
   if (!settings->value("Settings/queueScriptRun", false).toBool()) {
