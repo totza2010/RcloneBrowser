@@ -1006,18 +1006,6 @@ MainWindow::MainWindow() {
           // how Stop puts a task back in line rather than out of it.
           JobQueue::instance().pause();
 
-          if (mQueueCount == 0) {
-            ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-          } else {
-
-            if (!mQueueTaskRunning) {
-              ui.tabs->setTabText(3,
-                                  QString("Queue (%1)>>(0)").arg(mQueueCount));
-            } else {
-              ui.tabs->setTabText(
-                  3, QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-            }
-          }
           setQueueButtons();
         }
 
@@ -1719,29 +1707,6 @@ MainWindow::MainWindow() {
       }
     }
 
-    if (mQueueStatus) {
-
-      if (mQueueCount == 0) {
-        ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-      } else {
-
-        if (!mQueueTaskRunning) {
-          ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-        } else {
-          ui.tabs->setTabText(3,
-                              QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-        }
-      }
-
-    } else {
-      if (mQueueCount != 0) {
-        ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-      } else {
-        ui.tabs->setTabText(3, QString("Queue"));
-      }
-    }
-
-    saveQueueFile();
   });
 
   QObject::connect(ui.actionRemoveFromQueue, &QAction::triggered, this, [=]() {
@@ -1797,17 +1762,6 @@ MainWindow::MainWindow() {
       if (ui.queueListWidget->count() == 1) {
         ui.buttonRemoveFromQueue->setEnabled(false);
       }
-      if (mQueueCount == 0) {
-        ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-      } else {
-
-        if (!mQueueTaskRunning) {
-          ui.tabs->setTabText(3, QString("Queue (%1)>>(0)").arg(mQueueCount));
-        } else {
-          ui.tabs->setTabText(3,
-                              QString("Queue (%1)>>(1)").arg(mQueueCount - 1));
-        }
-      }
 
     } else {
 
@@ -1848,20 +1802,11 @@ MainWindow::MainWindow() {
         ui.buttonUpQueue->setEnabled(true);
       }
 
-      if (ui.queueListWidget->count() == 0) {
-
-        ui.buttonRemoveFromQueue->setEnabled(false);
-        ui.buttonPurgeQueue->setEnabled(false);
-        ui.buttonUpQueue->setEnabled(false);
-        ui.buttonDownQueue->setEnabled(false);
-        ui.tabs->setTabText(3, QString("Queue"));
-
-      } else {
-        ui.tabs->setTabText(3, QString("Queue (%1)").arg(mQueueCount));
-      }
     }
 
-    saveQueueFile();
+    // The buttons and the tab are read from the queue, in one place, by
+    // refreshQueueView(). Setting them here as well is a second path from the
+    // same state to the same screen, and the two do not have to agree.
   });
 
   QObject::connect(ui.actionDownQueue, &QAction::triggered, this, [=]() {
