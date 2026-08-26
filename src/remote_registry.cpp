@@ -39,6 +39,21 @@ QList<Remote> ParseListRemotes(const QByteArray &output) {
   return remotes;
 }
 
+ListFailure ClassifyListRemotesFailure(const QString &standardError) {
+  // Matched on the name of the variable rclone tells you to set, which is
+  // the stable part of that message -- the sentence around it has been
+  // reworded more than once.
+  if (standardError.contains(QStringLiteral("RCLONE_CONFIG_PASS"))) {
+    return ListFailure::PasswordRequired;
+  }
+  if (standardError.contains(QStringLiteral("unknown command"),
+                             Qt::CaseInsensitive) &&
+      standardError.contains(QStringLiteral("listremotes"))) {
+    return ListFailure::TooOld;
+  }
+  return ListFailure::Failed;
+}
+
 RemoteRegistry &RemoteRegistry::instance() {
   static RemoteRegistry registry;
   return registry;
@@ -87,23 +102,26 @@ void RemoteRegistry::refresh() {
         mProcess = nullptr;
 
         if (exitCode != 0) {
-          // An encrypted config is not a failure, it is a question. Told
-          // apart here so the caller does not have to read rclone's stderr
-          // for itself.
-          if (err.contains(QStringLiteral("RCLONE_CONFIG_PASS"))) {
+          // An encrypted config is not a failure, it is a question. Which of
+          // the three this is has its own function, so the rule can be
+          // checked without an encrypted config to hand.
+          switch (ClassifyListRemotesFailure(err)) {
+          case ListFailure::PasswordRequired:
             qCDebug(rbRemote) << "the configuration file wants a password";
             emit passwordRequired();
-          } else if (err.contains(
-                         QStringLiteral("unknown command \"listremotes\""))) {
+            break;
+          case ListFailure::TooOld:
             qCDebug(rbRemote) << "this rclone has no listremotes command";
             emit tooOld();
-          } else {
-            qCDebug(rbRemote) << "refused exit=" << exitCode
-                              << "because" << err;
+            break;
+          case ListFailure::Failed:
+            qCDebug(rbRemote) << "refused exit=" << exitCode << "because"
+                              << err;
             emit failed(err.isEmpty()
                             ? QStringLiteral("rclone exited with code %1")
                                   .arg(exitCode)
                             : err);
+            break;
           }
           return;
         }

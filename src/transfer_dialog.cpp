@@ -1,4 +1,5 @@
 #include "transfer_dialog.h"
+#include "task_builder.h"
 #include "completers.h"
 #include "file_dialog.h"
 #include "list_of_job_options.h"
@@ -1090,18 +1091,18 @@ void TransferDialog::putJobOptions() {
 void TransferDialog::done(int r) {
 
   if (r == QDialog::Accepted) {
-    if (mIsDownload) {
-      if (ui.textDest->text().isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please enter destination.");
-        ui.textDest->setFocus(Qt::FocusReason::OtherFocusReason);
-        return;
-      }
-    } else {
-      if (ui.textSource->text().isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please enter source.");
-        ui.textSource->setFocus(Qt::FocusReason::OtherFocusReason);
-        return;
-      }
+    // The path half of the same rule. A name is not wanted here: a transfer
+    // can be run without ever being saved as a task, and asking for a name
+    // before running one would be a new demand.
+    const TaskBuilder::Problem problem = TaskBuilder::Check(
+        mIsDownload, QStringLiteral("unchecked"), ui.textSource->text(),
+        ui.textDest->text());
+    if (problem != TaskBuilder::Problem::None) {
+      QMessageBox::warning(this, "Warning", TaskBuilder::Explain(problem));
+      (problem == TaskBuilder::Problem::NoDestination ? ui.textDest
+                                                      : ui.textSource)
+          ->setFocus(Qt::FocusReason::OtherFocusReason);
+      return;
     }
     if (!mIsEditMode) {
       save_AutoName_AddToQueue();
@@ -1143,31 +1144,29 @@ bool TransferDialog::saveTaskToFile() {
   // only generated if needed
   generateAutoTaskName();
 
-  // validate before saving task...
-  if (ui.le_taskName->text().trimmed().isEmpty()) {
-    QMessageBox::warning(this, "Error", "Please enter task name to save.");
+  // What makes a task worth saving is the core's rule now, stated once.
+  // This end of it decides what to do about a refusal: say it, and put the
+  // cursor where the answer goes. See docs/LAYER-SPLIT.md block 3.
+  const TaskBuilder::Problem problem =
+      TaskBuilder::Check(mIsDownload, ui.le_taskName->text(),
+                         ui.textSource->text(), ui.textDest->text());
+  if (problem != TaskBuilder::Problem::None) {
+    QMessageBox::warning(this, "Error", TaskBuilder::Explain(problem));
     ui.tabWidget->setCurrentIndex(0);
-    ui.le_taskName->setFocus(Qt::FocusReason::OtherFocusReason);
-    return false;
-  }
-
-  // even though the below does not match the condition on the Run buttons
-  // it SEEMS like blanking either one would be a problem, right?
-  if (mIsDownload) {
-    if (ui.textDest->text().isEmpty()) {
-      QMessageBox::warning(this, "Error",
-                           "Invalid task, destination is required.");
-      ui.tabWidget->setCurrentIndex(0);
-      ui.textDest->setFocus(Qt::FocusReason::OtherFocusReason);
-      return false;
-    }
-  } else {
-    if (ui.textSource->text().isEmpty()) {
-      QMessageBox::warning(this, "Error", "Invalid task, source is  required.");
-      ui.tabWidget->setCurrentIndex(0);
+    switch (problem) {
+    case TaskBuilder::Problem::NoName:
+      ui.le_taskName->setFocus(Qt::FocusReason::OtherFocusReason);
+      break;
+    case TaskBuilder::Problem::NoSource:
       ui.textSource->setFocus(Qt::FocusReason::OtherFocusReason);
-      return false;
+      break;
+    case TaskBuilder::Problem::NoDestination:
+      ui.textDest->setFocus(Qt::FocusReason::OtherFocusReason);
+      break;
+    case TaskBuilder::Problem::None:
+      break;
     }
+    return false;
   }
 
   if (!mIsEditMode) {
@@ -1175,12 +1174,13 @@ bool TransferDialog::saveTaskToFile() {
     transferWriteSettings();
   }
 
+  // Through the same door the API will use, so a task made here and one made
+  // by a request are named, checked and stored by the same code rather than
+  // by two that agree today.
   JobOptions *jobo = getJobOptions(mJobOptions);
-  ListOfJobOptions::getInstance()->Persist(jobo);
+  mTaskId = TaskBuilder::Create(jobo, QDateTime::currentDateTime());
 
-  mTaskId = jobo->uniqueId.toString();
-
-  return true;
+  return !mTaskId.isEmpty();
 }
 
 void TransferDialog::transferWriteSettings() {
@@ -1202,24 +1202,14 @@ void TransferDialog::transferWriteSettings() {
 }
 
 void TransferDialog::generateAutoTaskName() {
-
+  // The shape of the name is the core's (task_builder.h), so that a task
+  // made through the API is named the same way as one made here. What is
+  // left is the two questions only this dialog can answer: did the user ask
+  // for a name to be made up, and have they typed one already.
   if (ui.cb_taskAutoName->isChecked() &&
       ui.le_taskName->text().trimmed().isEmpty()) {
-    // generate auto task name
-
-    QDate date = QDate::currentDate();
-    QTime time = QTime::currentTime();
-
-    QString name = "_tmp_" + date.toString("ddMMMyyyy") + "_" +
-                   time.toString("HHmmss") + "_";
-
-    if (mIsDownload) {
-      name = name + mRemote;
-    } else {
-      name = name + mRemote;
-    }
-
-    ui.le_taskName->setText(name);
+    ui.le_taskName->setText(
+        TaskBuilder::AutoName(mRemote, QDateTime::currentDateTime()));
   }
 }
 

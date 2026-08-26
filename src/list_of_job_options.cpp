@@ -78,6 +78,15 @@ int ListOfJobOptions::countByName(const QString &description) const {
 
 bool ListOfJobOptions::Persist(JobOptions *jo) {
   bool isNew = !this->tasks.contains(jo);
+
+  // Said here rather than at the call sites, because this is where every
+  // one of them arrives: the dialog, the API through TaskBuilder, and the
+  // scheduler when it writes back a run. A task that changed without anyone
+  // saying so is the shape of half the questions this log exists to answer.
+  qCDebug(rbTask) << (isNew ? "created" : "updated")
+                  << "id=" << jo->uniqueId.toString()
+                  << "name=" << jo->description;
+
   if (isNew)
     this->tasks.append(jo);
   else {
@@ -96,8 +105,9 @@ bool ListOfJobOptions::Forget(JobOptions *jo) {
   if (!isKnown)
     return false;
   int ix = tasks.indexOf(jo);
+  qCDebug(rbTask) << "deleted id=" << jo->uniqueId.toString()
+                  << "name=" << jo->description;
   tasks.removeAt(ix);
-  //  qDebug() << QString("removed [%1]").arg(jo->description);
   PersistToUserData();
   return isKnown;
 }

@@ -32,6 +32,7 @@ rb_add_test(test_remote_registry)
 rb_add_test(test_debug_log)
 rb_add_test(test_script_runner)
 rb_add_test(test_rclone_version)
+rb_add_test(test_task_builder)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

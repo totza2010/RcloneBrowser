@@ -26,6 +26,21 @@ struct Remote {
 // shown with the wrong type gets the wrong icon and the wrong capabilities.
 QList<Remote> ParseListRemotes(const QByteArray &output);
 
+// Why "rclone listremotes" did not produce a list.
+//
+// Worth telling apart because what the person has to do differs: type a
+// password, upgrade rclone, or go and look at the path. The window used to
+// read rclone's stderr for this itself, inside the same lambda that chose an
+// icon size -- so the rule could not be checked without an encrypted config
+// or an ancient rclone binary to hand, which is to say it was never checked.
+enum class ListFailure {
+  Failed,           // something else; the message is rclone's own
+  PasswordRequired, // the configuration file is encrypted
+  TooOld,           // this rclone predates "listremotes"
+};
+
+ListFailure ClassifyListRemotesFailure(const QString &standardError);
+
 class RemoteRegistry : public QObject {
   Q_OBJECT
 

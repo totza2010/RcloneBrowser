@@ -32,6 +32,7 @@
 | อยู่ที่ | ทำอะไร | daemon ทำไม่ได้ |
 |---|---|---|
 | `main_window::runScript()` · 4 จุดเรียก | รัน script ตอนคิวว่าง / งานเริ่ม / งานจบ | **script ไม่ทำงานเลย** |
+| `main_window::rcloneConfig()` | เปิด `rclone config` ในเทอร์มินัล | **ตั้งค่า remote** — ดู [`REMOTE-CONFIG-UI.md`](REMOTE-CONFIG-UI.md) |
 | `main_window::rcloneListRemotes()` | รัน `rclone listremotes` | "มี remote อะไรบ้าง" |
 | `main_window::rcloneGetVersion()` | เช็คเวอร์ชัน rclone | ตรวจ rclone ตอนเริ่ม |
 | `TransferDialog` · 1,033 บรรทัด | สร้าง/แก้ task จากฟอร์ม | **สร้าง task ใหม่ไม่ได้** |
@@ -50,7 +51,7 @@
 |---|---|---|---|---|
 | 1 | รัน script | `main_window::runScript()` | `ScriptRunner` (L1) + `rb.script` | script ทำงานในโหมด daemon |
 | 2 | ค้นหา remote + เวอร์ชัน | `rcloneListRemotes()` `rcloneGetVersion()` | `RemoteRegistry::refresh()` · `RcloneVersion` | API ตอบ "มี remote อะไรบ้าง" · ✅ **ทำแล้ว** |
-| 3 | **สร้าง/แก้ task** | `TransferDialog` | `TaskBuilder` (L1) | **S11 — API สร้าง task ได้** |
+| 3 | **สร้าง/แก้ task** | `TransferDialog` | `TaskBuilder` (L1) | **S11 — API สร้าง task ได้** · ✅ **ทำแล้ว** |
 | 4 | เดินดูไฟล์ | `remote_widget` · `item_model` | `RemoteBrowser` (L1) | **S12 — Web UI เปิดดูไฟล์** |
 | 5 | check · dedupe · export | 3 dialog | `JobOptions` + `JobRegistry` | เรียกงานพวกนี้จาก API |
 | 6 | stream | `stream_widget` | ประเมินอีกที | (อาจไม่คุ้ม) |
@@ -117,3 +118,34 @@
 เริ่มจากการตอบให้ได้ว่า "ตัวนี้เวอร์ชันอะไร"
 
 **GUI-free 64/107 → 66/109**
+
+## บล็อก 3 เสร็จแล้ว — และเล็กกว่าที่ประเมินไว้มาก
+
+วัดก่อนตามกฎ: `transfer_dialog.cpp` 1,033 บรรทัด · 322 ui refs · แตะ 38 ฟิลด์ของ `JobOptions`
+ดูเหมือนงานขนาด S4 อีกรอบ
+
+**แต่ส่วนใหญ่ไม่ควรย้าย** `getJobOptions()` กับ `putJobOptions()` (210 บรรทัด) คือการแปลง
+widget ↔ model ซึ่งเป็นงานของ GUI โดยชอบธรรม — API จะสร้าง task จาก JSON ไม่ใช่จาก widget
+และ `JobOptions::toJson()/readJson()` มีอยู่แล้วตั้งแต่ S13
+
+ของที่เป็นแกนจริงมีสองกฎ ทั้งคู่เคยเขียนซ้ำหลายที่ พ่วง message box กับ `setFocus()` ทุกก๊อป:
+
+| กฎ | เคยอยู่ |
+|---|---|
+| task ต้องมีอะไรถึงบันทึกได้ | 3 ที่ ใน 2 ฟังก์ชัน |
+| task ที่ไม่ตั้งชื่อ ควรชื่ออะไร | `generateAutoTaskName()` |
+
+`TaskBuilder::Create()` รวมสามขั้น — ตั้งชื่อ ตรวจ บันทึก — ให้เป็นประตูเดียว
+ทั้ง dialog และ API เดินผ่านทางเดียวกัน
+
+**สองบั๊กที่ test จับได้ระหว่างเขียน:**
+
+1. **drive letter ของ Windows หน้าตาเหมือน remote** — `D:/films` ให้ remote ชื่อ `D`
+   task ที่ copy ลงดิสก์ในเครื่องจะถูกตั้งชื่อว่า `_tmp_..._D` แก้ตามกฎเดียวกับที่ rclone ใช้
+2. **`Persist()` คืนค่าว่า "อันนี้ใหม่ไหม" ไม่ใช่ "สำเร็จไหม"** — อ่านผิดเป็นความสำเร็จ
+   จะทำให้การแก้ task ที่มีอยู่แล้วทุกครั้งถูกรายงานว่าล้มเหลว
+
+`rb.task` เขียนไว้ใน `ListOfJobOptions::Persist()` และ `Forget()` **ไม่ใช่ที่ call site**
+เพราะนั่นคือจุดที่ทุกทางมาบรรจบ — dialog, API ผ่าน `TaskBuilder`, และ scheduler ตอนเขียนผลการรันกลับ
+
+**GUI-free 66/109 → 68/111**
