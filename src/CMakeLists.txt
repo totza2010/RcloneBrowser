@@ -52,6 +52,7 @@ set(CORE_SOURCE
   job_registry.cpp
   job_queue.cpp
   remote_registry.cpp
+  rclone_version.cpp
   schedule.cpp
   scheduler_store.cpp
   script_runner.cpp
@@ -80,6 +81,7 @@ set(CORE_HEADER
   job_registry.h
   job_queue.h
   remote_registry.h
+  rclone_version.h
   schedule.h
   scheduler_store.h
   script_runner.h

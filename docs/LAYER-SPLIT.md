@@ -49,7 +49,7 @@
 | # | ย้าย | จาก | ไปเป็น | ปลดล็อก |
 |---|---|---|---|---|
 | 1 | รัน script | `main_window::runScript()` | `ScriptRunner` (L1) + `rb.script` | script ทำงานในโหมด daemon |
-| 2 | ค้นหา remote + เวอร์ชัน | `rcloneListRemotes()` `rcloneGetVersion()` | `RemoteRegistry::refresh()` · `RcloneVersion` | API ตอบ "มี remote อะไรบ้าง" |
+| 2 | ค้นหา remote + เวอร์ชัน | `rcloneListRemotes()` `rcloneGetVersion()` | `RemoteRegistry::refresh()` · `RcloneVersion` | API ตอบ "มี remote อะไรบ้าง" · ✅ **ทำแล้ว** |
 | 3 | **สร้าง/แก้ task** | `TransferDialog` | `TaskBuilder` (L1) | **S11 — API สร้าง task ได้** |
 | 4 | เดินดูไฟล์ | `remote_widget` · `item_model` | `RemoteBrowser` (L1) | **S12 — Web UI เปิดดูไฟล์** |
 | 5 | check · dedupe · export | 3 dialog | `JobOptions` + `JobRegistry` | เรียกงานพวกนี้จาก API |
@@ -99,3 +99,21 @@
 > command line ไม่มี job card ไม่มี stats ไม่มีทางหยุดจากที่อื่น และเขียนประวัติเอง
 > คนละทางกับงานในหน้าต่าง **สมควรเป็นบล็อกของตัวเอง** ก่อนทำ S11 เพราะ API
 > จะต้องสั่งงานแล้วเห็นงานนั้นเหมือนกับที่หน้าต่างเห็น
+
+## บล็อก 2 เสร็จแล้ว
+
+`RemoteRegistry::refresh()` **มีอยู่แล้วตั้งแต่ S5** ครบทั้งการรัน การอ่าน และการแยก
+"ต้องใส่รหัสผ่าน" ออกจาก "ล้มเหลว" — **แต่ไม่มีใครเรียกมัน** หน้าต่างยังรัน process
+ของตัวเองอยู่ นี่คืออาการ "แยกครึ่งเดียว" อีกแบบหนึ่ง: **ของที่ย้ายไปแล้วแต่ไม่ได้ถูกใช้**
+ซึ่งมองจาก `check_layers.py` ไม่เห็นเลย เพราะไม่มีอะไรผิดกฎ
+
+ตอนนี้ `rcloneListRemotes()` เหลือบรรทัดเดียว และ `drawRemotes()` วาดจากสิ่งที่ registry ถือ
+ส่วน "ต้องใส่รหัสผ่าน" / "rclone เก่าเกินไป" เป็น signal ที่หน้าต่างรับไปตอบ
+แทนที่จะไปอ่าน stderr ของ rclone เอง
+
+`ParseRcloneVersion()` แยกออกมาเป็น `rclone_version.h` พร้อม `atLeast()` ที่เทียบทีละช่อง
+(ของเดิมใช้ `compareVersion()` บน `std::string`) — เป็นฐานของ
+[`RCLONE-MANAGER.md`](RCLONE-MANAGER.md) ด้วย เพราะการจัดการหลาย binary
+เริ่มจากการตอบให้ได้ว่า "ตัวนี้เวอร์ชันอะไร"
+
+**GUI-free 64/107 → 66/109**

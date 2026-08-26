@@ -5,6 +5,8 @@
 #include "debug_log.h"
 #include "history_widget.h"
 #include "job_log.h"
+#include "rclone_version.h"
+#include "remote_registry.h"
 #include "run_history.h"
 #include "script_runner.h"
 #include "scheduler_store.h"
@@ -790,6 +792,43 @@ MainWindow::MainWindow() {
 
   QObject::connect(ui.refresh, &QPushButton::clicked, this,
                    &MainWindow::rcloneListRemotes);
+
+  // What the registry has to say, in one place. The window used to find all
+  // of this out for itself by reading rclone's stderr inside the same lambda
+  // that drew the icons. See docs/LAYER-SPLIT.md block 2.
+  QObject::connect(&RemoteRegistry::instance(), &RemoteRegistry::refreshed,
+                   this, &MainWindow::drawRemotes);
+
+  QObject::connect(&RemoteRegistry::instance(), &RemoteRegistry::failed, this,
+                   [this](const QString &reason) {
+                     QMessageBox::information(
+                         this, "Error",
+                         "Cannot list remotes\n\n" + reason +
+                             "\n\nPlease verify rclone excecutable location.");
+                     emit ui.preferences->trigger();
+                   });
+
+  QObject::connect(
+      &RemoteRegistry::instance(), &RemoteRegistry::passwordRequired, this,
+      [this]() {
+        bool ok = false;
+        const QString password = QInputDialog::getText(
+            this, qApp->applicationDisplayName(),
+            "Enter password for .rclone.conf configuration file:",
+            QLineEdit::Password, QString(), &ok);
+        if (ok) {
+          SetRclonePassword(password);
+          RemoteRegistry::instance().refresh();
+        }
+      });
+
+  QObject::connect(&RemoteRegistry::instance(), &RemoteRegistry::tooOld, this,
+                   [this]() {
+                     QMessageBox::critical(
+                         this, qApp->applicationDisplayName(),
+                         "It seems rclone version you are using is too "
+                         "old.\nPlease upgrade to the latest version");
+                   });
 
   QObject::connect(ui.open, &QPushButton::clicked, this, [=]() {
     if (ui.remotes->selectedItems().size() != 0) {
@@ -2393,31 +2432,24 @@ void MainWindow::rcloneGetVersion() {
         if (code == 0) {
           QString version = p->readAllStandardOutput().trimmed();
 
-          // extract rclone version - numbers only
-          QString rclone_info1 = version;
-          QString rclone_version_no;
-          int lineBreak = rclone_info1.indexOf('\n');
-          if (lineBreak != -1) {
-            rclone_info1.remove(lineBreak, rclone_info1.length() - lineBreak);
-            rclone_version_no = rclone_info1;
-            rclone_version_no.replace("rclone v", "");
-            rclone_version_no.replace("-DEV", "");
-          } else {
-            // for very old rclone versions format was one line only
-            rclone_version_no = rclone_info1.trimmed();
-            rclone_version_no.replace("rclone v", "");
-            rclone_version_no.replace("-DEV", "");
-          }
+          // The reading of it is the core's (rclone_version.h): what was
+          // written out here stripped "rclone v" and "-DEV" by hand, in the
+          // middle of a lambda that also raised message boxes, so it could
+          // not be tested and could not be asked for without a window. See
+          // docs/LAYER-SPLIT.md block 2.
+          const RcloneVersion parsed = ParseRcloneVersion(version.toUtf8());
+          const QString rclone_version_no = parsed.number;
+
+          qCDebug(rbRemote) << "rclone version" << rclone_version_no << "at"
+                            << GetRclone();
+
           // save current version no in settings
           auto settings = GetSettings();
           settings->setValue("Settings/rcloneVersion", rclone_version_no);
 
 #if defined(Q_OS_WIN32)
           // check if required version
-          unsigned int result =
-              compareVersion(rclone_version_no.toStdString(), "1.50");
-
-          if (result == 2) {
+          if (!parsed.atLeast(QStringLiteral("1.50"))) {
             QMessageBox::warning(
                 this, "",
                 "For mount functionality to work you need "
@@ -2428,20 +2460,13 @@ void MainWindow::rcloneGetVersion() {
           };
 #endif
 
-          QStringList lines = version.split("\n", Qt::SkipEmptyParts);
-
-          QString rclone_info2;
-          QString rclone_info3;
-
-          int counter = 0;
-          foreach (QString line, lines) {
-            line = line.trimmed();
-            if (counter == 1)
-              rclone_info2 = line.replace("- ", "");
-            if (counter == 2)
-              rclone_info3 = line.replace("- ", "");
-            counter++;
-          };
+          // The three pieces the status bar shows. Picking them out of the
+          // output by counting lines and stripping "- " is the core's job
+          // too; what is left here is where they are put on screen.
+          const QString rclone_info1 =
+              QStringLiteral("rclone v%1").arg(parsed.number);
+          const QString rclone_info2 = parsed.osLine;
+          const QString rclone_info3 = parsed.goLine;
 
           QFileInfo appBundlePath;
 #ifdef Q_OS_MACOS
@@ -2819,44 +2844,38 @@ void MainWindow::rcloneConfig() {
 #endif
 }
 
-void MainWindow::rcloneListRemotes() {
+// Asks rclone what remotes there are. The answer comes back through
+// RemoteRegistry's signals, wired up once in the constructor.
+void MainWindow::rcloneListRemotes() { RemoteRegistry::instance().refresh(); }
+
+// Draws the remotes tab from RemoteRegistry. Nothing here asks rclone
+// anything: this used to be one lambda that ran the process, split its
+// output, chose an icon size, worked out a dark-mode suffix and built the
+// rows, and the only part of that a daemon could reuse was none of it.
+void MainWindow::drawRemotes() {
 
   ui.remotes->clear();
 
   auto settings = GetSettings();
   QString mIconsLayout = settings->value("Settings/iconsLayout").toString();
 
-  QProcess *p = new QProcess();
-
-  QObject::connect(
-      p,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
-      this, [=](int code, QProcess::ExitStatus) {
-        if (code == 0) {
+  {
+    {
           QStyle *style = qApp->style();
 
-          QString bytes = p->readAllStandardOutput().trimmed();
-          QStringList items = bytes.split('\n');
-
-          auto settings = GetSettings();
           bool darkModeIni = settings->value("Settings/darkModeIni").toBool();
           QString iconSize = settings->value("Settings/iconSize").toString();
           QString iconsColour =
               settings->value("Settings/iconsColour").toString();
 
-          for (const QString &line : items) {
-            if (line.isEmpty()) {
-              continue;
-            }
-
-            QStringList parts = line.split(':');
-            if (parts.count() != 2) {
-              continue;
-            }
-
-            QString name = parts[0].trimmed();
-            QString type = parts[1].trimmed();
+          // Drawn from RemoteRegistry, which is what asked rclone and what
+          // read the answer. Splitting "name: type" by hand here also split
+          // it wrongly -- it insisted on exactly two parts, so a type with a
+          // colon in it made the remote disappear. See docs/LAYER-SPLIT.md
+          // block 2.
+          for (const Remote &remote : RemoteRegistry::instance().remotes()) {
+            const QString name = remote.name;
+            QString type = remote.type;
             QString tooltip = "type: " + type + "\n\nname: " + name;
 
             QString img_add = "";
@@ -2996,36 +3015,9 @@ void MainWindow::rcloneListRemotes() {
             item->setToolTip(tooltip);
             ui.remotes->addItem(item);
           }
-        } else {
-          if (p->error() != QProcess::FailedToStart) {
-            if (getConfigPassword(p)) {
-              rcloneListRemotes();
-            }
-          }
-        }
-        p->deleteLater();
-        ui.open->setEnabled(false);
-      });
-
-  QObject::connect(
-      p, &QProcess::errorOccurred, this, [=](QProcess::ProcessError error) {
-        QString errorString =
-            QMetaEnum::fromType<QProcess::ProcessError>().valueToKey(error);
-
-        QMessageBox::information(
-            this, "Error",
-            "Cannot start rclone\n\n Error: " + errorString +
-                "\n\nPlease verify rclone excecutable location.");
-        emit ui.preferences->trigger();
-      });
-
-  UseRclonePassword(p);
-  p->start(GetRclone(),
-           QStringList() << "listremotes" << GetRcloneConf()
-                         << GetDefaultOptionsList("defaultRcloneOptions")
-                         << "--long"
-                         << "--ask-password=false",
-           QIODevice::ReadOnly);
+    }
+    ui.open->setEnabled(false);
+  }
 }
 
 bool MainWindow::getConfigPassword(QProcess *p) {

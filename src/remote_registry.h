@@ -61,6 +61,12 @@ signals:
   // on to whoever can.
   void passwordRequired();
 
+  // rclone is old enough not to have "listremotes". Told apart from an
+  // ordinary failure because the answer is different: upgrade, rather than
+  // check the path. Reading rclone's stderr for this used to be the window's
+  // job, which meant the answer existed only where there was a window.
+  void tooOld();
+
 private:
   explicit RemoteRegistry(QObject *parent = nullptr);
 

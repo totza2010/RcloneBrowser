@@ -1,4 +1,5 @@
 #include "remote_registry.h"
+#include "debug_log.h"
 #include "utils.h"
 
 QList<Remote> ParseListRemotes(const QByteArray &output) {
@@ -90,8 +91,15 @@ void RemoteRegistry::refresh() {
           // apart here so the caller does not have to read rclone's stderr
           // for itself.
           if (err.contains(QStringLiteral("RCLONE_CONFIG_PASS"))) {
+            qCDebug(rbRemote) << "the configuration file wants a password";
             emit passwordRequired();
+          } else if (err.contains(
+                         QStringLiteral("unknown command \"listremotes\""))) {
+            qCDebug(rbRemote) << "this rclone has no listremotes command";
+            emit tooOld();
           } else {
+            qCDebug(rbRemote) << "refused exit=" << exitCode
+                              << "because" << err;
             emit failed(err.isEmpty()
                             ? QStringLiteral("rclone exited with code %1")
                                   .arg(exitCode)
@@ -101,6 +109,7 @@ void RemoteRegistry::refresh() {
         }
 
         mRemotes = ParseListRemotes(out);
+        qCDebug(rbRemote) << "found n=" << mRemotes.size();
         emit refreshed();
       });
 
@@ -109,8 +118,15 @@ void RemoteRegistry::refresh() {
                      const QString why = mProcess->errorString();
                      mProcess->deleteLater();
                      mProcess = nullptr;
+                     qCDebug(rbRemote) << "refused because" << why;
                      emit failed(why);
                    });
+
+  // Which rclone, not just "rclone": more than one build can be installed --
+  // the official one and a fork such as tgdrive -- and they do not know the
+  // same remotes or the same backends. A log that does not say which was
+  // asked cannot explain a remote that is missing.
+  qCDebug(rbRemote) << "listing remotes with" << GetRclone();
 
   UseRclonePassword(mProcess);
   mProcess->start(GetRclone(),

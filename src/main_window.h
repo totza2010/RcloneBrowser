@@ -24,6 +24,10 @@ private slots:
   void rcloneGetVersion();
   void rcloneConfig();
   void rcloneListRemotes();
+
+  // Draws the remotes tab from what RemoteRegistry holds. See
+  // docs/LAYER-SPLIT.md block 2.
+  void drawRemotes();
   void listTasks();
 
   void addTransfer(const QString &message, const QString &source,
