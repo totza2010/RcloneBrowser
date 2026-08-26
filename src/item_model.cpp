@@ -1,4 +1,5 @@
 #include "item_model.h"
+#include "directory_listing.h"
 #include "lsjson_parser.h"
 #include "global.h"
 #include "icon_cache.h"
@@ -389,14 +390,16 @@ Item *ItemModel::get(const QModelIndex &index) const {
 }
 
 void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
+  // Asking is DirectoryListing's (directory_listing.h). What is left here is
+  // turning what comes back into rows: the spinner, merging with what is
+  // already shown, and the count of listings in flight.
+  //
   // One "rclone lsjson" answers for both files and directories. This used to
   // be two processes, lsd and lsl, each scraped with its own regular
   // expression -- twice the round trips on a backend where a listing is a
   // network call, which is most of them.
-  auto ls = new QProcess(this);
-  ls->setProcessChannelMode(QProcess::SeparateChannels);
+  auto listing = new DirectoryListing(mRemote, parent->path.path(), this);
 
-  auto parser = new LsjsonParser();
   auto cache = new QVector<Item *>();
 
   Item *loading = new Item();
@@ -413,7 +416,7 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
   });
 
   auto rcloneFinished = [=]() {
-    sender()->deleteLater();
+    listing->deleteLater();
     // free rclone ls count (global and local)
     mRcloneLsProcessCountMutex.lock();
     if (global.rcloneLsProcessCount > 0) {
@@ -426,7 +429,6 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
 
     // A single listing process, so there is no second stage to wait for.
     parent->state = Item::Ready;
-    delete parser;
 
     timer->stop();
     timer->deleteLater();
@@ -504,23 +506,31 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     }
   };
 
-  QObject::connect(ls,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, rcloneFinished);
+  QObject::connect(listing, &DirectoryListing::finished, this,
+                   rcloneFinished);
 
-  QObject::connect(ls, &QProcess::readyReadStandardOutput, this, [=]() {
-    for (const LsjsonEntry &entry : parser->feed(ls->readAllStandardOutput())) {
-      Item *child = new Item();
-      child->parent = parent;
-      child->name = entry.name;
-      child->isFolder = entry.isDir;
-      child->modified = entry.modifiedText();
-      // Directories report -1, and so do backends that cannot size an entry.
-      child->size = entry.size > 0 ? static_cast<quint64>(entry.size) : 0;
-      cache->append(child);
-    }
-  });
+  // The same tidying up when it could not be read. Before this, a listing
+  // that failed to start left the "... loading" row spinning for ever,
+  // because only the process finishing was listened for and a process that
+  // never started never finishes.
+  QObject::connect(listing, &DirectoryListing::failed, this,
+                   [=](const QString &) { rcloneFinished(); });
+
+  QObject::connect(
+      listing, &DirectoryListing::entries, this,
+      [=](const QVector<LsjsonEntry> &batch) {
+        for (const LsjsonEntry &entry : batch) {
+          Item *child = new Item();
+          child->parent = parent;
+          child->name = entry.name;
+          child->isFolder = entry.isDir;
+          child->modified = entry.modifiedText();
+          // Directories report -1, and so do backends that cannot size an
+          // entry.
+          child->size = entry.size > 0 ? static_cast<quint64>(entry.size) : 0;
+          cache->append(child);
+        }
+      });
 
   parent->state = Item::Loading;
 
@@ -529,7 +539,6 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
   emit endInsertRows();
 
   timer->start(100);
-  UseRclonePassword(ls);
 
   // keep track of number of listing rclone processes
   mRcloneLsProcessCountMutex.lock();
@@ -537,12 +546,7 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
   mLocalRcloneLsProcessCount++;
   mRcloneLsProcessCountMutex.unlock();
 
-  ls->start(GetRclone(),
-            QStringList() << "lsjson" << GetRcloneConf()
-                          << GetRemoteModeRcloneOptions() << GetShowHidden()
-                          << GetDefaultOptionsList("defaultRcloneOptions")
-                          << mRemote + ":" + parent->path.path(),
-            QIODevice::ReadOnly);
+  listing->start();
 }
 
 void ItemModel::sortRecursive(Item *item, const ItemSorter &sorter) {

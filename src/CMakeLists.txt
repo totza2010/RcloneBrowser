@@ -63,6 +63,7 @@ set(CORE_SOURCE
   run_history.cpp
   job_stats.cpp
   lsjson_parser.cpp
+  directory_listing.cpp
   rc_client.cpp
   qcron.cpp
   qcronfield.cpp
@@ -93,6 +94,7 @@ set(CORE_HEADER
   run_history.h
   job_stats.h
   lsjson_parser.h
+  directory_listing.h
   rc_client.h
   qcron.h
   qcronfield.h
