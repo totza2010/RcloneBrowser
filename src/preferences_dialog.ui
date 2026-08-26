@@ -1431,7 +1431,7 @@
           <item row="4" column="4">
            <widget class="QLineEdit" name="transferOffScript">
             <property name="toolTip">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Script executed when last transfer job finishes e.g.:&lt;br/&gt;&lt;br/&gt;&amp;quot;/usr/local/bin/keep_awake&amp;quot; -allowSleep&lt;br/&gt;&amp;quot;C:\Program Files\Tools\keep_awake.exe&amp;quot; -allowSleep -arg2&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Script executed when a transfer job finishes -- after every one, or once nothing is transferring any more, whichever is chosen below. e.g.:&lt;br/&gt;&lt;br/&gt;&amp;quot;/usr/local/bin/keep_awake&amp;quot; -allowSleep&lt;br/&gt;&amp;quot;C:\Program Files\Tools\keep_awake.exe&amp;quot; -allowSleep -arg2&lt;/p&gt;&lt;p&gt;This fires for a job started any way, including one run on its own. &amp;quot;Finished queue script&amp;quot; above is about the queue draining, which is a different thing.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
            </widget>
           </item>
@@ -1510,9 +1510,49 @@
           <item row="4" column="3" alignment="Qt::AlignRight">
            <widget class="QLabel" name="label_9">
             <property name="text">
-             <string>Last transfer job ends:</string>
+             <string>Transfer job ends:</string>
             </property>
            </widget>
+          </item>
+          <item row="5" column="4">
+           <layout class="QHBoxLayout" name="horizontalLayout_jobFinishedWhen">
+            <item>
+             <widget class="QRadioButton" name="rb_jobFinishedWhen_last">
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Run it once, when nothing is transferring any more. A queue of three jobs runs it once, at the end.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="text">
+               <string>after the last one</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="rb_jobFinishedWhen_every">
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Run it every time a transfer job finishes. A queue of three jobs runs it three times.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="text">
+               <string>after every one</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer_jobFinishedWhen">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
           </item>
           <item row="0" column="2">
            <spacer name="horizontalSpacer_7">

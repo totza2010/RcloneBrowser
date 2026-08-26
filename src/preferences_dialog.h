@@ -56,6 +56,10 @@ public:
   // Diagnostics. Turning the log on takes effect at once rather than at the
   // next start, so that ticking the box and reproducing the problem is one
   // step; see DebugLog::setEnabledForNextRun().
+  // "last" or "every" -- whether the finished script runs once nothing is
+  // transferring, or after each transfer.
+  QString getJobFinishedScriptWhen() const;
+
   bool getDebugLog() const;
   int getLogMaxFileKb() const;
   int getLogKeepFiles() const;

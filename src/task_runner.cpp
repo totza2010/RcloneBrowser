@@ -4,7 +4,9 @@
 #include "database.h"
 #include "job_options.h"
 #include "list_of_job_options.h"
+#include "app_settings.h"
 #include "run_history.h"
+#include "script_runner.h"
 #include "utils.h"
 
 #include <QDateTime>
@@ -183,6 +185,13 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
     return RcloneUnavailable;
   }
 
+  // The hooks a window would fire through JobRegistry. This path does not go
+  // through JobRegistry at all -- it runs rclone itself -- so the moments
+  // have to be announced here, or "run my script when a transfer starts"
+  // silently means "...as long as a window is open". See
+  // docs/LAYER-SPLIT.md block 1.
+  ScriptRunner::instance().run(ScriptRunner::Reason::TransferStarted, true);
+
   loop.exec();
 
   // Whatever is left in the buffer after the process ends: the last lines of
@@ -209,6 +218,19 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
   history.exitCode = process.exitCode();
   history.state = history.exitCode == 0 ? QStringLiteral("finished")
                                         : QStringLiteral("error");
+
+  // One task at a time here, so both rules mean the same thing -- but the
+  // log line should still name the one the user chose, or reading it would
+  // suggest a setting that is not in force.
+  //
+  // Waited for, because this process is about to end and a script that is
+  // not waited for is a script killed a moment after it starts.
+  ScriptRunner::instance().run(
+      AppSettings::runFinishedScriptForEveryTransfer()
+          ? ScriptRunner::Reason::TransferFinished
+          : ScriptRunner::Reason::LastTransferFinished,
+      true);
+
   return history.exitCode;
 }
 

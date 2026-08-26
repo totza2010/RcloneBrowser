@@ -6,6 +6,7 @@
 #include "history_widget.h"
 #include "job_log.h"
 #include "run_history.h"
+#include "script_runner.h"
 #include "scheduler_store.h"
 #include "job_options_item.h"
 #include "job_widget.h"
@@ -642,6 +643,9 @@ MainWindow::MainWindow() {
 
       // The sizes first, so that switching the log on picks them up rather
       // than opening its files under the old ones.
+      settings->setValue("Settings/jobFinishedScriptWhen",
+                         dialog.getJobFinishedScriptWhen());
+
       settings->setValue("Settings/logMaxFileKb", dialog.getLogMaxFileKb());
       settings->setValue("Settings/logKeepFiles", dialog.getLogKeepFiles());
       DebugLog::setEnabledForNextRun(dialog.getDebugLog());
@@ -1019,14 +1023,10 @@ MainWindow::MainWindow() {
           mQueueStatus = true;
 
           if (ui.queueListWidget->count() == 0) {
-            auto settings = GetSettings();
-            if (settings->value("Settings/queueScriptRun", false).toBool()) {
-              QString queueScript =
-                  settings->value("Settings/queueScript").toString();
-              if (!queueScript.isEmpty()) {
-                runScript(queueScript);
-              }
-            }
+            // Switched on with nothing in it counts as the queue having
+            // emptied. ScriptRunner decides whether anything is configured.
+            ScriptRunner::instance().run(
+                ScriptRunner::Reason::QueueEmpty);
           }
 
           if (ui.queueListWidget->count() > 0) {
@@ -1814,13 +1814,11 @@ MainWindow::MainWindow() {
   // From here the queue drives itself and the tab is drawn from it.
   QObject::connect(&JobQueue::instance(), &JobQueue::changed, this,
                    [this]() { refreshQueueView(); });
-  QObject::connect(&JobQueue::instance(), &JobQueue::emptied, this, [this]() {
-    const QString script = AppSettings::queueFinishedScript();
-    if (!script.isEmpty()) {
-      runScript(script);
-    }
-  });
+  // The queue emptying is ScriptRunner's to hear, not this window's. It
+  // listens to the same signal, so a queue that empties with no window open
+  // still runs what the user asked for. See docs/LAYER-SPLIT.md block 1.
   JobQueue::instance().setDrivesItself(true);
+  ScriptRunner::instance().install();
 
   // remove close button from these tabs
   ui.tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
@@ -3877,20 +3875,8 @@ void MainWindow::addJobCard(RunningJob *job) {
 #if defined(Q_OS_MACOS)
           mMacOsPowerSaving->resumePowerSaving();
 #endif
-          // run custom script
-          auto settings = GetSettings();
-          QString transferOffScript =
-              settings->value("Settings/transferOffScript").toString();
-
-          bool jobLastFinishedScriptRun =
-              settings->value("Settings/jobLastFinishedScriptRun", false)
-                  .toBool();
-          if (jobLastFinishedScriptRun) {
-
-            if (!transferOffScript.isEmpty()) {
-              runScript(transferOffScript);
-            }
-          }
+          // The script for this moment is ScriptRunner's, and it hears
+          // the job ending from JobRegistry rather than from here.
         }
 
         if (--mJobCount == 0) {
@@ -4011,20 +3997,8 @@ void MainWindow::addJobCard(RunningJob *job) {
   mMacOsPowerSaving->suspendPowerSaving();
 #endif
 
-  // run custom script
-  auto settings = GetSettings();
-  QString transferOnScript =
-      settings->value("Settings/transferOnScript").toString();
-
-  bool jobStartScriptRun =
-      settings->value("Settings/jobStartScriptRun", false).toBool();
-
-  if (jobStartScriptRun) {
-
-    if (!transferOnScript.isEmpty()) {
-      runScript(transferOnScript);
-    }
-  }
+  // The script for a transfer starting is ScriptRunner's; it hears the
+  // start from JobRegistry.
 
   ui.tabs->setTabText(1, QString("Jobs (%1)").arg(++mJobCount));
 
@@ -4040,35 +4014,6 @@ void MainWindow::addJobCard(RunningJob *job) {
 }
 
 //  runs Script
-void MainWindow::runScript(const QString &script) {
-
-  QProcess *p = new QProcess();
-
-  QObject::connect(p,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, [=](int code, QProcess::ExitStatus) {
-                     if (code == 0) {
-                     }
-                     p->deleteLater();
-                   });
-
-  QStringList scriptList;
-
-  QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-  for (QString arg : script.split(re)) {
-    if (!arg.isEmpty()) {
-      scriptList << arg.replace("\"", "");
-    }
-  }
-
-  QString scriptCmd = scriptList.takeAt(0);
-  QStringList scriptArgs = scriptList;
-
-  p->start(scriptCmd, scriptArgs, QIODevice::ReadOnly);
-}
-
 void MainWindow::addNewMount(const QString &remote, const QString &folder,
                              const QString &remoteType, const QStringList &args,
                              const QString &script, const QString &uniqueId,

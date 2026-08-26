@@ -111,10 +111,38 @@ void AppSettings::setSchedulerIsRunning(bool running) {
                                   : QStringLiteral("false"));
 }
 
-QString AppSettings::queueFinishedScript() {
+namespace {
+
+// A script is only wanted when its switch is on and its path is set. Every
+// caller used to check both, which is two chances to check only one.
+QString scriptIf(const char *switchKey, const char *pathKey) {
   auto settings = GetSettings();
-  if (!settings->value("Settings/queueScriptRun", false).toBool()) {
+  if (!settings->value(QLatin1String(switchKey), false).toBool()) {
     return QString();
   }
-  return settings->value("Settings/queueScript").toString();
+  return settings->value(QLatin1String(pathKey)).toString();
+}
+
+} // namespace
+
+QString AppSettings::queueFinishedScript() {
+  return scriptIf("Settings/queueScriptRun", "Settings/queueScript");
+}
+
+QString AppSettings::transferStartedScript() {
+  return scriptIf("Settings/jobStartScriptRun", "Settings/transferOnScript");
+}
+
+QString AppSettings::transferFinishedScript() {
+  return scriptIf("Settings/jobLastFinishedScriptRun",
+                  "Settings/transferOffScript");
+}
+
+bool AppSettings::runFinishedScriptForEveryTransfer() {
+  // Stored as the word rather than a flag, so that a settings file read by a
+  // person says which of the two it means.
+  return GetSettings()
+             ->value("Settings/jobFinishedScriptWhen",
+                     QStringLiteral("last"))
+             .toString() == QLatin1String("every");
 }

@@ -54,6 +54,19 @@ void setSchedulerIsRunning(bool running);
 // instead of two.
 QString queueFinishedScript();
 
+// The same for a transfer starting, and for one finishing.
+QString transferStartedScript();
+QString transferFinishedScript();
+
+// Whether the finished script runs after every transfer or only once nothing
+// is transferring any more.
+//
+// Upstream ran it after every one while labelling it "Last transfer job
+// ends", which is two different promises. Rather than pick one and take the
+// other away, both are offered and the label says what it does. "Last" is
+// the default because it is what the label always said. See VERIFY.md V-24.
+bool runFinishedScriptForEveryTransfer();
+
 // Whether the application writes its own debug log. Off by default: it says
 // a great deal and most runs have nothing to explain.
 //

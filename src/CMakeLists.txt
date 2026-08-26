@@ -54,6 +54,7 @@ set(CORE_SOURCE
   remote_registry.cpp
   schedule.cpp
   scheduler_store.cpp
+  script_runner.cpp
   job_log.cpp
   database.cpp
   config_store.cpp
@@ -81,6 +82,7 @@ set(CORE_HEADER
   remote_registry.h
   schedule.h
   scheduler_store.h
+  script_runner.h
   job_log.h
   database.h
   config_store.h

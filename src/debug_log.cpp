@@ -12,6 +12,7 @@
 
 Q_LOGGING_CATEGORY(rbQueue, "rb.queue")
 Q_LOGGING_CATEGORY(rbSched, "rb.sched")
+Q_LOGGING_CATEGORY(rbScript, "rb.script")
 Q_LOGGING_CATEGORY(rbJob, "rb.job")
 Q_LOGGING_CATEGORY(rbDb, "rb.db")
 Q_LOGGING_CATEGORY(rbApp, "rb.app")
@@ -179,6 +180,9 @@ QString subsystemFor(const char *category) {
   }
   if (name == QLatin1String("rb.sched")) {
     return QStringLiteral("scheduler");
+  }
+  if (name == QLatin1String("rb.script")) {
+    return QStringLiteral("scripts");
   }
   if (name == QLatin1String("rb.job")) {
     return QStringLiteral("jobs");

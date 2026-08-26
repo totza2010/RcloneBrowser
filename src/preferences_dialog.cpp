@@ -434,6 +434,12 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   ui.https_proxy->setText(settings->value("Settings/https_proxy").toString());
   ui.no_proxy->setText(settings->value("Settings/no_proxy").toString());
 
+  if (AppSettings::runFinishedScriptForEveryTransfer()) {
+    ui.rb_jobFinishedWhen_every->setChecked(true);
+  } else {
+    ui.rb_jobFinishedWhen_last->setChecked(true);
+  }
+
   ui.cb_debugLog->setChecked(AppSettings::debugLog());
   ui.logMaxFileKb->setValue(AppSettings::logMaxFileKb());
   ui.logKeepFiles->setValue(AppSettings::logKeepFiles());
@@ -719,6 +725,11 @@ bool PreferencesDialog::getUseProxy() const {
 
 bool PreferencesDialog::getPreemptiveLoading() const {
   return ui.cb_preemptiveLoading->isChecked();
+}
+
+QString PreferencesDialog::getJobFinishedScriptWhen() const {
+  return ui.rb_jobFinishedWhen_every->isChecked() ? QStringLiteral("every")
+                                                  : QStringLiteral("last");
 }
 
 bool PreferencesDialog::getDebugLog() const {
