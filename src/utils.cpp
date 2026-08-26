@@ -187,24 +187,30 @@ QStringList GetRemoteModeRcloneOptions() {
   return driveSharedOption;
 }
 
-QStringList GetDefaultOptionsList(const QString &settingsOptions) {
-  auto settings = GetSettings();
-  QString defaultOptions =
-      settings->value("Settings/" + settingsOptions).toString();
-  //      settings->value("Settings/defaultRcloneOptions").toString();
-  QStringList defaultOptionsList;
-
-  if (!defaultOptions.isEmpty()) {
-    QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-    for (QString arg : defaultOptions.split(re)) {
-      if (!arg.isEmpty()) {
-        defaultOptionsList << arg.replace("\"", "");
-      }
-    }
+QStringList SplitRcloneOptions(const QString &options) {
+  QStringList list;
+  const QString trimmed = options.trimmed();
+  if (trimmed.isEmpty()) {
+    return list;
   }
 
-  return defaultOptionsList;
+  // A space, but only one with an even number of quotes after it -- which is
+  // to say a space that is not inside a quoted run.
+  static const QRegularExpression outsideQuotes(
+      QStringLiteral(R"( (?=[^"]*("[^"]*"[^"]*)*$))"));
+
+  for (QString arg : trimmed.split(outsideQuotes)) {
+    if (!arg.isEmpty()) {
+      list << arg.replace(QLatin1Char('"'), QString());
+    }
+  }
+  return list;
+}
+
+QStringList GetDefaultOptionsList(const QString &settingsOptions) {
+  auto settings = GetSettings();
+  return SplitRcloneOptions(
+      GetSettings()->value("Settings/" + settingsOptions).toString());
 }
 
 QStringList GetShowHidden() {

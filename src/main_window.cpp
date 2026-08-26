@@ -1843,6 +1843,11 @@ MainWindow::MainWindow() {
   }
 
   // Every transfer gets a card, whoever started it.
+  //
+  // Only a transfer. A mount has its own tab, and check, dedupe and export
+  // show their output in the window that started them -- they go through the
+  // registry for the history row, the log file and one way of starting
+  // rclone, not to be drawn twice. See docs/LAYER-SPLIT.md block 5.
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
                    [this](RunningJob *job) {
                      if (job->kind() == JobKind::Transfer) {
@@ -4026,15 +4031,7 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
   auto settings = GetSettings();
   QString opt = settings->value("Settings/mount").toString();
 
-  if (!opt.isEmpty()) {
-    QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-    for (QString arg : opt.split(re)) {
-        if (!arg.isEmpty()) {
-            argsFinal << arg.replace("\"", "");
-        }
-    }
-  }
+  argsFinal << SplitRcloneOptions(opt);
 
   argsFinal << GetRcloneConf();
 
@@ -4415,14 +4412,7 @@ void MainWindow::addStream(const QString &remote, const QString &stream,
   ui.buttonSortByTime->setEnabled(_jobsCount > 1);
   ui.buttonSortByStatus->setEnabled(_jobsCount > 1);
 
-  QStringList streamPrefsList;
-  QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-  for (QString arg : stream.split(re)) {
-    if (!arg.isEmpty()) {
-      streamPrefsList << arg.replace("\"", "");
-    }
-  }
+  QStringList streamPrefsList = SplitRcloneOptions(stream);
 
   QString streamCmd = streamPrefsList.takeAt(0);
   QStringList streamArgs = streamPrefsList;

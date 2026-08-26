@@ -523,16 +523,7 @@ QStringList MountDialog::getOptions() {
   mJobOptions->extra = ui.textExtra->toPlainText().trimmed();
   if (!ui.textExtra->toPlainText().trimmed().isEmpty()) {
     for (auto line : ui.textExtra->toPlainText().trimmed().split('\n')) {
-      if (!line.isEmpty()) {
-
-        QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-
-        for (QString arg : line.split(re)) {
-          if (!arg.isEmpty()) {
-            list << arg.replace("\"", "");
-          }
-        }
-      }
+      list << SplitRcloneOptions(line);
     }
   }
 

@@ -31,6 +31,18 @@ void SetRcloneConf(const QString &rcloneConf);
 void UseRclonePassword(QProcess *process);
 void SetRclonePassword(const QString &rclonePassword);
 
+// Splits a line of rclone options the way every field in this program that
+// takes one has always split it: on spaces that are not inside double
+// quotes, with the quotes then removed.
+//
+// This regular expression was written out nine times -- in the check,
+// dedupe, mount and folder dialogs, in the task options, in the script
+// runner, in the window twice, and here -- and had already drifted into two
+// spellings. Nine copies of a rule about quoting is nine chances for
+// "--exclude "My Films"" to mean something different depending on which box
+// it was typed into. See docs/LAYER-SPLIT.md block 5.
+QStringList SplitRcloneOptions(const QString &options);
+
 QStringList GetDefaultOptionsList(const QString &settingsOptions);
 QStringList GetRemoteModeRcloneOptions();
 QStringList GetShowHidden();

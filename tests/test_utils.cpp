@@ -8,6 +8,63 @@ class TestUtils : public QObject {
   Q_OBJECT
 
 private slots:
+  // The rule for reading a line of rclone options. It was written out nine
+  // times -- the check, dedupe, mount and folder dialogs, the task options,
+  // the script runner, the window twice, and here -- in two spellings that
+  // had already drifted apart. Nine copies of a quoting rule is nine chances
+  // for the same typed line to mean different things depending on which box
+  // it went into. See docs/LAYER-SPLIT.md block 5.
+  void splitsOnSpacesOutsideQuotes() {
+    QCOMPARE(SplitRcloneOptions(QStringLiteral("--fast-list --transfers 4")),
+             (QStringList{"--fast-list", "--transfers", "4"}));
+  }
+
+  // The whole point of the quotes: a path with a space in it is one argument.
+  void aQuotedRunStaysOneArgument() {
+    QCOMPARE(SplitRcloneOptions(QStringLiteral("--exclude \"My Films/**\"")),
+             (QStringList{"--exclude", "My Films/**"}));
+
+    QCOMPARE(
+        SplitRcloneOptions(
+            QStringLiteral("--exclude \"a b\" --include \"c d\" --fast-list")),
+        (QStringList{"--exclude", "a b", "--include", "c d", "--fast-list"}));
+  }
+
+  // Quotes are removed, not passed on: rclone is given the argument, not the
+  // way it was typed.
+  void theQuotesThemselvesDoNotSurvive() {
+    for (const QString &arg :
+         SplitRcloneOptions(QStringLiteral("--exclude \"x y\""))) {
+      QVERIFY2(!arg.contains(QLatin1Char('"')), qPrintable(arg));
+    }
+  }
+
+  void nothingTypedIsNoArguments() {
+    QVERIFY(SplitRcloneOptions(QString()).isEmpty());
+    QVERIFY(SplitRcloneOptions(QStringLiteral("   ")).isEmpty());
+    QVERIFY(SplitRcloneOptions(QStringLiteral("\t \n ")).isEmpty());
+  }
+
+  // Runs of spaces are how a line looks after somebody edits it, and they
+  // must not become empty arguments -- rclone reads an empty argument as a
+  // path, not as nothing.
+  void extraSpacesDoNotBecomeEmptyArguments() {
+    const QStringList args =
+        SplitRcloneOptions(QStringLiteral("  --fast-list    --checkers  6  "));
+    QCOMPARE(args, (QStringList{"--fast-list", "--checkers", "6"}));
+    for (const QString &arg : args) {
+      QVERIFY(!arg.isEmpty());
+    }
+  }
+
+  void oneArgumentOnItsOwnIsStillAnArgument() {
+    QCOMPARE(SplitRcloneOptions(QStringLiteral("--fast-list")),
+             (QStringList{"--fast-list"}));
+    QCOMPARE(SplitRcloneOptions(QStringLiteral("\"C:/Program Files/x.exe\"")),
+             (QStringList{"C:/Program Files/x.exe"}));
+  }
+
+
   void credentialHasRequestedLength_data() {
     QTest::addColumn<int>("length");
     QTest::newRow("rc user") << 10;

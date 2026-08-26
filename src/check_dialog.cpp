@@ -1,4 +1,5 @@
 #include "check_dialog.h"
+#include "utils.h"
 #include <QFileDialog>
 
 CheckDialog::CheckDialog(const QString &remote, const QDir &path,
@@ -95,16 +96,7 @@ QStringList CheckDialog::getOptions() const {
     list << "--download";
   }
 
-  QString extra = ui.textExtra->text().trimmed();
-  if (!extra.isEmpty()) {
-    QRegularExpression re(R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
-
-    for (QString arg : extra.split(re)) {
-      if (!arg.isEmpty()) {
-        list << arg.replace("\"", "");
-      }
-    }
-  }
+  list << SplitRcloneOptions(ui.textExtra->text());
 
   list << getSource();
 

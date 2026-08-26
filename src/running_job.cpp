@@ -34,6 +34,22 @@ QString JobKindToString(JobKind kind) {
     return QStringLiteral("mount");
   case JobKind::Stream:
     return QStringLiteral("stream");
+  case JobKind::Check:
+    return QStringLiteral("check");
+  case JobKind::Dedupe:
+    return QStringLiteral("dedupe");
+  case JobKind::Export:
+    return QStringLiteral("export");
+  case JobKind::Tree:
+    return QStringLiteral("tree");
+  case JobKind::Size:
+    return QStringLiteral("size");
+  case JobKind::Link:
+    return QStringLiteral("link");
+  case JobKind::About:
+    return QStringLiteral("about");
+  case JobKind::Cleanup:
+    return QStringLiteral("cleanup");
   }
   return QStringLiteral("transfer");
 }

@@ -3,31 +3,11 @@
 #include "debug_log.h"
 #include "job_queue.h"
 #include "job_registry.h"
+#include "utils.h"
 
 #include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
-
-namespace {
-
-// Splits a command line on spaces that are not inside double quotes, which is
-// what the settings field has always accepted. Lifted from MainWindow
-// unchanged: this is not the moment to change what a user's existing script
-// line means.
-QStringList splitCommand(const QString &command) {
-  static const QRegularExpression outsideQuotes(
-      QStringLiteral(R"( (?=[^"]*("[^"]*"[^"]*)*$))"));
-
-  QStringList parts;
-  for (QString part : command.split(outsideQuotes)) {
-    if (!part.isEmpty()) {
-      parts << part.replace(QLatin1Char('"'), QString());
-    }
-  }
-  return parts;
-}
-
-} // namespace
 
 ScriptRunner &ScriptRunner::instance() {
   static ScriptRunner runner;
@@ -111,7 +91,9 @@ bool ScriptRunner::run(Reason reason, bool waitForIt) {
     return false;
   }
 
-  const QStringList parts = splitCommand(command);
+  // The same splitting every options field in the program uses, so a script
+  // line and an rclone options line quote the same way.
+  const QStringList parts = SplitRcloneOptions(command);
   if (parts.isEmpty()) {
     qCDebug(rbScript) << "refused reason=" << reasonName(reason)
                       << "because the command line is empty";

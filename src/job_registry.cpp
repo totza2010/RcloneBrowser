@@ -3,6 +3,8 @@
 #include "list_of_job_options.h"
 #include "run_history.h"
 
+#include <QUuid>
+
 #include <memory>
 
 namespace {
@@ -153,8 +155,19 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
                                const QString &taskId,
                                const QString &transferMode,
                                const QString &requestId) {
-  auto *job = new RunningJob(kind, args, description, taskId, transferMode,
-                             requestId, this);
+  // A run with no id leaves no history: RunHistory refuses a record without
+  // one, because the id is what an ending is matched back to a beginning by.
+  //
+  // Minted here rather than demanded of the caller. Every caller that had to
+  // remember was a caller that could forget, and forgetting is silent -- the
+  // job runs perfectly and simply never appears in the history. That is
+  // exactly what happened when check, dedupe and export were first moved
+  // here. See docs/LAYER-SPLIT.md block 5.
+  const QString id =
+      requestId.isEmpty() ? QUuid::createUuid().toString() : requestId;
+
+  auto *job =
+      new RunningJob(kind, args, description, taskId, transferMode, id, this);
   mJobs.append(job);
 
   QObject::connect(job, &RunningJob::finished, this, [this, job](JobState) {

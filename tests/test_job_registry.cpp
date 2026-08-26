@@ -1,6 +1,7 @@
 #include "database.h"
 #include "job_options.h"
 #include "job_registry.h"
+#include "run_history.h"
 #include "running_job.h"
 #include "utils.h"
 
@@ -63,6 +64,43 @@ private slots:
   }
 
   void cleanupTestCase() { Database::closeForThread(); }
+
+  // A run with no id given is still a run, and still has to appear in the
+  // history: RunHistory refuses a record without one, because the id is what
+  // matches an ending to a beginning.
+  //
+  // This is here because it went wrong. check, dedupe and export were moved
+  // to the registry with an empty request id, and the result was silent --
+  // the jobs ran perfectly and simply never appeared in the history. Nothing
+  // in a build or a test caught it; it took looking in the database.
+  void aJobStartedWithNoRequestIdStillGetsOne() {
+    JobRegistry &registry = JobRegistry::instance();
+
+    QSignalSpy ended(&registry, &JobRegistry::jobFinished);
+
+    RunningJob *job = registry.start(
+        JobKind::Check, copyArgs(),
+        JobDescription{"no id given", mSource->path(), mDest->path()},
+        QString(), QStringLiteral("check"), QString());
+
+    QVERIFY(job != nullptr);
+    QVERIFY2(!job->requestId().isEmpty(),
+             "a job was started with nothing to record it under");
+    QCOMPARE(registry.find(job->requestId()), job);
+
+    QVERIFY2(ended.wait(60000), "the job never reported that it finished");
+
+    // And the row is really there, which is the thing that was missing.
+    const QList<JobRunRecord> rows = RunHistory::recent(50);
+    bool found = false;
+    for (const JobRunRecord &row : rows) {
+      if (row.requestId == job->requestId()) {
+        found = true;
+        QCOMPARE(row.kind, QStringLiteral("check"));
+      }
+    }
+    QVERIFY2(found, "the run left no history row");
+  }
 
   void runsAJobAndReportsItFinished() {
     JobRegistry &registry = JobRegistry::instance();

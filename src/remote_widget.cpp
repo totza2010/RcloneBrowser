@@ -1,4 +1,5 @@
 #include "remote_widget.h"
+#include "job_registry.h"
 #include "check_dialog.h"
 #include "dedupe_dialog.h"
 #include "delete_progress_dialog.h"
@@ -14,6 +15,30 @@
 #include "utils.h"
 #include <QMenu>
 #include <QInputDialog>
+
+namespace {
+
+// Runs one of this tab's tools as a job.
+//
+// Each of these used to build a QProcess of its own and hand it to a
+// ProgressDialog, which meant no history row, no log file, and no way to stop
+// it from anywhere else. The window still shows the output; what changed is
+// that there is one way of starting rclone. See docs/LAYER-SPLIT.md block 5.
+//
+// The configuration file is added by RunningJob, which is why no caller
+// passes it.
+RunningJob *StartTool(JobKind kind, QStringList command, const QString &info,
+                      const QString &source, const QString &dest) {
+  command << GetRemoteModeRcloneOptions()
+          << GetDefaultOptionsList("defaultRcloneOptions");
+
+  return JobRegistry::instance().start(kind, command,
+                                       JobDescription{info, source, dest},
+                                       QString(), JobKindToString(kind),
+                                       QString());
+}
+
+} // namespace
 
 RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                            const QString &remoteType, QWidget *parent)
@@ -432,6 +457,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
           }
           ui.getInfo->setDisabled(false);
           ui.cleanup->setDisabled(false);
+          applyCapabilityLimits();
           ui.path->clear();
           return;
         }
@@ -543,6 +569,14 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
           path = model->path(index);
         }
+
+        // Capabilities have the last word. Everything above decides what
+        // makes sense for what is selected; this decides what the backend can
+        // do at all, and the two are different questions. Without it the
+        // first click in the tree quietly undid applyCapabilities() -- which
+        // is how teldrive came to offer a Cleanup it cannot perform, while
+        // the status bar underneath said it had nothing to clean up.
+        applyCapabilityLimits();
 
         ui.path->setText(
             remote + ":" +
@@ -792,20 +826,16 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
       return;
     }
 
-    QProcess process;
-    UseRclonePassword(&process);
-    process.setProgram(GetRclone());
-    process.setArguments(QStringList()
-                         << "copy" << GetRcloneConf()
-                         << GetRemoteModeRcloneOptions()
-                         << GetDefaultOptionsList("defaultRcloneOptions")
-                         << remote + ":" + path << remote + ":" + destFolder
-                         << args);
-
-    process.setProcessChannelMode(QProcess::MergedChannels);
+    // A copy inside a remote is a transfer like any other, and now says so:
+    // it gets a history row, a log file and a card in the Jobs tab.
+    RunningJob *job =
+        StartTool(JobKind::Transfer,
+                  QStringList() << "copy" << remote + ":" + path
+                                << remote + ":" + destFolder << args,
+                  pathMsg, remote + ":" + path, remote + ":" + destFolder);
 
     ProgressDialog progress(
-        "Copy", "Copying... ", pathMsg, &process, this,
+        "Copy", "Copying... ", pathMsg, job, this,
         !(args.contains("--dry-run") || args.contains("--verbose")), false,
         toolTip);
 
@@ -942,20 +972,14 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
       return;
     }
 
-    QProcess process;
-    UseRclonePassword(&process);
-    process.setProgram(GetRclone());
-    process.setArguments(QStringList()
-                         << "move" << GetRcloneConf()
-                         << GetRemoteModeRcloneOptions()
-                         << GetDefaultOptionsList("defaultRcloneOptions")
-                         << remote + ":" + path << remote + ":" + destFolder
-                         << args);
-
-    process.setProcessChannelMode(QProcess::MergedChannels);
+    RunningJob *job =
+        StartTool(JobKind::Transfer,
+                  QStringList() << "move" << remote + ":" + path
+                                << remote + ":" + destFolder << args,
+                  pathMsg, remote + ":" + path, remote + ":" + destFolder);
 
     ProgressDialog progress(
-        "Move", "Moving... ", pathMsg, &process, this,
+        "Move", "Moving... ", pathMsg, job, this,
         !(args.contains("--dry-run") || args.contains("--verbose")), false,
         toolTip);
 
@@ -1076,21 +1100,17 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
     toolTip = "\"" + remote + ":" +
               (isLocal ? QDir::toNativeSeparators(path) : path) + "\"";
 
-    QProcess *process = new QProcess;
-    UseRclonePassword(process);
-    process->setProgram(GetRclone());
-    process->setArguments(QStringList()
-                          << "link" << GetRcloneConf()
-                          << GetRemoteModeRcloneOptions()
-                          << GetDefaultOptionsList("defaultRcloneOptions")
-                          << remote + ":" + path);
-    process->setProcessChannelMode(QProcess::MergedChannels);
+    const QString info = QString("Public link for: ") + "\"" +
+                         metrix.elidedText(remote, Qt::ElideMiddle, 150) +
+                         ":" + pathMsg + "\"";
+
+    RunningJob *job =
+        StartTool(JobKind::Link, QStringList() << "link" << remote + ":" + path,
+                  info, remote + ":" + path, QString());
+
     ProgressDialog *progress =
-        new ProgressDialog("Fetch Public Link", "Running... ",
-                           QString("Public link for: ") + "\"" +
-                               metrix.elidedText(remote, Qt::ElideMiddle, 150) +
-                               ":" + pathMsg + "\"",
-                           process, NULL, false, true, toolTip);
+        new ProgressDialog("Fetch Public Link", "Running... ", info, job, NULL,
+                           false, true, toolTip);
     progress->expand();
     progress->allowToClose();
     progress->show();
@@ -1205,21 +1225,18 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
     QString toolTip = "\"" + remote + ":" +
                       (isLocal ? QDir::toNativeSeparators(path) : path) + "\"";
 
-    QProcess *process = new QProcess;
-    UseRclonePassword(process);
-    process->setProgram(GetRclone());
-    process->setArguments(
-        QStringList() << "tree"
-                      << "-d" << GetRcloneConf() << GetRemoteModeRcloneOptions()
-                      << GetDefaultOptionsList("defaultRcloneOptions")
-                      << remote + ":" + path);
-    process->setProcessChannelMode(QProcess::MergedChannels);
+    const QString info = QString("rclone tree -d ") + "\"" +
+                         metrix.elidedText(remote, Qt::ElideMiddle, 150) +
+                         ":" + pathMsg + "\"";
+
+    RunningJob *job = StartTool(JobKind::Tree,
+                                QStringList() << "tree"
+                                              << "-d" << remote + ":" + path,
+                                info, remote + ":" + path, QString());
+
     ProgressDialog *progress =
-        new ProgressDialog("Show directories tree", "Running... ",
-                           QString("rclone tree -d ") + "\"" +
-                               metrix.elidedText(remote, Qt::ElideMiddle, 150) +
-                               ":" + pathMsg + "\"",
-                           process, NULL, false, false, toolTip);
+        new ProgressDialog("Show directories tree", "Running... ", info, job,
+                           NULL, false, false, toolTip);
     progress->expand();
     progress->allowToClose();
     //    progress->resize(566, 350);
@@ -1249,7 +1266,6 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
     QString path = model->path(index).path();
 
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
-    QProcess *process = new QProcess;
 
     if (multiSelectCount > 1) {
 
@@ -1280,18 +1296,14 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     } // if (multiSelectCount > 1)
 
-    UseRclonePassword(process);
-    process->setProgram(GetRclone());
-    process->setArguments(QStringList()
-                          << "size" << GetRcloneConf()
-                          << GetRemoteModeRcloneOptions()
-                          << GetDefaultOptionsList("defaultRcloneOptions")
-                          << remote + ":" + path << includedListFinal);
-    process->setProcessChannelMode(QProcess::MergedChannels);
+    RunningJob *job = StartTool(JobKind::Size,
+                                QStringList() << "size" << remote + ":" + path
+                                              << includedListFinal,
+                                progressMsg, remote + ":" + path, QString());
 
     ProgressDialog *progress =
-        new ProgressDialog("Get Size", "Running... ", progressMsg, process,
-                           NULL, false, false, toolTip);
+        new ProgressDialog("Get Size", "Running... ", progressMsg, job, NULL,
+                           false, false, toolTip);
 
     progress->expand();
     progress->allowToClose();
@@ -1332,17 +1344,20 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
       QRegularExpression re(R"(^\s*(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)");
 
-      QProcess *process = new QProcess;
-      UseRclonePassword(process);
-      process->setProgram(GetRclone());
-      process->setArguments(QStringList()
-                            << GetRcloneConf() << GetRemoteModeRcloneOptions()
-                            << GetDefaultOptionsList("defaultRcloneOptions")
-                            << e.getOptions());
-      process->setProcessChannelMode(QProcess::MergedChannels);
-
       toolTip =
           "\"" + remote + ":" + pathMsg + "\"" + "\nto " + "\"" + dst + "\"";
+
+      JobDescription description;
+      description.info = QString("Export ") + remote + ":" + pathMsg;
+      description.source = remote + ":" + pathMsg;
+      description.dest = dst;
+
+      RunningJob *job = JobRegistry::instance().start(
+          JobKind::Export,
+          QStringList() << GetRemoteModeRcloneOptions()
+                        << GetDefaultOptionsList("defaultRcloneOptions")
+                        << e.getOptions(),
+          description, QString(), QStringLiteral("export"), QString());
 
       ProgressDialog *progress = new ProgressDialog(
           "Export", "Running... ",
@@ -1351,7 +1366,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
               metrix.elidedText(pathMsg, Qt::ElideMiddle, 500) + "\"" +
               "\nto " + "\"" + metrix.elidedText(dst, Qt::ElideMiddle, 500) +
               "\"",
-          process, NULL, false, false, toolTip);
+          job, NULL, false, false, toolTip);
 
       file->setParent(progress);
 
@@ -1489,27 +1504,35 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
     if (e.exec() == QDialog::Accepted) {
       QString source = e.getSource();
 
-      QProcess *process = new QProcess;
-      UseRclonePassword(process);
-      process->setProgram(GetRclone());
-
-      process->setArguments(QStringList()
-                            << GetRcloneConf() << e.getOptions()
-                            << GetRemoteModeRcloneOptions()
-                            << GetDefaultOptionsList("defaultRcloneOptions"));
-      process->setProcessChannelMode(QProcess::MergedChannels);
-
       QString checkcommand = "Integity check";
       if (!e.isCheck()) {
         checkcommand = "Integrity cryptcheck";
       }
 
-      ProgressDialog *progress = new ProgressDialog(
-          checkcommand, "Running... ",
+      const QString info =
           "rclone " + e.getOptions().join(" ") + " " +
-              GetRemoteModeRcloneOptions().join(" ") + " " +
-              GetDefaultOptionsList("defaultRcloneOptions").join(" "),
-          process, NULL, false);
+          GetRemoteModeRcloneOptions().join(" ") + " " +
+          GetDefaultOptionsList("defaultRcloneOptions").join(" ");
+
+      // Through the registry rather than a process of its own, so this leaves
+      // a history row and a log file and can be stopped from elsewhere -- the
+      // same road every other job takes. The configuration file is added by
+      // RunningJob, which is why it is not listed here.
+      // See docs/LAYER-SPLIT.md block 5.
+      JobDescription description;
+      description.info = info;
+      description.source = e.getSource();
+      description.dest = remote + ":" + path.path();
+
+      RunningJob *job = JobRegistry::instance().start(
+          JobKind::Check,
+          QStringList() << e.getOptions() << GetRemoteModeRcloneOptions()
+                        << GetDefaultOptionsList("defaultRcloneOptions"),
+          description, QString(), QStringLiteral("check"), QString());
+
+      ProgressDialog *progress =
+          new ProgressDialog(checkcommand, "Running... ", info, job, NULL,
+                             false);
 
       progress->expand();
       progress->allowToClose();
@@ -1530,23 +1553,25 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     if (e.exec() == QDialog::Accepted) {
 
-      QProcess *process = new QProcess;
-      UseRclonePassword(process);
-      process->setProgram(GetRclone());
-
-      process->setArguments(QStringList()
-                            << GetRcloneConf() << e.getOptions()
-                            << GetRemoteModeRcloneOptions()
-                            << GetDefaultOptionsList("defaultRcloneOptions"));
-
-      process->setProcessChannelMode(QProcess::MergedChannels);
-
-      ProgressDialog *progress = new ProgressDialog(
-          "rclone dedupe", "Running... ",
+      const QString info =
           "rclone " + e.getOptions().join(" ") + " " +
-              GetRemoteModeRcloneOptions().join(" ") + " " +
-              GetDefaultOptionsList("defaultRcloneOptions").join(" "),
-          process, NULL, false);
+          GetRemoteModeRcloneOptions().join(" ") + " " +
+          GetDefaultOptionsList("defaultRcloneOptions").join(" ");
+
+      JobDescription description;
+      description.info = info;
+      description.source = remote + ":" + path.path();
+      description.dest = description.source;
+
+      RunningJob *job = JobRegistry::instance().start(
+          JobKind::Dedupe,
+          QStringList() << e.getOptions() << GetRemoteModeRcloneOptions()
+                        << GetDefaultOptionsList("defaultRcloneOptions"),
+          description, QString(), QStringLiteral("dedupe"), QString());
+
+      ProgressDialog *progress =
+          new ProgressDialog("rclone dedupe", "Running... ", info, job, NULL,
+                             false);
 
       progress->expand();
       progress->allowToClose();
@@ -1562,21 +1587,17 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     QString toolTip = "\"" + remote + ":" + "\"";
 
-    QProcess *process = new QProcess;
-    UseRclonePassword(process);
-    process->setProgram(GetRclone());
-    process->setArguments(QStringList()
-                          << "about" << GetRcloneConf()
-                          << GetRemoteModeRcloneOptions()
-                          << GetDefaultOptionsList("defaultRcloneOptions")
-                          << remote + ":");
-    process->setProcessChannelMode(QProcess::MergedChannels);
+    const QString info =
+        "rclone about \"" + metrix.elidedText(remote, Qt::ElideMiddle, 150) +
+        ":\"";
+
+    RunningJob *job =
+        StartTool(JobKind::About, QStringList() << "about" << remote + ":",
+                  info, remote + ":", QString());
 
     ProgressDialog *progress = new ProgressDialog(
-        "Get remote Info", "Runnning... ",
-        "rclone about \"" + metrix.elidedText(remote, Qt::ElideMiddle, 150) +
-            ":\"",
-        process, NULL, false, false, toolTip);
+        "Get remote Info", "Runnning... ", info, job, NULL, false, false,
+        toolTip);
 
     progress->expand();
     progress->allowToClose();
@@ -1592,31 +1613,35 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     QString toolTip = "\"" + remote + ":" + "\"";
 
+    // What it does, not just that it cannot be undone. "Cleanup" says
+    // nothing about which files go, and a warning that only says
+    // "irreversible" gives somebody no way to decide -- so the honest answer
+    // is not to run it, which makes the button useless. The wording is
+    // rclone's own, because what happens is the backend's business and
+    // differs between them.
     int button = QMessageBox::question(
         this, "Cleanup",
-        QString("Are you sure you want to cleanup remote: \n\n %1 \n\nThis "
-                "action is irreversible.")
+        QString("Clean up remote %1 ?\n\n"
+                "This empties the trash, or deletes old versions of files, "
+                "depending on what the backend supports. Files removed this "
+                "way cannot be recovered.\n\n"
+                "It does not touch files you can currently see.")
             .arg("\"" + metrix.elidedText(remote, Qt::ElideMiddle, 250) +
                  ":\""),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (button == QMessageBox::Yes) {
 
-      QProcess process;
-      UseRclonePassword(&process);
-      process.setProgram(GetRclone());
-      process.setArguments(QStringList()
-                           << "cleanup" << GetRcloneConf()
-                           << GetRemoteModeRcloneOptions()
-                           << GetDefaultOptionsList("defaultRcloneOptions")
-                           << remote + ":"
-                           << "-vv");
-      process.setProcessChannelMode(QProcess::MergedChannels);
-
-      ProgressDialog progress(
-          "Cleanup", "Runnning... ",
+      const QString info =
           "rclone cleanup \"" +
-              metrix.elidedText(remote, Qt::ElideMiddle, 150) + ":\"",
-          &process, NULL, false, false, toolTip);
+          metrix.elidedText(remote, Qt::ElideMiddle, 150) + ":\"";
+
+      RunningJob *job = StartTool(JobKind::Cleanup,
+                                  QStringList() << "cleanup" << remote + ":"
+                                                << "-vv",
+                                  info, remote + ":", QString());
+
+      ProgressDialog progress("Cleanup", "Runnning... ", info, job, NULL, false,
+                              false, toolTip);
 
       progress.expand();
       progress.allowToClose();
@@ -1792,10 +1817,37 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
   }
 }
 
+// What the backend cannot do is not offered, whatever is selected.
+//
+// Separate from applyCapabilities() because it has to run again on every
+// selection change: those rules turn actions back on for reasons of their
+// own, and a backend's limits are not one of the things they know about.
+void RemoteWidget::applyCapabilityLimits() {
+  if (!mCaps.known) {
+    return;
+  }
+  if (!mCaps.publicLink) {
+    ui.link->setDisabled(true);
+  }
+  if (!mCaps.about) {
+    ui.getInfo->setDisabled(true);
+  }
+  if (!mCaps.cleanUp) {
+    ui.cleanup->setDisabled(true);
+  }
+  if (!mCaps.duplicateFiles) {
+    ui.actionDedupe->setDisabled(true);
+  }
+}
+
 void RemoteWidget::applyCapabilities(const RcloneCapabilities &caps) {
   if (!caps.known) {
     return;
   }
+
+  // Kept, because the selection handler runs constantly and has to be able to
+  // ask again. Reading it once and acting on it once was the bug.
+  mCaps = caps;
 
   ui.link->setEnabled(caps.publicLink);
   ui.getInfo->setEnabled(caps.about);
@@ -1816,6 +1868,8 @@ void RemoteWidget::applyCapabilities(const RcloneCapabilities &caps) {
   if (!caps.cleanUp) {
     ui.cleanup->setStatusTip("This backend has nothing to clean up");
   }
+  applyCapabilityLimits();
+
   if (!caps.duplicateFiles) {
     ui.actionDedupe->setStatusTip(
         "This backend cannot hold duplicate files, so there is nothing to "

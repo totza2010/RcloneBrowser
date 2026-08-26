@@ -1,4 +1,5 @@
 #include "dedupe_dialog.h"
+#include "utils.h"
 
 DedupeDialog::DedupeDialog(const QString &remote, const QDir &path,
                            const QString &remoteType, QWidget *parent)
@@ -79,16 +80,7 @@ QStringList DedupeDialog::getOptions() const {
     list << "rename";
   }
 
-  QString extra = ui.textExtra->text().trimmed();
-  if (!extra.isEmpty()) {
-    QRegularExpression re(R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
-
-    for (QString arg : extra.split(re)) {
-      if (!arg.isEmpty()) {
-        list << arg.replace("\"", "");
-      }
-    }
-  }
+  list << SplitRcloneOptions(ui.textExtra->text());
 
   list << mTarget;
 

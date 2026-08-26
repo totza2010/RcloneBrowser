@@ -21,7 +21,32 @@
 // What kind of thing rclone was asked to do. Mount and stream still run
 // through their own widgets (S10) and are here so the vocabulary is settled
 // before they move.
-enum class JobKind { Transfer, Mount, Stream };
+// Check, Dedupe and Export are the maintenance commands the remote tab
+// offers. They ran as a bare QProcess handed to a ProgressDialog, so they
+// left no history row, wrote no log file, could not be stopped from anywhere
+// else, and could not be started by anything but a click. See
+// docs/LAYER-SPLIT.md block 5.
+enum class JobKind {
+  Transfer,
+  Mount,
+  Stream,
+  // The tools in the remote tab. Each runs one rclone command and shows its
+  // output in the window that asked for it. They ran as a bare QProcess
+  // handed to a ProgressDialog, so they left no history row, wrote no log
+  // file, could not be stopped from anywhere else, and could not be started
+  // by anything but a click.
+  //
+  // Kept apart rather than lumped into one "tool" kind because the history
+  // is read by a person: "cleanup" and "size" are not the same news.
+  Check,
+  Dedupe,
+  Export,
+  Tree,
+  Size,
+  Link,
+  About,
+  Cleanup,
+};
 
 enum class JobState {
   Running,
@@ -30,7 +55,8 @@ enum class JobState {
   Stopped,  // we killed it
 };
 
-// "transfer" | "mount" | "stream". Stored with the run history and reported
+// "transfer" | "mount" | "stream" | "check" | "dedupe" | "export". Stored
+// with the run history and reported
 // by the API, so the words are settled in one place rather than at each site
 // that has to write them down.
 QString JobKindToString(JobKind kind);

@@ -338,15 +338,7 @@ QStringList RemoteFolderDialog::getOptions() {
 
   if (!ui.pte_textExtra->toPlainText().trimmed().isEmpty()) {
     for (auto line : ui.pte_textExtra->toPlainText().trimmed().split('\n')) {
-      if (!line.isEmpty()) {
-
-        QRegularExpression re(R"( (?=[^"]*("[^"]*"[^"]*)*$))");
-        for (QString arg : line.split(re)) {
-          if (!arg.isEmpty()) {
-            args << arg.replace("\"", "");
-          }
-        }
-      }
+      args << SplitRcloneOptions(line);
     }
   }
 

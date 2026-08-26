@@ -45,15 +45,8 @@ static QStringList SplitExtraOptions(const QString &extra) {
     return args;
   }
 
-  static const QRegularExpression unquotedSpace(
-      R"( (?=[^"]*(?:"[^"]*"[^"]*)*$))");
-
   for (const QString &line : extra.split(QLatin1Char('\n'))) {
-    for (QString arg : line.split(unquotedSpace)) {
-      if (!arg.isEmpty()) {
-        args << arg.replace(QLatin1Char('"'), QString());
-      }
-    }
+    args << SplitRcloneOptions(line);
   }
   return args;
 }

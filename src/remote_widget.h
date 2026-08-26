@@ -52,6 +52,15 @@ private:
   // once; does nothing while the capabilities are still unknown.
   void applyCapabilities(const RcloneCapabilities &caps);
 
+  // Re-applies what the backend cannot do, after the selection rules have
+  // had their say. Called on every selection change: those rules enable
+  // actions for reasons of their own and know nothing about backends.
+  void applyCapabilityLimits();
+
+  // What the backend said it can do. Kept rather than acted on once, because
+  // the selection handler has to be able to ask again.
+  RcloneCapabilities mCaps;
+
   ItemModel *model;
   QModelIndex mRootIndex;
 
