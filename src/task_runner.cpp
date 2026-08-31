@@ -6,6 +6,9 @@
 #include "list_of_job_options.h"
 #include "app_settings.h"
 #include "run_history.h"
+#include <QFileInfo>
+#include "running_job.h"
+#include "job_registry.h"
 #include "script_runner.h"
 #include "utils.h"
 
@@ -118,120 +121,81 @@ int runTask(const QString &nameOrId, bool dryRun, QTextStream &out,
   // The same argument list the window would build. Nothing is assembled here
   // -- that is the rule L3 has been breaking (VIO-1) and there is no reason
   // to add another place that does it.
-  const QStringList args = task->getOptions() + GetRcloneConf();
+  //
+  // The configuration file is not appended: RunningJob adds it.
+  const QStringList args = task->getOptions();
 
   out << "task:   " << task->description << "\n"
-      << "rclone: " << RedactArgs(args).join(QLatin1Char(' ')) << "\n\n";
+      << "rclone: "
+      << RedactArgs(args + GetRcloneConf()).join(QLatin1Char(' '))
+      << "\n\n";
   out.flush();
 
-  // A run from cron counts as much as one from the window, and this is the
-  // half of "two processes writing the same history" that has no window at
-  // all. transferMode says which one it was, so a run that went wrong can be
-  // told apart from one somebody watched.
-  JobRunRecord history;
-  history.requestId =
-      QUuid::createUuid().toString(QUuid::WithoutBraces);
-  history.taskId = task->uniqueId.toString(QUuid::WithoutBraces);
-  history.taskName = task->description;
-  history.kind = QStringLiteral("transfer");
-  history.transferMode = QStringLiteral("cli");
-  history.info = task->description;
-  history.source = task->source;
-  history.dest = task->dest;
-  history.startedAt = QDateTime::currentMSecsSinceEpoch();
-  if (!RunHistory::recordStarted(history)) {
-    // Said out loud rather than swallowed: a run that leaves no trace looks
-    // exactly like one that never happened, and this is the path nobody is
-    // watching. The transfer goes ahead either way.
-    err << "warning: this run will not be recorded in the history: "
-        << Database::lastError() << "\n";
-    err.flush();
-  }
-
-  // Whatever happens below, the row must not be left saying "running": that
-  // reading is reserved for a run whose process died without a word.
-  struct Ending {
-    JobRunRecord &record;
-    ~Ending() {
-      if (record.state.isEmpty()) {
-        record.state = QStringLiteral("unknown");
-      }
-      RunHistory::recordFinished(record);
-    }
-  } ending{history};
-
-  QProcess process;
-  process.setProcessChannelMode(QProcess::MergedChannels);
-  UseRclonePassword(&process);
-
-  QEventLoop loop;
-  QObject::connect(&process, &QProcess::readyRead, &process, [&]() {
-    while (process.canReadLine()) {
-      out << QString::fromUtf8(process.readLine());
-    }
-    out.flush();
-  });
-  QObject::connect(&process,
-                   QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                   &loop, &QEventLoop::quit);
-  QObject::connect(&process, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
-
-  process.start(GetRclone(), args, QIODevice::ReadOnly);
-  if (!process.waitForStarted(10000)) {
+  // Checked before starting, because "there is no rclone there" and "rclone
+  // exited 1" are different things to a script reading exit codes, and once
+  // the job has started they both arrive as an exit code.
+  if (!QFileInfo::exists(GetRclone())) {
     err << "could not start rclone: " << GetRclone() << "\n"
-        << process.errorString() << "\n";
-    history.state = QStringLiteral("error");
-    history.exitCode = RcloneUnavailable;
+        << "no such file\n";
     return RcloneUnavailable;
   }
 
-  // The hooks a window would fire through JobRegistry. This path does not go
-  // through JobRegistry at all -- it runs rclone itself -- so the moments
-  // have to be announced here, or "run my script when a transfer starts"
-  // silently means "...as long as a window is open". See
-  // docs/LAYER-SPLIT.md block 1.
+  // Through JobRegistry, the same road the window takes. This used to run
+  // rclone itself and write its own history row, which meant a run from cron
+  // had no figures, could not be stopped from anywhere, and was invisible to
+  // the queue -- two implementations of "run a task", one of them the one
+  // nobody was watching. See docs/LAYER-SPLIT.md.
+  //
+  // transferMode says which one it was, so a run that went wrong can be told
+  // apart from one somebody watched.
+  RunningJob *job = JobRegistry::instance().start(
+      JobKind::Transfer, args,
+      DescribeTask(*task, QStringLiteral("cli"), dryRun),
+      task->uniqueId.toString(), QStringLiteral("cli"), QString());
+
+  QEventLoop loop;
+  QObject::connect(job, &RunningJob::outputLine, &loop,
+                   [&out](const QString &line) {
+                     out << line << "\n";
+                     out.flush();
+                   });
+  QObject::connect(job, &RunningJob::finished, &loop,
+                   [&loop](JobState) { loop.quit(); });
+
+  // The hooks a window would fire. ScriptRunner is not listening in this
+  // mode -- AppCore installs it, and a run that does one thing and exits does
+  // not start the core -- so the moments are announced here, and waited for:
+  // this process is about to end and a script that is not waited for is a
+  // script killed a moment after it starts.
   ScriptRunner::instance().run(ScriptRunner::Reason::TransferStarted, true);
 
-  loop.exec();
-
-  // Whatever is left in the buffer after the process ends: the last lines of
-  // a transfer are usually the ones that say what went wrong.
-  while (process.canReadLine()) {
-    out << QString::fromUtf8(process.readLine());
-  }
-  out << QString::fromUtf8(process.readAll());
-  out.flush();
-
-  if (process.state() != QProcess::NotRunning) {
-    process.kill();
-    process.waitForFinished(5000);
+  // Already over: rclone can refuse in less time than it takes to get here.
+  if (job->isRunning()) {
+    loop.exec();
   }
 
-  if (process.exitStatus() != QProcess::NormalExit) {
-    err << "rclone did not exit normally: " << process.errorString() << "\n";
-    history.state = QStringLiteral("error");
-    history.exitCode = RcloneCrashed;
+  if (!job->everStarted()) {
+    err << "could not start rclone: " << GetRclone() << "\n";
+    return RcloneUnavailable;
+  }
+
+  if (job->crashed()) {
+    err << "rclone did not exit normally\n";
     return RcloneCrashed;
   }
 
-  qCDebug(rbApp) << "headless run finished exit=" << process.exitCode();
-  history.exitCode = process.exitCode();
-  history.state = history.exitCode == 0 ? QStringLiteral("finished")
-                                        : QStringLiteral("error");
+  qCDebug(rbApp) << "headless run finished exit=" << job->exitCode();
 
-  // One task at a time here, so both rules mean the same thing -- but the
-  // log line should still name the one the user chose, or reading it would
+  // One task at a time here, so both rules mean the same thing -- but the log
+  // line should still name the one the user chose, or reading it would
   // suggest a setting that is not in force.
-  //
-  // Waited for, because this process is about to end and a script that is
-  // not waited for is a script killed a moment after it starts.
   ScriptRunner::instance().run(
       AppSettings::runFinishedScriptForEveryTransfer()
           ? ScriptRunner::Reason::TransferFinished
           : ScriptRunner::Reason::LastTransferFinished,
       true);
 
-  return history.exitCode;
+  return job->exitCode();
 }
 
 } // namespace TaskRunner

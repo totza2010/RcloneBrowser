@@ -114,6 +114,13 @@ public:
   QDateTime finishedAt() const { return mFinishedAt; }
   int exitCode() const { return mExitCode; }
 
+  // Whether rclone died rather than exited, and whether it ever started at
+  // all. Both are kept because a caller that reports an exit code has to
+  // tell these apart from rclone's own: "--run-task" documents 69 for an
+  // rclone that would not start and 70 for one that did not exit normally.
+  bool crashed() const { return mCrashed; }
+  bool everStarted() const { return mEverStarted; }
+
   // The log file this job is writing, empty when logging is off or when
   // rclone has not printed anything yet. Only the path is stored in the
   // history; the lines stay in the file. See docs/PLAN.md 6.8.
@@ -183,6 +190,9 @@ private:
   RcClient *mRc = nullptr;
   QString mRcUser;
   QString mRcPass;
+  bool mCrashed = false;
+  bool mEverStarted = false;
+
   JobLogWriter mLog;
 
   QString mMountScript;

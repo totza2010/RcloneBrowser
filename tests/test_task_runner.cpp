@@ -2,6 +2,7 @@
 #include "job_options.h"
 #include "list_of_job_options.h"
 #include "task_runner.h"
+#include "run_history.h"
 #include "utils.h"
 
 #include <QCoreApplication>
@@ -163,6 +164,59 @@ private slots:
     QVERIFY2(outText.contains(QStringLiteral("--dry-run")), qPrintable(outText));
     QVERIFY2(!QFile::exists(QDir(untouched.path()).filePath("hello.txt")),
              "a dry run copied the file anyway");
+  }
+
+  // An rclone that is not there is 69, not rclone's own exit code. A script
+  // that reads exit codes has to be able to tell "your path is wrong" from
+  // "the transfer failed", and once the job has started both arrive the same
+  // way -- which is why this is checked before starting rather than after.
+  void anRcloneThatIsNotThereIsItsOwnExitCode() {
+    QVERIFY(ListOfJobOptions::getInstance()->Persist(makeCopyTask(
+        QStringLiteral("no-rclone-here"), mSource->path(), mDest->path())));
+
+    const QString real = GetRclone();
+    SetRclone(QStringLiteral("no-such-rclone-anywhere"));
+
+    QString outText;
+    QString errText;
+    QTextStream out(&outText);
+    QTextStream err(&errText);
+
+    const int code = TaskRunner::runTask(QStringLiteral("no-rclone-here"),
+                                         true, out, err);
+    SetRclone(real);
+
+    QCOMPARE(code, int(TaskRunner::RcloneUnavailable));
+    QVERIFY2(errText.contains(QStringLiteral("could not start")),
+             qPrintable(errText));
+  }
+
+  // The run goes through JobRegistry now, so it leaves what every other job
+  // leaves: a history row saying it came from the command line. Before this
+  // it wrote its own row and no log file at all.
+  void aRunFromTheCommandLineIsAnOrdinaryJob() {
+    QVERIFY(ListOfJobOptions::getInstance()->Persist(makeCopyTask(
+        QStringLiteral("from-the-cli"), mSource->path(), mDest->path())));
+
+    QString outText;
+    QString errText;
+    QTextStream out(&outText);
+    QTextStream err(&errText);
+
+    QCOMPARE(TaskRunner::runTask(QStringLiteral("from-the-cli"), true, out,
+                                 err),
+             int(TaskRunner::Ok));
+
+    bool found = false;
+    for (const JobRunRecord &row : RunHistory::recent(20)) {
+      if (row.transferMode == QStringLiteral("cli")) {
+        found = true;
+        QCOMPARE(row.kind, QStringLiteral("transfer"));
+        QCOMPARE(row.state, QStringLiteral("finished"));
+        break;
+      }
+    }
+    QVERIFY2(found, "a command-line run left no history row");
   }
 
   void refusesAnUnknownTask() {

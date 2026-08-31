@@ -115,7 +115,8 @@ bool RunningJob::start() {
       mProcess,
       static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
           &QProcess::finished),
-      this, [this](int exitCode, QProcess::ExitStatus) {
+      this, [this](int exitCode, QProcess::ExitStatus status) {
+        mCrashed = status != QProcess::NormalExit;
         handleFinished(exitCode);
       });
 
@@ -144,6 +145,7 @@ bool RunningJob::start() {
   // mProcess can already be null by the time start() returns.
   QProcess *process = mProcess;
   process->start(GetRclone(), mArgs + GetRcloneConf(), QIODevice::ReadOnly);
+  mEverStarted = isRunning();
 
   // Deliberately not waitForStarted(): that spins the event loop, which would
   // let the first lines of output be emitted before the caller has had a
