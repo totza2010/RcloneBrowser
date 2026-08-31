@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "job_options.h"
+#include "app_core.h"
 #include "app_settings.h"
 #include "config_store.h"
 #include "debug_log.h"
@@ -1855,14 +1856,22 @@ MainWindow::MainWindow() {
                      }
                    });
 
+  // And a card for anything already going. AppCore reads the stored queue
+  // before this window exists, so a queue left running has its first job
+  // under way by now -- and a job that started before anyone was listening
+  // would otherwise be running with nothing on screen to show it.
+  for (RunningJob *job : JobRegistry::instance().jobs()) {
+    if (job->isRunning() && job->kind() == JobKind::Transfer) {
+      addJobCard(job);
+    }
+  }
+
   // From here the queue drives itself and the tab is drawn from it.
   QObject::connect(&JobQueue::instance(), &JobQueue::changed, this,
                    [this]() { refreshQueueView(); });
   // The queue emptying is ScriptRunner's to hear, not this window's. It
   // listens to the same signal, so a queue that empties with no window open
   // still runs what the user asked for. See docs/LAYER-SPLIT.md block 1.
-  JobQueue::instance().setDrivesItself(true);
-  ScriptRunner::instance().install();
 
   // remove close button from these tabs
   ui.tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
@@ -1893,11 +1902,9 @@ MainWindow::MainWindow() {
     refreshSchedulerView();
   }
 
-  // Start the one clock. The same five seconds each widget used to wait
-  // before its first look, so a schedule due in the minute the program starts
-  // in behaves as it always has.
-  QTimer::singleShot(5000, Qt::VeryCoarseTimer, this,
-                     &MainWindow::checkSchedules);
+  // The clock, the stored queue and the schedules are AppCore's, started by
+  // main() before this window exists. All that is left here is watching.
+  watchAppCore();
 
   // Whether the queue was left running is the queue's own memory, not a key
   // this window reads for itself.
@@ -3131,11 +3138,9 @@ void MainWindow::closeEvent(QCloseEvent *ev) {
 void MainWindow::restoreSchedulersFromFile() {
   // make sure that tasks are already listed so we can cross check
 
-  // The store reads the file; this only builds a row for each schedule it
+  // AppCore read the file; this only builds a row for each schedule it
   // found. Reading and drawing were the same act before, which is why the
   // schedules could not be listed without a window to list them in.
-  SchedulerStore::instance().load();
-
   for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
     // A scheduler whose task has since been deleted is skipped rather than
     // restored pointing at nothing.
@@ -3181,48 +3186,40 @@ void MainWindow::refreshSchedulerView() {
   ui.labelSchedulerInfoStop->setVisible(!schedulerRunning);
 }
 
-void MainWindow::checkSchedules() {
-  // Ask once, for all of them. What comes back is what the store decided is
-  // due, which already accounts for the scheduler being switched off and for
-  // a minute having fired already.
-  const QList<Schedule> due =
-      SchedulerStore::instance().due(QDateTime::currentDateTime());
-
-  for (const Schedule &schedule : due) {
-    bool found = false;
+// The clock is AppCore's. This redraws the countdown on every card when it
+// ticks, and finds the card a run belongs to when one is fired.
+//
+// Two clocks would each start the schedule that came due, so this window no
+// longer looks for itself. See docs/LAYER-SPLIT.md.
+void MainWindow::watchAppCore() {
+  QObject::connect(&AppCore::instance(), &AppCore::ticked, this, [this]() {
     for (SchedulerWidget *widget : schedulerWidgets()) {
-      if (widget->getSchedulerId() == schedule.id) {
-        widget->startScheduledRun();
-        found = true;
-        break;
-      }
+      widget->refreshNextRun();
     }
-    if (!found) {
-      // The store knows about a schedule the tab does not -- which happens
-      // when its task was deleted, because restoring skips those. Saying so
-      // is better than a run that quietly never happens.
-      qCDebug(rbSched) << "due but not on the tab" << schedule.name
-                       << "task=" << schedule.taskId;
-    }
-  }
+  });
 
-  // The countdown on every card, whether or not anything was due.
-  for (SchedulerWidget *widget : schedulerWidgets()) {
-    widget->refreshNextRun();
-  }
+  QObject::connect(&AppCore::instance(), &AppCore::scheduleFired, this,
+                   [this](const QString &scheduleId, const QString &requestId) {
+                     for (SchedulerWidget *widget : schedulerWidgets()) {
+                       if (widget->getSchedulerId() == scheduleId) {
+                         // The card has to know the id of the run that was
+                         // started, or it will ignore every piece of news
+                         // about it -- see SchedulerWidget::updateTaskStatus.
+                         widget->adoptRun(requestId);
+                         break;
+                       }
+                     }
+                   });
 
-  // On the next full minute, plus a second, so a schedule set for 07:00 is
-  // looked at inside the minute it names rather than on its edge.
-  QDateTime next = QDateTime::currentDateTime();
-  next.setTime(QTime(next.time().hour(), next.time().minute()));
-  next = next.addSecs(60);
-
-  qint64 wait = QDateTime::currentDateTime().msecsTo(next);
-  if (wait < 0) {
-    wait = 0;
-  }
-  QTimer::singleShot(wait + 1000, Qt::VeryCoarseTimer, this,
-                     &MainWindow::checkSchedules);
+  QObject::connect(&AppCore::instance(), &AppCore::scheduleHeld, this,
+                   [this](const QString &scheduleId, const QString &reason) {
+                     for (SchedulerWidget *widget : schedulerWidgets()) {
+                       if (widget->getSchedulerId() == scheduleId) {
+                         widget->showHeld(reason);
+                         break;
+                       }
+                     }
+                   });
 }
 
 QList<SchedulerWidget *> MainWindow::schedulerWidgets() const {
@@ -3328,11 +3325,11 @@ void MainWindow::refreshQueueView() {
 }
 
 void MainWindow::addTasksToQueue() {
-  // Reads the stored queue once. Everything that used to be built here --
-  // the rows, their icons, the "(*Sch)" marker, the tab text -- is drawn by
-  // refreshQueueView() from the queue itself, which is what the load()
-  // below sets off. See docs/QUEUE-MOVE.md block 8.
-  JobQueue::instance().load();
+  // AppCore has already read the stored queue. Everything that used to be
+  // built here -- the rows, their icons, the "(*Sch)" marker, the tab text --
+  // is drawn by refreshQueueView() from the queue itself. See
+  // docs/QUEUE-MOVE.md block 8.
+  refreshQueueView();
 
   // Schedulers still want to know that a run of theirs is waiting.
   for (const QueueEntry &entry : JobQueue::instance().entries()) {
@@ -4235,72 +4232,36 @@ void MainWindow::addScheduler(const QString &taskId, const QString &taskName,
     }
   });
 
+  // The Run button takes the same road as the clock. All of this used to be
+  // written out here -- find the task, mint an id, queue it or start it --
+  // which was a second implementation of "run this schedule", and two of
+  // those is one too many whichever is right today. See
+  // docs/LAYER-SPLIT.md.
   QObject::connect(widget, &SchedulerWidget::runTask, this, [=]() {
     QMutexLocker locker(&mMutex);
     mDoNotSort = true;
-    // when quitting (waiting for unmount) don't start new tasks
+
+    // When quitting -- waiting for mounts to come down -- nothing new starts.
     if (mAppQuittingStatus) {
       qCDebug(rbSched) << "run refused: the application is quitting";
       mDoNotSort = false;
       return;
     }
 
-    const QString taskID = widget->getSchedulerTaskId();
-    const QString requestID = widget->getSchedulerRequestId();
-    const int executionMode = widget->getExecutionMode();
+    QString reason;
+    const QString requestId =
+        AppCore::instance().runNow(widget->getSchedulerId(), &reason);
 
-    // The task is looked up by id rather than by walking the rows of the
-    // task list. A row is how a task is shown; it is not what a task is, and
-    // a schedule has never pointed at one. See docs/SCHEDULER-MOVE.md
-    // block 8.
-    JobOptions *joTask = ListOfJobOptions::getInstance()->find(taskID);
-    if (joTask == nullptr) {
-      // Falling out of the search loop was all this used to do: no message,
-      // no status, nothing the person waiting for the run could see. It
-      // still does not run, but now it says so and the schedule stops
-      // waiting for a run that is never coming.
-      qCDebug(rbSched) << "run refused: no such task task=" << taskID
-                       << "request=" << requestID;
-      widget->updateTaskStatus(requestID, "error");
-      mDoNotSort = false;
-      return;
-    }
-
-    if (executionMode == 0) {
-      // run immediately
-      qCDebug(rbSched) << "starting now task=" << joTask->description
-                       << "request=" << requestID;
-      mRunningSchedulersCount++;
-      refreshSchedulerView();
-
-      runItem(joTask, "scheduler", requestID);
-    }
-
-    if (executionMode == 1) {
-      // If the same task is already waiting, a second run of it would have
-      // two copies writing the same destination. Asked of the queue rather
-      // than of the rows drawn from it.
-      for (const QueueEntry &entry : JobQueue::instance().entries()) {
-        if (entry.taskId == taskID) {
-          qCDebug(rbSched) << "not queued: that task is already waiting task="
-                           << joTask->description << "request=" << requestID;
-          widget->updateTaskStatus(requestID, "task already in the queue");
-          mDoNotSort = false;
-          return;
-        }
-      }
-
-      // The queue takes it from here: it gives the run its id, saves,
-      // redraws and starts it if this is the moment. What stood here was
-      // all of that written out. See docs/QUEUE-MOVE.md block 12.
-      //
-      // The request id is the schedule's, so that a run it asked for can
-      // be matched back to it afterwards.
-      qCDebug(rbSched) << "queueing task=" << joTask->description
-                       << "request=" << requestID;
-      JobQueue::instance().enqueue(taskID, false, requestID);
-
-      widget->updateTaskStatus(requestID, "in the queue");
+    if (requestId.isEmpty()) {
+      // Said out loud, because somebody who has just pressed a button is
+      // owed an answer. The clock's refusals go to the card instead; this
+      // one was asked for.
+      QMessageBox::warning(this, "Warning",
+                           QString("This schedule did not start.\n\n%1.")
+                               .arg(reason));
+      widget->showHeld(reason);
+    } else {
+      widget->adoptRun(requestId);
       mRunningSchedulersCount++;
       refreshSchedulerView();
     }

@@ -476,13 +476,9 @@ void SchedulerWidget::refreshNextRun(void) {
   const QDateTime now = QDateTime::currentDateTime();
   const qint64 diff = mNextRun.secsTo(now);
 
-  // Every tick says so, due or not. "It never ran" is the complaint this has
-  // to answer, and without this line "not due yet" and "nothing is checking
-  // at all" look identical: both are silence. See debug_log.h.
-  qCDebug(rbSched) << "check" << mSchedulerName
-                   << "next=" << mNextRun.toString(Qt::ISODate)
-                   << "in=" << -diff << "s"
-                   << "status=" << mSchedulerStatus;
+  // The heartbeat is AppCore's now. It was written here, which meant it
+  // stopped existing with no window open -- exactly when a stopped clock is
+  // hardest to tell from a quiet one.
 
   // A minute that went by without anyone looking -- the machine was asleep --
   // is not run late. Saying so is the difference between "it is not due yet"
@@ -497,27 +493,27 @@ void SchedulerWidget::refreshNextRun(void) {
   updateInfoFields();
 }
 
-void SchedulerWidget::startScheduledRun(void) {
-  // Whether the schedule is switched on, and whether its minute has come, is
-  // the store's to say -- it said so to get here. What is left is the one
-  // thing only this schedule knows: whether the run it asked for last time
-  // is still going.
-  if (mGlobalStop || mTaskRunning) {
-    qCDebug(rbSched) << "held" << mSchedulerName << "reason="
-                     << (mGlobalStop ? "scheduler stopped"
-                                     : "its task is still running");
-    return;
-  }
-
-  mRequestId = QUuid::createUuid().toString();
+void SchedulerWidget::adoptRun(const QString &requestId) {
+  mRequestId = requestId;
   mManualStart = false;
-  qCDebug(rbSched) << "fired" << mSchedulerName << "request=" << mRequestId
-                   << "mode=" << (mExecutionMode == "1" ? "queue" : "now");
-  emit runTask();
+  mNextRun = nextRun();
+  updateTaskStatus(requestId, QStringLiteral("running"));
+}
 
+void SchedulerWidget::showHeld(const QString &reason) {
+  qCDebug(rbSched) << "held" << mSchedulerName << "reason=" << reason;
+  mLastRun = QDateTime::currentDateTime().toString("ddd, dd/MMM/yyyy HH:mm:ss t");
+  mLastRunFinished = mLastRun;
+  mLastRunStatus = reason;
+  mTaskRunning = false;
   mNextRun = nextRun();
   updateInfoFields();
+  emit save();
 }
+
+// Deciding to run is AppCore's, for the clock and for the button alike. What
+// stood here was a third way of doing it -- mint an id, emit runTask -- and
+// the window then had a fourth. See docs/LAYER-SPLIT.md.
 
 void SchedulerWidget::applyScreenToSettings() {
   mSchedulerName = ui.schedulerName->text();

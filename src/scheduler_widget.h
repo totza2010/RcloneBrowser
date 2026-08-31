@@ -34,16 +34,14 @@ public:
   QString getSchedulerRequestId();
   int getExecutionMode();
 
-  // Asks this schedule to start its run, because something decided its
-  // minute has come. Refused, with a reason in the log, when its own task is
-  // still going from last time -- the one condition that is this schedule's
-  // to know rather than the store's.
-  //
-  // The deciding used to be here: every widget ran a timer of its own and
-  // worked out whether it was due. One clock for all of them means they
-  // cannot disagree, and means the answer exists without a window. See
-  // docs/SCHEDULER-MOVE.md block 7.
-  void startScheduledRun();
+  // Takes on a run AppCore started for this schedule. Without this the card
+  // ignores every piece of news about it: updateTaskStatus() only keeps what
+  // matches the id it is waiting for, and that id was minted elsewhere.
+  void adoptRun(const QString &requestId);
+
+  // Says why a run that was due did not happen. The card showed nothing at
+  // all before, which reads as a clock that has stopped.
+  void showHeld(const QString &reason);
 
   // Redraws "next run" from the current settings. Called on the same tick
   // that looks for due schedules, so the tab keeps counting down.

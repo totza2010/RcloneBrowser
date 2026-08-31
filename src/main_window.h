@@ -192,10 +192,10 @@ private:
   // to walk the layout to find out.
   bool taskIsScheduled(const QString &taskId) const;
 
-  // The one clock. Asks SchedulerStore what is due, starts those, and lets
-  // every schedule redraw its countdown. Every SchedulerWidget used to run a
-  // timer of its own. See docs/SCHEDULER-MOVE.md block 7.
-  void checkSchedules();
+  // Follows AppCore: redraws the countdowns when it ticks, and points a card
+  // at the run that was started for it. The clock itself is AppCore's -- two
+  // clocks would each start the schedule that came due.
+  void watchAppCore();
 
   // Tells every schedule what became of a run, and moves the count of
   // schedules with something going if one of them owns that run.

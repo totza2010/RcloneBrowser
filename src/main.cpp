@@ -1,5 +1,6 @@
 #include "database.h"
 #include "debug_log.h"
+#include "app_core.h"
 #include "main_window.h"
 #include "task_runner.h"
 #include "utils.h"
@@ -82,6 +83,7 @@ struct CommandLine {
   bool listTasks = false;
   bool help = false;
   bool dryRun = false;
+  bool daemon = false;
   QString task;
   QString unknownOption;
 };
@@ -103,6 +105,9 @@ CommandLine ReadCommandLine(int argc, char *argv[]) {
     } else if (arg == QLatin1String("--list-tasks")) {
       cmd.headless = true;
       cmd.listTasks = true;
+    } else if (arg == QLatin1String("--daemon")) {
+      cmd.headless = true;
+      cmd.daemon = true;
     } else if (arg == QLatin1String("--dry-run")) {
       cmd.dryRun = true;
     } else if (arg == QLatin1String("--help") || arg == QLatin1String("-h")) {
@@ -134,6 +139,8 @@ void PrintUsage(QTextStream &out) {
       << "  --run-task <name|id> run one saved task and exit with rclone's "
          "exit code\n"
       << "  --dry-run            with --run-task, pass --dry-run to rclone\n"
+      << "  --daemon             run the queue and the schedules with no "
+         "window\n"
       << "  -h, --help           this text\n"
       << "\n"
       << "Exit codes: rclone's own (1-9) are passed through.\n"
@@ -183,6 +190,26 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
     return TaskRunner::listTasks(out);
   }
 
+  if (cmd.daemon) {
+    SetRclone(GetSettings()->value("Settings/rclone").toString());
+    SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
+
+    // The whole application, with nothing watching it. Every part of this is
+    // the same code the window runs on: the queue keeps itself moving, the
+    // clock looks for schedules that have come due, and the scripts fire at
+    // the moments they are configured for.
+    //
+    // There is no way to ask it to stop yet, and no HTTP on the side -- that
+    // is S11. What this proves is that the parts do not need a window, which
+    // is the thing the layer split was for. See VERIFY.md V-24 item 6.4.
+    AppCore::instance().start();
+
+    out << "rclone-browser running without a window. Ctrl+C to stop.\n";
+    out.flush();
+
+    return app.exec();
+  }
+
   if (cmd.task.isEmpty()) {
     err << "--run-task needs the name or id of a task\n\n";
     PrintUsage(err);
@@ -192,6 +219,10 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
   SetRclone(GetSettings()->value("Settings/rclone").toString());
   SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
 
+  // Deliberately not AppCore::start() here. --run-task does one thing and
+  // exits; starting the clock and the queue would leave a scheduled run half
+  // begun when the process ends a few seconds later. The daemon, when there
+  // is one, is the mode that starts the core and stays.
   return TaskRunner::runTask(cmd.task, cmd.dryRun, out, err);
 }
 
@@ -558,6 +589,11 @@ int main(int argc, char *argv[]) {
     return static_cast<int>(
         0x80004004); // exit immediately if another instance is running
   }
+
+  // Before the window, not inside it. Reading the stored queue and the
+  // schedules and starting the clock is the application running; a window is
+  // one way of watching it. See docs/LAYER-SPLIT.md.
+  AppCore::instance().start();
 
   MainWindow w;
   w.show();
