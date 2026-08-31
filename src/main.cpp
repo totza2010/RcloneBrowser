@@ -1,5 +1,6 @@
 #include "database.h"
 #include "debug_log.h"
+#include "api_server.h"
 #include "app_core.h"
 #include "main_window.h"
 #include "task_runner.h"
@@ -139,8 +140,8 @@ void PrintUsage(QTextStream &out) {
       << "  --run-task <name|id> run one saved task and exit with rclone's "
          "exit code\n"
       << "  --dry-run            with --run-task, pass --dry-run to rclone\n"
-      << "  --daemon             run the queue and the schedules with no "
-         "window\n"
+      << "  --daemon             run the queue, the schedules and the API "
+         "with no window\n"
       << "  -h, --help           this text\n"
       << "\n"
       << "Exit codes: rclone's own (1-9) are passed through.\n"
@@ -198,13 +199,31 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
     // the same code the window runs on: the queue keeps itself moving, the
     // clock looks for schedules that have come due, and the scripts fire at
     // the moments they are configured for.
-    //
-    // There is no way to ask it to stop yet, and no HTTP on the side -- that
-    // is S11. What this proves is that the parts do not need a window, which
-    // is the thing the layer split was for. See VERIFY.md V-24 item 6.4.
     AppCore::instance().start();
 
     out << "rclone-browser running without a window. Ctrl+C to stop.\n";
+
+    // 127.0.0.1 unless somebody deliberately says otherwise, because opening
+    // this to the network is a decision and not a default. See
+    // docs/API.md section 13.
+    const QString address =
+        GetSettings()
+            ->value("Settings/apiAddress", QStringLiteral("127.0.0.1"))
+            .toString();
+    const quint16 port =
+        quint16(GetSettings()->value("Settings/apiPort", 19999).toUInt());
+
+    QString apiError;
+    if (ApiServer::instance().start(address, port, &apiError)) {
+      out << "API on http://" << address << ":"
+          << QString::number(ApiServer::instance().port()) << "/api/v1/\n"
+          << "token: " << ApiServer::token() << "\n";
+    } else {
+      // Said, not swallowed. A daemon whose API quietly did not open looks
+      // exactly like one that is working until something tries to reach it.
+      err << "the API could not start: " << apiError << "\n";
+      err.flush();
+    }
     out.flush();
 
     return app.exec();

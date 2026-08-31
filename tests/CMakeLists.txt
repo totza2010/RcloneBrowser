@@ -35,6 +35,8 @@ rb_add_test(test_rclone_version)
 rb_add_test(test_task_builder)
 rb_add_test(test_directory_listing)
 rb_add_test(test_app_core)
+rb_add_test(test_http_message)
+rb_add_test(test_api_server)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

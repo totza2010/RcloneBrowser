@@ -390,7 +390,7 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S10** | Mounts / Streams | `mount_widget` / `stream_widget` | ชนิดหนึ่งของ `RunningJob` | S2 | M | ✅ **mount เสร็จ** · stream ไม่ย้าย (มีเหตุผล) |
 | **S14** | **Extension เฉพาะ backend** | ยังไม่มี — ความรู้เรื่อง teldrive ไม่มีที่อยู่ | `rbext_teldrive` (โมดูลตอนคอมไพล์) | S13 | M | ⬜ ดู [`PLAN.md` §6.9](PLAN.md) |
 | **S13** | **Store + ประวัติ** | SQLite ไฟล์เดียว (schema v2) | `database.*` · `run_history.*` · `config_store.*` (L1) | S2 | **L** | ✅ เสร็จ — ดู [`PLAN.md` §6.8](PLAN.md) |
-| **S11** | HTTP API | — | `rbapi` (L2) | S1–S6, S10 | L | ⬜ |
+| **S11** | HTTP API | — | `api_server` (L2) | S1–S6, S10 | L | 🟨 อ่านได้แล้ว |
 | **S12** | Web UI | — | static (L3) | S11 | L | ⬜ |
 
 **S7–S9 เสร็จไปแล้วโดยไม่ได้ตั้งใจ** — ทั้งสามเกิดจากงาน P1/เฟส 2 ที่เขียนเป็น L0 ตั้งแต่แรก

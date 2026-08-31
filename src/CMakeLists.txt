@@ -52,6 +52,8 @@ set(CORE_SOURCE
   job_registry.cpp
   job_queue.cpp
   app_core.cpp
+  http_message.cpp
+  api_server.cpp
   remote_registry.cpp
   rclone_version.cpp
   task_builder.cpp
@@ -84,6 +86,8 @@ set(CORE_HEADER
   job_registry.h
   job_queue.h
   app_core.h
+  http_message.h
+  api_server.h
   remote_registry.h
   rclone_version.h
   task_builder.h
