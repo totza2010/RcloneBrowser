@@ -384,8 +384,12 @@ void UseRcCredentials(QProcess *process, const QString &user,
 QStringList RedactArgs(const QStringList &args) {
   // Matches "--rc-pass=secret", "--drive-token=...", "--sftp-key-pem=..." etc.
   // Only the part up to and including '=' is kept.
+  //
+  // "--baseurl" is in the list because of streaming: the path a stream is
+  // served under is the only thing that keeps it private. See
+  // RemoteOps::Stream().
   static const QRegularExpression prefix(
-      R"(^(--[a-z0-9-]*(pass|passw|password|token|secret|key|auth|user)[a-z0-9-]*)=)",
+      R"(^(--[a-z0-9-]*(pass|passw|password|token|secret|key|auth|user|baseurl)[a-z0-9-]*)=)",
       QRegularExpression::CaseInsensitiveOption);
 
   QStringList out;

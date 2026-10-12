@@ -139,6 +139,10 @@ private:
                       const QString &remote, const QString &question);
 
   void openEventStream(QTcpSocket *socket);
+
+  // Passes a request for a stream on to the rclone that is serving it, and
+  // what rclone says back to whoever asked. See RemoteOps::Stream().
+  void relayStream(QTcpSocket *client, const HttpRequest &request);
   void broadcast(const QString &event, const QJsonObject &data);
 
   // Connects to the things worth telling anyone about. Done once, when the

@@ -23,6 +23,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTcpServer>
 #include <QUrl>
 #include <QUuid>
 
@@ -804,6 +805,18 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/app.js", QByteArray())), 200);
     QVERIFY(ask("GET", "/app.css", QByteArray()).contains("text/css"));
 
+    // A remote's picture is asked for by the name of its kind, which is the
+    // one place a name from outside goes into a file name. The pictures
+    // belong to the window and are not in this test's build, so the answer
+    // for a real one is "none here" -- never an error, and never a file.
+    QCOMPARE(statusOf(ask("GET", "/icons/remote/drive.png", QByteArray())), 404);
+    for (const char *path :
+         {"/icons/remote/../../webui/app.js.png", "/icons/remote/..%2Fx.png",
+          "/icons/remote/Drive.png", "/icons/remote/.png",
+          "/icons/remote/a/b.png"}) {
+      QVERIFY2(statusOf(ask("GET", path, QByteArray())) == 404, path);
+    }
+
     // And nothing of this installation came with it -- above all not the
     // token, which a page that asks for one must not already know.
     QVERIFY2(!page.contains(mToken), "the page was served with the token in it");
@@ -1564,6 +1577,184 @@ private slots:
                           mToken)),
              202);
     job->stop();
+  }
+
+  // A stream is an address a player can open with nothing but the address,
+  // so the address carries a secret -- and the secret is nowhere else. It
+  // is an address of this same server: there is no second port to open.
+  void aFileIsStreamedAtAnAddressOnlyItsAskerKnows() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "5000");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/stream", mToken,
+             "{\"path\":\"films/Film [1080p] a.mkv\"}");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QCOMPARE(statusOf(reply), 202);
+    const QJsonObject object = bodyOf(reply).object();
+    // Nothing about a port: that is between this program and rclone.
+    QVERIFY(!object.contains(QStringLiteral("port")));
+
+    const QString path = object.value(QStringLiteral("path")).toString();
+    QVERIFY2(path.startsWith(QStringLiteral("/stream/")), qPrintable(path));
+    QVERIFY2(path.endsWith(QStringLiteral("/Film%20%5B1080p%5D%20a.mkv")),
+             qPrintable(path));
+    const QString secret = path.section(QLatin1Char('/'), 2, 2);
+    QCOMPARE(secret.size(), 32);
+
+    const QString request = object.value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(request);
+    QVERIFY(job != nullptr);
+    QCOMPARE(JobKindToString(job->kind()), QStringLiteral("stream"));
+
+    // rclone listens on this machine alone. It serves the file out of its
+    // folder with the rest of the folder filtered away, the name's own
+    // brackets not left to mean something to the filter.
+    const QString command = job->displayCommand().join(QLatin1Char(' '));
+    QVERIFY2(command.contains(QStringLiteral("serve http fake:films")),
+             qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("--addr 127.0.0.1:")),
+             qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("\\[1080p\\]")),
+             qPrintable(command));
+    // And the secret is not in what is shown of the command.
+    QVERIFY2(!command.contains(secret), qPrintable(command));
+
+    // The job can give the address again, to whoever may see jobs.
+    bool found = false;
+    for (const QJsonValue &value :
+         bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+      const QJsonObject one = value.toObject();
+      if (one.value(QStringLiteral("requestId")).toString() == request) {
+        found = true;
+        QCOMPARE(one.value(QStringLiteral("stream")).toObject()
+                     .value(QStringLiteral("path")).toString(),
+                 path);
+        QVERIFY(!one.value(QStringLiteral("command")).toString().contains(secret));
+      }
+    }
+    QVERIFY(found);
+
+    // Standing in for rclone: something on the port it was given, which
+    // says what it was asked and answers as rclone would to a seek.
+    QTcpServer rclone;
+    QVERIFY(rclone.listen(QHostAddress::LocalHost, job->streamPort()));
+    QByteArray asked;
+    QObject::connect(&rclone, &QTcpServer::newConnection, &rclone, [&]() {
+      QTcpSocket *peer = rclone.nextPendingConnection();
+      QObject::connect(peer, &QTcpSocket::readyRead, peer, [&asked, peer]() {
+        asked += peer->readAll();
+        if (!asked.contains("\r\n\r\n")) {
+          return;
+        }
+        peer->write("HTTP/1.1 206 Partial Content\r\n"
+                    "Content-Type: video/x-matroska\r\n"
+                    "Content-Range: bytes 2-5/10\r\n"
+                    "Content-Length: 4\r\n"
+                    "Connection: close\r\n\r\nFILM");
+        peer->disconnectFromHost();
+      });
+    });
+
+    // Asked for with no token at all, as a player would, and with what a
+    // browser would have sent besides.
+    const QByteArray played = askRaw(
+        "GET " + path.toUtf8() + " HTTP/1.1\r\nHost: localhost\r\n"
+        "Range: bytes=2-5\r\nAuthorization: Bearer " + mToken +
+        "\r\nCookie: rb_session=abc\r\n\r\n");
+    QCOMPARE(statusOf(played), 206);
+    QVERIFY2(played.endsWith("FILM"), played.constData());
+    QVERIFY(played.contains("Content-Range: bytes 2-5/10"));
+
+    // Passed on as it came: the same path, and the seek.
+    QVERIFY2(asked.startsWith("GET " + path.toUtf8() + " HTTP/1.1\r\n"),
+             asked.constData());
+    QVERIFY(asked.toLower().contains("range: bytes=2-5"));
+    // And this API's own secrets were not passed on with it.
+    QVERIFY2(!asked.contains(mToken) && !asked.toLower().contains("cookie"),
+             "rclone was handed the API's credentials");
+
+    // A player that leaves in the middle, which is what every seek is and
+    // what closing a player is. rclone is still sending when it goes. This
+    // took the whole program down once, so what is checked is that there
+    // is still a program afterwards.
+    {
+      QTcpServer endless;
+      QVERIFY(endless.listen(QHostAddress::LocalHost, 0));
+      rclone.close();
+      // The same stream, with a different rclone behind it: one that never
+      // stops sending.
+      job->setStreamAddress(endless.serverPort(), job->streamPath());
+      QObject::connect(&endless, &QTcpServer::newConnection, &endless, [&]() {
+        QTcpSocket *peer = endless.nextPendingConnection();
+        peer->write("HTTP/1.1 200 OK\r\nContent-Length: 1000000000\r\n"
+                    "Connection: close\r\n\r\n");
+        auto *more = new QTimer(peer);
+        QObject::connect(more, &QTimer::timeout, peer, [peer]() {
+          peer->write(QByteArray(256 * 1024, 'x'));
+        });
+        more->start(5);
+      });
+
+      for (int round = 0; round < 3; ++round) {
+        QTcpSocket player;
+        QVERIFY(openConnection(&player));
+        player.write("GET " + path.toUtf8() + " HTTP/1.1\r\nHost: x\r\n\r\n");
+        QByteArray seen;
+        QVERIFY(waitFor(&player, &seen, "xxxxxxxx"));
+        // Gone, without a word, with megabytes still on their way.
+        player.abort();
+        QTest::qWait(150);
+      }
+      QCOMPARE(statusOf(ask("GET", "/api/v1/ping", QByteArray())), 200);
+    }
+
+    // Another secret, or none, is no stream at all.
+    QCOMPARE(statusOf(ask("GET",
+                          "/stream/00000000000000000000000000000000/a.mkv",
+                          QByteArray())),
+             404);
+    QCOMPARE(statusOf(ask("GET", "/stream/", QByteArray())), 404);
+    QCOMPARE(statusOf(ask("GET", "/stream//" + secret.toUtf8(), QByteArray())),
+             404);
+    // Read, never written.
+    QCOMPARE(statusOf(ask("DELETE", path.toUtf8(), QByteArray())), 405);
+
+    // Stopped, the same address is nothing.
+    rclone.close();
+    job->stop();
+    QCOMPARE(statusOf(ask("GET", path.toUtf8(), QByteArray())), 404);
+
+    // A folder is served whole, and any number at once.
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000");
+    const QByteArray folder =
+        send("POST", "/api/v1/remotes/fake/stream", mToken,
+             "{\"path\":\"films\",\"isDir\":true}");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QCOMPARE(statusOf(folder), 202);
+    const QJsonObject whole = bodyOf(folder).object();
+    QVERIFY(whole.value(QStringLiteral("path")).toString().endsWith(
+        QLatin1Char('/')));
+    RunningJob *served = JobRegistry::instance().find(
+        whole.value(QStringLiteral("requestId")).toString());
+    QVERIFY(served != nullptr);
+    QVERIFY(!served->displayCommand().contains(QStringLiteral("--include")));
+
+    // Nothing is listening where that one's rclone should be, which is what
+    // a player sees in the moment before rclone is up: told so, not hung.
+    QCOMPARE(statusOf(ask("GET",
+                          whole.value(QStringLiteral("path")).toString().toUtf8(),
+                          QByteArray())),
+             502);
+    served->stop();
+
+    // Not without a secret, and not of nothing.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/stream", QByteArray(),
+                           "{\"path\":\"films/a.mkv\"}")),
+             401);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/stream", mToken,
+                           "{\"path\":\"\"}")),
+             409);
   }
 
   void aMountNeedsSomewhereToGo() {

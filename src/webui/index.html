@@ -77,19 +77,19 @@
   </div>
 
   <nav id="tabs">
-    <button data-tab="jobs" class="on">Jobs</button>
+    <button data-tab="remotes" class="on">Remotes</button>
+    <button data-tab="jobs">Jobs</button>
     <button data-tab="queue">Queue</button>
     <button data-tab="tasks">Tasks</button>
-    <button data-tab="remotes">Remotes</button>
     <button data-tab="schedules">Schedules</button>
     <button data-tab="history">History</button>
   </nav>
 
   <main>
-    <section id="tab-jobs" class="tab on"></section>
+    <section id="tab-jobs" class="tab"></section>
     <section id="tab-queue" class="tab"></section>
     <section id="tab-tasks" class="tab"></section>
-    <section id="tab-remotes" class="tab">
+    <section id="tab-remotes" class="tab on">
       <div id="remote-list" class="remote-list"></div>
       <div id="browser" class="hidden">
         <div id="remote-info"></div>
@@ -106,6 +106,7 @@
           <button id="remote-tree" class="ghost small">Tree</button>
           <button id="remote-about" class="ghost small">Info</button>
           <button id="remote-mount" class="ghost small">Mount</button>
+          <button id="remote-stream" class="ghost small">Stream</button>
           <button id="remote-check" class="ghost small">Check</button>
           <button id="remote-export" class="ghost small">Export</button>
           <button id="remote-link" class="ghost small" disabled>Link</button>

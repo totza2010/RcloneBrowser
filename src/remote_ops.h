@@ -17,6 +17,7 @@
 // Moved over one at a time. What is here is what has been moved; the rest
 // still lives in remote_widget.cpp and is listed in the plan.
 
+#include <QList>
 #include <QString>
 #include <QStringList>
 
@@ -249,5 +250,32 @@ RunningJob *Upload(const QString &localPath, bool isFolder,
 // Copies a file or folder of a remote into a folder of this machine.
 RunningJob *Download(const Item &what, const QString &localFolder,
                      bool dryRun, QString *why = nullptr);
+
+// ---- streaming ---------------------------------------------------------------
+//
+// The window streams by piping "rclone cat" into a player it starts itself,
+// which only means anything on the machine the window is on. From anywhere
+// else the file has to be given an address a player can open, so this serves
+// it over HTTP ("rclone serve http") for as long as the job runs.
+//
+// rclone listens on this machine alone, on whatever port is free. Nobody
+// outside is meant to reach that port: the API passes requests on to it
+// (ApiServer::relayStream), so a stream is at the same address as everything
+// else and there is no second port to open, publish or put behind a proxy.
+//
+// A player cannot send a header, so the address has to be enough by itself:
+// the file is served under a path made at random for that one stream, which
+// stops meaning anything when the job is stopped. That is a secret in a URL,
+// which the API's own token is never allowed to be -- the difference is that
+// this one opens one file, for one sitting.
+
+// The first part of every stream's path, which is how the API tells a
+// request for a stream from a request for anything else.
+extern const char *const kStreamPrefix; // "/stream/"
+
+// Serves a file, or a folder, of a remote. For a file only that file is
+// served, not the folder it is in. The job says where: streamPath() is the
+// path to ask the API for, streamPort() the port rclone itself is on.
+RunningJob *Stream(const Item &what, QString *why = nullptr);
 
 } // namespace RemoteOps

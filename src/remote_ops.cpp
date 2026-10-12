@@ -2,6 +2,7 @@
 #include "debug_log.h"
 #include "job_options.h"
 #include "job_registry.h"
+#include "running_job.h"
 #include "utils.h"
 
 #include <QDir>
@@ -9,6 +10,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTcpServer>
+#include <QUrl>
 #include <QUuid>
 
 namespace {
@@ -531,6 +533,90 @@ RunningJob *Download(const Item &what, const QString &localFolder, bool dryRun,
                            : localFolder;
   return transferByTask(true, Target(what.remote, from), dest, what.isFolder,
                         dryRun);
+}
+
+const char *const kStreamPrefix = "/stream/";
+
+namespace {
+
+// A name, as a filter pattern that matches that name and nothing else. The
+// characters a pattern gives meaning to are in real file names all the time
+// ("Film [1080p].mkv"), and unescaped they would match something else or
+// nothing.
+QString asPattern(const QString &name) {
+  QString pattern;
+  for (const QChar c : name) {
+    if (QStringLiteral("\\*?[]{}").contains(c)) {
+      pattern += QLatin1Char('\\');
+    }
+    pattern += c;
+  }
+  return pattern;
+}
+
+} // namespace
+
+RunningJob *Stream(const Item &what, QString *why) {
+  const QString path = trimSlashes(what.path);
+  if (path.isEmpty() && !what.isFolder) {
+    if (why != nullptr) {
+      *why = QStringLiteral("choose a file or a folder to stream");
+    }
+    return nullptr;
+  }
+
+  // Any port that is free, found by asking for one and letting it go.
+  quint16 port = 0;
+  {
+    QTcpServer probe;
+    if (probe.listen(QHostAddress::LocalHost, 0)) {
+      port = probe.serverPort();
+    }
+  }
+  if (port == 0) {
+    if (why != nullptr) {
+      *why = QStringLiteral("no port could be found to serve it on");
+    }
+    return nullptr;
+  }
+
+  // What the address has to carry, since a player can carry nothing else.
+  const QString base = QLatin1String(kStreamPrefix) +
+                       QUuid::createUuid().toString(QUuid::Id128);
+
+  // A file is served out of the folder it is in, with everything else in
+  // that folder filtered away.
+  const QString root = what.isFolder ? path : ParentOf(path);
+  const QString name = what.isFolder ? QString() : NameOf(path);
+  const QString source = Target(what.remote, root);
+
+  // rclone is told the same path the API is asked for, so a request can be
+  // passed on exactly as it came.
+  QStringList command{QStringLiteral("serve"), QStringLiteral("http"), source,
+                      QStringLiteral("--addr"),
+                      QStringLiteral("127.0.0.1:%1").arg(port),
+                      QStringLiteral("--baseurl=") + base};
+  if (!what.isFolder) {
+    command << QStringLiteral("--include")
+            << QLatin1Char('/') + asPattern(name);
+  }
+  command << GetRemoteModeRcloneOptions()
+          << GetDefaultOptionsList("defaultRcloneOptions");
+
+  const QString shown = Target(what.remote, path);
+  qCDebug(rbRemote) << "streaming" << shown;
+
+  RunningJob *job = JobRegistry::instance().start(
+      JobKind::Stream, command,
+      JobDescription{QStringLiteral("Stream of %1").arg(shown), shown,
+                     QStringLiteral("a player")},
+      QString(), QStringLiteral("stream"), QUuid::createUuid().toString());
+  if (job != nullptr) {
+    job->setStreamAddress(
+        port, base + QLatin1Char('/') +
+                  QString::fromLatin1(QUrl::toPercentEncoding(name)));
+  }
+  return job;
 }
 
 } // namespace RemoteOps

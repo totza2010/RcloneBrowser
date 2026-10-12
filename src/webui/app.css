@@ -235,6 +235,9 @@ tbody tr:hover { background: var(--panel); }
   text-align: left;
 }
 
+.remote-list button { align-items: center; display: flex; gap: 12px; }
+.remote-icon { flex: none; height: 36px; object-fit: contain; width: 36px; }
+.remote-text { display: block; min-width: 0; }
 .remote-list button.on { border-color: var(--accent); color: var(--accent); }
 .remote-list .type { color: var(--muted); font-size: 12px; display: block; }
 
@@ -481,3 +484,7 @@ input.bad, select.bad { border-color: var(--bad); }
 .flag-add input { margin-top: 0; }
 .flag-row .order { color: var(--muted); font-size: 12px; min-width: 1.4em; text-align: right; }
 .flag-row .aside { color: var(--muted); font-size: 12px; }
+.ghost-link { color: var(--accent); font-size: 13px; margin-left: 6px; }
+#stream-address { font: 12px/1.45 Consolas, "Courier New", monospace; }
+.player { background: #000; border-radius: 4px; max-height: 52vh; width: 100%; }
+#stream-items { max-height: 150px; }

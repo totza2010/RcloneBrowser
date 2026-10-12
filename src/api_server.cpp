@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMimeDatabase>
+#include <QRegularExpression>
 #include <QHostAddress>
 #include <QSharedPointer>
 #include <QJsonArray>
@@ -33,6 +34,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QUrl>
 #include <QUuid>
 
 // The resource is compiled into rbcore, and a static library's resources are
@@ -150,6 +152,15 @@ QJsonObject describe(const RunningJob &job) {
   // never leave this process (docs/ARCHITECTURE.md section 5).
   object.insert(QStringLiteral("command"),
                 job.displayCommand().join(QLatin1Char(' ')));
+
+  // Where a stream can be opened: a path of this same server. The host is
+  // not here: this program does not know by what name whoever is asking
+  // reached it, and they do.
+  if (job.kind() == JobKind::Stream && job.streamPort() != 0) {
+    QJsonObject stream;
+    stream.insert(QStringLiteral("path"), job.streamPath());
+    object.insert(QStringLiteral("stream"), stream);
+  }
 
   const JobStats &stats = job.stats();
   if (stats.valid) {
@@ -1026,6 +1037,31 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     return;
   }
 
+  if (operation == QLatin1String("stream")) {
+    RemoteOps::Item item;
+    item.remote = remote;
+    item.path = path;
+    item.isFolder = given.value(QStringLiteral("isDir")).toBool(false);
+
+    QString why;
+    RunningJob *job = RemoteOps::Stream(item, &why);
+    if (job == nullptr) {
+      refuse(409, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API streaming" << remote << path;
+
+    // Answered now, like a mount: it runs until it is stopped.
+    QJsonObject started;
+    started.insert(QStringLiteral("requestId"), job->requestId());
+    started.insert(QStringLiteral("started"), QStringLiteral("stream"));
+    started.insert(QStringLiteral("source"), job->description().source);
+    started.insert(QStringLiteral("isDir"), item.isFolder);
+    started.insert(QStringLiteral("path"), job->streamPath());
+    socket->write(FormatHttpResponse(202, toJson(started)));
+    return;
+  }
+
   if (operation == QLatin1String("link")) {
     QString why;
     RunningJob *job = RemoteOps::Link(remote, path, &why);
@@ -1105,6 +1141,133 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
          QStringLiteral("no such operation"));
 }
 
+void ApiServer::relayStream(QTcpSocket *client, const HttpRequest &request) {
+  const auto refuse = [client](int status, const QString &why) {
+    client->write(FormatHttpResponse(status, problem(why)));
+  };
+
+  if (request.method != QLatin1String("GET") &&
+      request.method != QLatin1String("HEAD")) {
+    refuse(405, QStringLiteral("a stream is only read"));
+    return;
+  }
+
+  // Which stream: the one whose path begins the way this one does, as far
+  // as the end of the random part. That part is the whole of the permission,
+  // so nothing is said about why when it does not match -- a stream that
+  // has stopped and one that never was are the same answer.
+  const QString prefix = QLatin1String(RemoteOps::kStreamPrefix);
+  const QString secret = request.path.mid(prefix.size())
+                             .section(QLatin1Char('/'), 0, 0);
+  const RunningJob *serving = nullptr;
+  if (secret.size() >= 32) {
+    const QString base = prefix + secret + QLatin1Char('/');
+    for (const RunningJob *job : JobRegistry::instance().jobs()) {
+      if (job->isRunning() && job->kind() == JobKind::Stream &&
+          job->streamPort() != 0 && job->streamPath().startsWith(base)) {
+        serving = job;
+        break;
+      }
+    }
+  }
+  if (serving == nullptr) {
+    refuse(404, QStringLiteral("no such stream"));
+    return;
+  }
+
+  // From here the connection belongs to the stream: read() leaves it alone.
+  client->setProperty("stream", true);
+
+  // The request, written out again. Only what a player needs is carried
+  // across -- above all Range, which is how it seeks -- and never the
+  // Authorization or Cookie a browser may have sent along: rclone has no
+  // use for this API's secrets.
+  QByteArray head = request.method.toUtf8() + ' ' +
+                    QUrl::toPercentEncoding(request.path, "/");
+  if (!request.query.isEmpty()) {
+    head += '?' + request.query.toUtf8();
+  }
+  head += " HTTP/1.1\r\nHost: 127.0.0.1:" +
+          QByteArray::number(serving->streamPort()) + "\r\n";
+  for (const char *name :
+       {"range", "if-range", "if-modified-since", "if-none-match", "accept"}) {
+    const QString value = request.header(QLatin1String(name));
+    if (!value.isEmpty()) {
+      head += QByteArray(name) + ": " + value.toUtf8() + "\r\n";
+    }
+  }
+  // One request to a connection. A player asks again for every seek, and a
+  // connection each is cheap next to working out where one answer ends and
+  // the next begins in bytes that are only being passed along.
+  head += "Connection: close\r\n\r\n";
+
+  // A child of the client's socket, so it goes when that does: a player
+  // that is closed half way through a film stops the reading from rclone.
+  auto *upstream = new QTcpSocket(client);
+  // Held to a megabyte, and the client's side to four below. A film is
+  // bigger than memory; when the player is slower than the remote, what has
+  // not been sent yet has to stay with rclone rather than pile up here.
+  upstream->setReadBufferSize(1 << 20);
+
+  const auto pump = [client, upstream]() {
+    while (upstream->bytesAvailable() > 0 &&
+           client->bytesToWrite() < (4 << 20)) {
+      client->write(upstream->read(64 * 1024));
+    }
+    if (upstream->state() == QAbstractSocket::UnconnectedState &&
+        upstream->bytesAvailable() == 0) {
+      // Everything rclone sent has been handed on; this closes once it has
+      // actually gone.
+      client->disconnectFromHost();
+    }
+  };
+
+  QObject::connect(upstream, &QTcpSocket::connected, upstream,
+                   [upstream, head]() { upstream->write(head); });
+  QObject::connect(upstream, &QTcpSocket::readyRead, upstream, [client, pump]() {
+    client->setProperty("answered", true);
+    pump();
+  });
+  QObject::connect(client, &QTcpSocket::bytesWritten, upstream, pump);
+  QObject::connect(upstream, &QTcpSocket::disconnected, upstream, pump);
+  QObject::connect(
+      upstream, &QTcpSocket::errorOccurred, upstream,
+      [client, upstream](QAbstractSocket::SocketError error) {
+        if (error == QAbstractSocket::RemoteHostClosedError) {
+          return; // the ordinary end of an answer; disconnected deals with it
+        }
+        qCDebug(rbApp) << "a stream could not be reached:"
+                       << upstream->errorString();
+        if (!client->property("answered").toBool()) {
+          // rclone is not up yet -- it takes a moment after the job starts
+          // -- or has gone. Said, so a player shows something.
+          client->write(FormatHttpResponse(
+              502, problem(QStringLiteral(
+                       "the stream is not answering; it may still be "
+                       "starting, or it has stopped"))));
+        }
+        client->disconnectFromHost();
+      });
+
+  // The player going away first is the ordinary case, not the odd one: it
+  // closes the connection every time it seeks, and when it is shut half way
+  // through a film. From that moment nothing above may run again -- the
+  // client's socket is on its way to being deleted, and this one, being its
+  // child, is torn down inside that deletion, where a last "disconnected"
+  // from it would reach for a socket that is already half gone. That is a
+  // crash, and it was one: the first real film played through this took the
+  // program down when the player closed. So every connection from this
+  // socket is cut before anything else, and then it is dropped.
+  QObject::connect(client, &QTcpSocket::disconnected, upstream,
+                   [client, upstream]() {
+                     upstream->disconnect();
+                     QObject::disconnect(client, nullptr, upstream, nullptr);
+                     upstream->abort();
+                   });
+
+  upstream->connectToHost(QHostAddress::LocalHost, serving->streamPort());
+}
+
 void ApiServer::openEventStream(QTcpSocket *socket) {
   socket->setProperty("stream", true);
 
@@ -1172,6 +1335,49 @@ bool ApiServer::serveWebUi(const HttpRequest &request, QByteArray *body,
       {QStringLiteral("/app.css"), QStringLiteral(":/webui/app.css")},
       {QStringLiteral("/app.js"), QStringLiteral(":/webui/app.js")},
   };
+
+  // The pictures the window puts beside each kind of remote, so the page can
+  // show the same ones. They are in the application's resources rather than
+  // the web interface's, so a build without the window has none and says
+  // 404, which a page can live with.
+  //
+  // The one place a name from outside becomes part of a file name, so it is
+  // held to lower-case letters, digits and underscores -- nothing that can
+  // climb out of the folder -- and what is opened is a compiled-in resource,
+  // not a file on disk.
+  static const QString icons = QStringLiteral("/icons/remote/");
+  if (request.path.startsWith(icons) &&
+      request.path.endsWith(QLatin1String(".png"))) {
+    QString name = request.path.mid(icons.size());
+    name.chop(4);
+    static const QRegularExpression plain(QStringLiteral("^[a-z0-9_]{1,40}$"));
+
+    QString found;
+    if (plain.match(name).hasMatch()) {
+      const QString folder = QStringLiteral(":/media/images/remotes_icons/");
+      // A kind there is no picture for gets the one for "unknown", in the
+      // same shade as was asked for.
+      const QString fallback = name.endsWith(QLatin1String("_inv"))
+                                   ? QStringLiteral("unknown_inv")
+                                   : QStringLiteral("unknown");
+      for (const QString &candidate : {name, fallback}) {
+        if (QFile::exists(folder + candidate + QStringLiteral(".png"))) {
+          found = folder + candidate + QStringLiteral(".png");
+          break;
+        }
+      }
+    }
+    QFile picture(found);
+    if (found.isEmpty() || !picture.open(QIODevice::ReadOnly)) {
+      *status = 404;
+      *body = problem(QStringLiteral("no such picture"));
+      return true;
+    }
+    *status = 200;
+    *body = picture.readAll();
+    *contentType = "image/png";
+    return true;
+  }
 
   const QString resource = pages.value(request.path);
   if (resource.isEmpty()) {
@@ -1340,6 +1546,14 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
     socket->write(end < 0 ? response : response.left(end + 4));
   };
 
+  // A stream, which is neither the API nor the page. Answered without a
+  // token because a player has no way to send one; the path itself is what
+  // lets it in. See relayStream().
+  if (request.path.startsWith(QLatin1String(RemoteOps::kStreamPrefix))) {
+    relayStream(socket, request);
+    return;
+  }
+
   // Anything that is not the API is the Web UI's, and is answered without a
   // token -- including its 404s. See serveWebUi().
   if (!asked.path.startsWith(QLatin1String("/api/"))) {
@@ -1421,7 +1635,7 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         QStringLiteral("cleanup"), QStringLiteral("dedupe"),
         QStringLiteral("copy"),    QStringLiteral("move"),
         QStringLiteral("mount"),   QStringLiteral("upload"),
-        QStringLiteral("download")};
+        QStringLiteral("download"), QStringLiteral("stream")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {

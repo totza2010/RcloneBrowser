@@ -105,6 +105,17 @@ public:
   void setMountScript(const QString &script) { mMountScript = script; }
   QString mountScript() const { return mMountScript; }
 
+  // Where a stream is being served: the port, and the path under it that
+  // has to be asked for. Kept with the job so that whoever shows the job can
+  // give the address again -- it cannot be worked out from the command,
+  // which is shown with the secret part of the path taken out.
+  void setStreamAddress(quint16 port, const QString &path) {
+    mStreamPort = port;
+    mStreamPath = path;
+  }
+  quint16 streamPort() const { return mStreamPort; }
+  QString streamPath() const { return mStreamPath; }
+
   // The remote-control port rclone settled on, read from its output. Zero
   // until it is announced, and zero forever when the task set no port.
   QString rcPort() const { return mRcPort; }
@@ -209,6 +220,8 @@ private:
   JobLogWriter mLog;
 
   QString mMountScript;
+  quint16 mStreamPort = 0;
+  QString mStreamPath;
   QProcess *mScriptProcess = nullptr;
   QString mRcPort;
 

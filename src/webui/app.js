@@ -19,7 +19,7 @@ const KEY = "rb.token";
 const THEME_KEY = "rb.theme";
 
 let secret = localStorage.getItem(KEY) || "";
-let tab = "jobs";
+let tab = "remotes";
 let logFor = "";
 let auth = { passwordSet: false, user: "admin" };
 
@@ -88,6 +88,8 @@ function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   const button = $("theme-toggle");
   if (button) button.textContent = theme === "light" ? "Dark" : "Light";
+  // The pictures of the remotes come in two shades, one for each.
+  if ($("remote-list") && state.remotes.length) drawRemotes();
 }
 
 function startTheme() {
@@ -458,6 +460,9 @@ function jobCard(job) {
         (job.dryRun ? '<span class="tag">dry run</span>' : "") +
         '<div class="card-actions">' +
           '<button class="ghost small" data-log="' + esc(job.requestId) + '">Log</button>' +
+          (job.running && job.stream
+            ? '<button class="small" data-stream="' + esc(job.requestId) + '">Play</button>'
+            : "") +
           (job.running
             ? '<button class="danger small" data-stop="' + esc(job.requestId) + '">' +
               (job.kind === "mount" ? "Unmount" : "Stop") + "</button>"
@@ -592,14 +597,28 @@ function drawHistory() {
 
 // ---- remotes and their folders -------------------------------------------
 
+// The picture for a kind of remote: the one the window uses, asked for by
+// the kind's name. The lighter drawing is for a dark page. A kind there is
+// no picture for is answered with the one for "unknown".
+function remoteIcon(type) {
+  const dark = document.documentElement.getAttribute("data-theme") !== "light";
+  const name = String(type || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  return "/icons/remote/" + name + (dark ? "_inv" : "") + ".png";
+}
+
 function drawRemotes() {
   $("remote-list").innerHTML = state.remotes.length
     ? state.remotes.map((r) => (
         '<button data-remote="' + esc(r.name) + '"' +
           (r.name === browsing.remote ? ' class="on"' : "") + ">" +
-          esc(r.name) +
-          '<span class="type">' + esc(r.type) + "</span>" +
-          '<span class="type">' + esc(lastRunLine("↑", r.lastUpload)) + "</span>" +
+          // Hidden if it will not load, rather than shown as a broken frame.
+          '<img class="remote-icon" alt="" src="' + esc(remoteIcon(r.type)) +
+            '" onerror="this.style.display=\'none\'">' +
+          '<span class="remote-text">' +
+            esc(r.name) +
+            '<span class="type">' + esc(r.type) + "</span>" +
+            '<span class="type">' + esc(lastRunLine("↑", r.lastUpload)) + "</span>" +
+          "</span>" +
         "</button>"
       )).join("")
     : '<p class="empty">No remotes. They are configured with rclone itself.</p>';
@@ -841,8 +860,12 @@ function showResult(title, html) {
   $("resultbox").classList.remove("hidden");
 }
 
-$("result-close").addEventListener("click", () =>
-  $("resultbox").classList.add("hidden"));
+// Emptied as well as hidden: a film left in a hidden box goes on playing.
+function closeResult() {
+  $("resultbox").classList.add("hidden");
+  $("result-body").innerHTML = "";
+}
+$("result-close").addEventListener("click", closeResult);
 
 function figures(rows) {
   return "<dl>" + rows.map((r) =>
@@ -2007,6 +2030,191 @@ $("remote-mount").addEventListener("click", () => {
   });
 });
 
+// ---- streaming --------------------------------------------------------------
+//
+// A file of a remote, played here or given an address a player can open.
+// The address is one of this same server's, so wherever the page can be
+// reached the stream can be, with no second port to open.
+
+const streamUrl = (path) => location.origin + path;
+
+const MEDIA = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|wmv|flv|mpg|mpeg|mp3|flac|m4a|aac|ogg|opus|wav)$/i;
+
+function saveText(name, text, type) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([text], { type: type }));
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// A playlist: what a player opens when it is handed a file rather than an
+// address. Opening the .m3u starts whatever plays media on that machine.
+function playlist(items) {
+  return "#EXTM3U\n" + items.map((item) =>
+    "#EXTINF:-1," + item.name + "\n" + item.url + "\n").join("");
+}
+
+// The player. `items` is what there is to play -- one file, or the media of
+// a folder -- and `requestId` is the job, so it can be stopped from here.
+function showStream(title, items, requestId) {
+  if (!items.length) {
+    showResult("Streaming " + title, '<p class="muted">There are no files in this folder to play.</p>');
+    return;
+  }
+
+  showResult("Streaming " + title,
+    '<video id="stream-player" class="player" controls autoplay playsinline></video>' +
+    '<p id="stream-cannot" class="error"></p>' +
+    (items.length > 1
+      ? '<div id="stream-items" class="pick-list">' + items.map((item, i) =>
+          '<button type="button" data-play="' + i + '">' + esc(item.name) + "</button>").join("") + "</div>"
+      : "") +
+    '<p class="muted">Or in a player of your own — in VLC: Media → Open Network ' +
+    "Stream. The address works until the stream is stopped, and anyone who " +
+    "has it can play this while it does.</p>" +
+    '<p><input id="stream-address" type="text" readonly></p>' +
+    '<p><button id="stream-copy" class="ghost small">Copy address</button> ' +
+      '<button id="stream-m3u" class="ghost small">Download .m3u</button> ' +
+      '<button id="stream-stop" class="danger small">Stop the stream</button></p>');
+
+  const player = $("stream-player");
+  let now = 0;
+
+  const play = (index) => {
+    now = index;
+    $("stream-cannot").textContent = "";
+    $("stream-address").value = items[index].url;
+    player.src = items[index].url;
+    player.play().catch(() => { /* autoplay refused; the controls are there */ });
+    const list = $("stream-items");
+    if (list) {
+      for (const b of list.querySelectorAll("button")) {
+        b.classList.toggle("on", Number(b.dataset.play) === index);
+      }
+    }
+  };
+
+  // A browser plays what it has a decoder for, which is less than a player
+  // does: MP4 and WebM nearly always, MKV sometimes, and the sound of some
+  // films not at all. Said, with what to do about it, rather than left as a
+  // black box.
+  player.addEventListener("error", () => {
+    $("stream-cannot").textContent =
+      "This browser cannot play this file. It is still being served — open the address below in VLC or another player.";
+  });
+  player.addEventListener("ended", () => {
+    if (now + 1 < items.length) play(now + 1);
+  });
+  if ($("stream-items")) {
+    $("stream-items").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-play]");
+      if (button) {
+        event.stopPropagation();
+        play(Number(button.dataset.play));
+      }
+    });
+  }
+
+  $("stream-address").addEventListener("focus", (e) => e.target.select());
+  $("stream-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("stream-address").value);
+      toast("address copied");
+    } catch (e) {
+      // No clipboard without HTTPS on anything but this machine itself.
+      $("stream-address").focus();
+      toast("select the address and copy it — this browser will not do it for a page served this way");
+    }
+  });
+  $("stream-m3u").addEventListener("click", () =>
+    saveText(title.replace(/[\\/:*?"<>|]+/g, "_") + ".m3u", playlist(items), "audio/x-mpegurl"));
+  $("stream-stop").addEventListener("click", async () => {
+    if (await command("POST", "/jobs/" + encodeURIComponent(requestId) + "/stop")) {
+      closeResult();
+      toast("stream stopped");
+      refresh();
+    }
+  });
+
+  play(0);
+}
+
+// What a folder's stream holds: the media in it, or failing any, every
+// file. Read from the same listing the page shows.
+async function streamItems(remote, folder, path) {
+  let answer;
+  try {
+    answer = await api("GET", "/remotes/" + encodeURIComponent(remote) +
+                       "/ls?path=" + encodeURIComponent(folder));
+  } catch (e) {
+    return [];
+  }
+  if (answer.status !== 200) return [];
+  const files = (answer.data.entries || []).filter((e) => !e.isDir)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const media = files.filter((e) => MEDIA.test(e.name));
+  return (media.length ? media : files).map((e) => ({
+    name: e.name,
+    url: streamUrl(path + encodeURIComponent(e.name)),
+  }));
+}
+
+// rclone takes a moment to come up after the job starts, and a player that
+// asks before then is told the stream is not answering. So the page waits
+// until it is, for a few seconds, before it hands the address to anything.
+async function streamReady(path) {
+  for (let tries = 0; tries < 30; ++tries) {
+    try {
+      const answer = await fetch(path, { method: "HEAD" });
+      if (answer.status !== 502) return;
+    } catch (e) { /* tried again */ }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
+$("remote-stream").addEventListener("click", async () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  const remote = browsing.remote;
+  const path = entry ? entry.path : browsing.path;
+  const isDir = entry ? entry.isDir : true;
+
+  let answer;
+  try {
+    answer = await api("POST", remoteUrl("stream"), { path: path, isDir: isDir });
+  } catch (e) {
+    toast("could not reach the daemon");
+    return;
+  }
+  if (answer.status !== 202) {
+    toast(reasonFrom(answer));
+    return;
+  }
+  const started = answer.data;
+  toast("starting the stream…");
+  refresh();
+  await streamReady(started.path);
+
+  const items = isDir
+    ? await streamItems(remote, path, started.path)
+    : [{ name: entry.name, url: streamUrl(started.path) }];
+  showStream(remote + ":" + path, items, started.requestId);
+});
+
+// From a stream's card: the player again.
+async function reopenStream(requestId) {
+  const job = state.jobs.find((j) => j.requestId === requestId);
+  if (!job || !job.stream) return;
+  const at = job.source.indexOf(":");
+  const folder = job.stream.path.endsWith("/");
+  const items = folder
+    ? await streamItems(job.source.slice(0, at), job.source.slice(at + 1), job.stream.path)
+    : [{ name: job.source.slice(at + 1).split("/").pop(), url: streamUrl(job.stream.path) }];
+  showStream(job.source, items, requestId);
+}
+
 // ---- comparing two folders, and saving a listing --------------------------
 
 $("remote-check").addEventListener("click", async () => {
@@ -2216,6 +2424,7 @@ document.addEventListener("click", async (event) => {
   const task = (id, suffix) => "/tasks/" + encodeURIComponent(id) + suffix;
 
   if (d.log) return openLog(d.log);
+  if (d.stream) return reopenStream(d.stream);
   if (d.remote) return browse(d.remote, "");
   if (d.go !== undefined) return browse(browsing.remote, d.go);
 
