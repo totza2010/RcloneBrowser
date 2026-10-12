@@ -6,6 +6,7 @@
 #include "task_runner.h"
 #include "utils.h"
 
+#include <QLockFile>
 #include <QTextStream>
 
 #ifdef Q_OS_WIN
@@ -146,7 +147,67 @@ void PrintUsage(QTextStream &out) {
       << "\n"
       << "Exit codes: rclone's own (1-9) are passed through.\n"
       << "  64 usage   65 no such task   66 ambiguous name\n"
-      << "  69 rclone would not start   70 rclone did not exit normally\n";
+      << "  69 rclone would not start   70 rclone did not exit normally\n"
+      << "  75 already running (--daemon)\n";
+}
+
+// Where the one-instance lock lives.
+//
+// One function, because the window and the daemon have to be reaching for the
+// same file. They did not: only the window took a lock at all, so a daemon and
+// a window could run side by side -- two clocks and two queues over one
+// database, and a schedule that came due started twice.
+QString InstanceLockPath() {
+  QString dir = QDir::tempPath();
+  if (IsPortableMode()) {
+#if defined(Q_OS_WIN)
+    dir = QCoreApplication::applicationDirPath();
+#elif defined(Q_OS_MACOS)
+    dir = QDir(QCoreApplication::applicationDirPath() + "/../../..")
+              .absolutePath();
+#else
+    dir = QString::fromLocal8Bit(qgetenv("XDG_CONFIG_HOME")) +
+          "/rclone-browser";
+#endif
+  }
+
+  // Per user, so two people on one machine each get their own.
+  QString user = qEnvironmentVariable("USERNAME");
+  if (user.isEmpty()) {
+    user = qEnvironmentVariable("USER");
+  }
+  return dir + "/." + user + "RcloneBrowser_4q6RgLs2RpbJA.lock";
+}
+
+// Opens the API and the page it serves. The same call whether or not there
+// is a window, because the page is a view of the core and so is the window:
+// neither of them is what does the work, and either can be absent.
+//
+// Returns the address to open, or an empty string with *error saying why.
+QString StartApi(QString *error) {
+  if (!GetSettings()->value("Settings/apiEnabled", true).toBool()) {
+    if (error != nullptr) {
+      *error = QStringLiteral("it is switched off (Settings/apiEnabled)");
+    }
+    return QString();
+  }
+
+  // 127.0.0.1 unless somebody deliberately says otherwise, because opening
+  // this to the network is a decision and not a default. See
+  // docs/API.md section 13.
+  const QString address =
+      GetSettings()
+          ->value("Settings/apiAddress", QStringLiteral("127.0.0.1"))
+          .toString();
+  const quint16 port =
+      quint16(GetSettings()->value("Settings/apiPort", 19999).toUInt());
+
+  if (!ApiServer::instance().start(address, port, error)) {
+    return QString();
+  }
+  return QStringLiteral("http://%1:%2/")
+      .arg(address)
+      .arg(ApiServer::instance().port());
 }
 
 // Everything the headless path needs that the window would otherwise set up.
@@ -192,8 +253,14 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
   }
 
   if (cmd.daemon) {
-    SetRclone(GetSettings()->value("Settings/rclone").toString());
-    SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
+    // The same lock the window takes. Held for as long as this runs.
+    QLockFile lockFile(InstanceLockPath());
+    if (!lockFile.tryLock(100)) {
+      err << "rclone-browser is already running -- as a window or as another "
+             "daemon.\nOnly one may run at a time: two would each start the "
+             "same schedule.\n";
+      return TaskRunner::AlreadyRunning;
+    }
 
     // The whole application, with nothing watching it. Every part of this is
     // the same code the window runs on: the queue keeps itself moving, the
@@ -203,20 +270,11 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
 
     out << "rclone-browser running without a window. Ctrl+C to stop.\n";
 
-    // 127.0.0.1 unless somebody deliberately says otherwise, because opening
-    // this to the network is a decision and not a default. See
-    // docs/API.md section 13.
-    const QString address =
-        GetSettings()
-            ->value("Settings/apiAddress", QStringLiteral("127.0.0.1"))
-            .toString();
-    const quint16 port =
-        quint16(GetSettings()->value("Settings/apiPort", 19999).toUInt());
-
     QString apiError;
-    if (ApiServer::instance().start(address, port, &apiError)) {
-      out << "API on http://" << address << ":"
-          << QString::number(ApiServer::instance().port()) << "/api/v1/\n"
+    const QString url = StartApi(&apiError);
+    if (!url.isEmpty()) {
+      out << "web interface on " << url << "\n"
+          << "API on " << url << "api/v1/\n"
           << "token: " << ApiServer::token() << "\n";
     } else {
       // Said, not swallowed. A daemon whose API quietly did not open looks
@@ -594,16 +652,18 @@ int main(int argc, char *argv[]) {
 
   // qDebug() << QString("main.cpp tmpDir:  " + tmpDir);
 
-  // not most elegant as fixed name but in reality not big deal
-  char* lockLocalUserName = std::getenv("USER");
-  QLockFile lockFile(tmpDir + "/." + lockLocalUserName + "RcloneBrowser_4q6RgLs2RpbJA.lock");
+  // The same file the daemon locks. See InstanceLockPath().
+  QLockFile lockFile(InstanceLockPath());
 
   if (!lockFile.tryLock(100)) {
     // if already running display warning and quit
     QMessageBox msgBox;
     msgBox.setIcon(QMessageBox::Warning);
-    msgBox.setText("Rclone Browser is already running."
-                   "\r\n\nOnly one instance is allowed.");
+    msgBox.setText("Rclone Browser is already running -- as a window, or "
+                   "in the background as a daemon."
+                   "\r\n\nOnly one may run at a time. If it is running in "
+                   "the background, its web interface is the way to reach "
+                   "it.");
     msgBox.exec();
     return static_cast<int>(
         0x80004004); // exit immediately if another instance is running
@@ -613,6 +673,15 @@ int main(int argc, char *argv[]) {
   // schedules and starting the clock is the application running; a window is
   // one way of watching it. See docs/LAYER-SPLIT.md.
   AppCore::instance().start();
+
+  // And the page, beside the window. Both are views of the core just
+  // started: what one does the other sees, because neither is where anything
+  // happens. A failure here is not a reason to refuse to open -- the window
+  // works without it -- but it is said, in the log and in the Help menu.
+  QString apiError;
+  if (StartApi(&apiError).isEmpty()) {
+    qCDebug(rbApp) << "the web interface is not available:" << apiError;
+  }
 
   MainWindow w;
   w.show();

@@ -25,6 +25,7 @@ enum ExitCode {
   AmbiguousName = 66,     // several tasks share that name
   RcloneUnavailable = 69, // rclone could not be started at all
   RcloneCrashed = 70,     // rclone died on a signal rather than exiting
+  AlreadyRunning = 75, // --daemon while a window or daemon runs
 };
 
 // Prints every saved task as "<id>  <name>", which is what makes runTask()

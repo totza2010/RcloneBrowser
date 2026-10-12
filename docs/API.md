@@ -380,9 +380,9 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 |---|---|---|---|---|---|---|
 | **S1** | Task store | `ListOfJobOptions` + `ui.tasksListWidget` | `TaskStore` (L1) | — | M | ✅ **เสร็จ** — ส่งมอบ E1 |
 | **S2** | Job registry | `ui.jobs` + `JobWidget` ถือ `QProcess` | `JobRegistry` + `RunningJob` (L1) | S1 | **L** | 🟡 **transfer เสร็จ** · mount/stream = S10 |
-| **S3** | Queue | `ui.queueListWidget` | `JobQueue` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
-| **S4** | Scheduler store | `ui.schedulers` + `scheduler.conf` (comma+b64) | `SchedulerStore` (L1) | S1, S2 | M | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
-| **S5** | Remote registry | `ui.remotes` | `RemoteRegistry` (L1) | — | S | 🟡 เครื่องยนต์เสร็จ · หน้าต่างยังไม่เรียก |
+| **S3** | Queue | `ui.queueListWidget` | `JobQueue` (L1) | S1, S2 | M | ✅ เสร็จ — หน้าต่างและหน้าเว็บอ่านจากตัวนี้ |
+| **S4** | Scheduler store | `ui.schedulers` + `scheduler.conf` (comma+b64) | `SchedulerStore` (L1) | S1, S2 | M | ✅ เสร็จ — หน้าต่างและหน้าเว็บอ่านจากตัวนี้ |
+| **S5** | Remote registry | `ui.remotes` | `RemoteRegistry` (L1) | — | S | ✅ เสร็จ — หน้าต่างและหน้าเว็บอ่านจากตัวนี้ |
 | **S6** | Settings | `QSettings` เรียกตรงทุกที่ | `AppSettings` (L1) | — | S | 🟡 ส่วนที่ core ใช้เสร็จ · ส่วนที่เป็นหน้าตายังอยู่ที่เดิม |
 | **S7** | Job logs | `job_log.*` (L0) | — | — | — | ✅ **มีแล้ว** |
 | **S8** | Capabilities | `rclone_capabilities.*` (L0) | — | — | — | ✅ **มีแล้ว** |
@@ -391,7 +391,7 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S14** | **Extension เฉพาะ backend** | ยังไม่มี — ความรู้เรื่อง teldrive ไม่มีที่อยู่ | `rbext_teldrive` (โมดูลตอนคอมไพล์) | S13 | M | ⬜ ดู [`PLAN.md` §6.9](PLAN.md) |
 | **S13** | **Store + ประวัติ** | SQLite ไฟล์เดียว (schema v2) | `database.*` · `run_history.*` · `config_store.*` (L1) | S2 | **L** | ✅ เสร็จ — ดู [`PLAN.md` §6.8](PLAN.md) |
 | **S11** | HTTP API | — | `api_server` (L2) | S1–S6, S10 | L | 🟨 อ่าน + สั่ง + events |
-| **S12** | Web UI | — | `webui.qrc` (L3) | S11 | L | 🟨 หน้าแรกใช้ได้ |
+| **S12** | Web UI | — | `webui.qrc` (L3) | S11 | L | 🟨 ใช้ได้ทั้งคู่กับหน้าต่างและแบบ daemon · ดู [`WEB-UI.md`](WEB-UI.md) |
 
 **S7–S9 เสร็จไปแล้วโดยไม่ได้ตั้งใจ** — ทั้งสามเกิดจากงาน P1/เฟส 2 ที่เขียนเป็น L0 ตั้งแต่แรก
 ซึ่งเป็นหลักฐานว่าวิธี "เจอ core ก็แยกเลยถ้าต้นทุนไม่เกินครึ่งชั่วโมง" ได้ผลจริง

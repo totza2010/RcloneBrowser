@@ -1180,6 +1180,15 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       object.insert(QStringLiteral("state"), row.state);
       object.insert(QStringLiteral("exitCode"), row.exitCode);
       object.insert(QStringLiteral("bytes"), double(row.bytes));
+
+      // When, as well as what. A history that does not say when is a list
+      // of things that happened at some point.
+      const auto stamp = [](qint64 ms) {
+        return ms > 0 ? QDateTime::fromMSecsSinceEpoch(ms).toString(Qt::ISODate)
+                      : QString();
+      };
+      object.insert(QStringLiteral("startedAt"), stamp(row.startedAt));
+      object.insert(QStringLiteral("finishedAt"), stamp(row.finishedAt));
       array.append(object);
     }
     *body = toJson(array);

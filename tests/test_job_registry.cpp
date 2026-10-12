@@ -328,6 +328,35 @@ private slots:
     registry.forget(job);
     QVERIFY(registry.find(QStringLiteral("{forget-request}")) == nullptr);
   }
+
+  // An id belongs to one run. The window passed one literal placeholder for
+  // every run started from its task list, and the history keeps one row per
+  // id -- so each run overwrote the last and kept the date of the first.
+  // Stopping a transfer by hand left nothing in the history that anybody
+  // could find.
+  void twoRunsGivenTheSameIdDoNotShareOne() {
+    const QString shared = QStringLiteral("the-same-word-every-time");
+
+    RunningJob *first = JobRegistry::instance().start(
+        JobKind::Transfer, QStringList{QStringLiteral("version")},
+        JobDescription{}, QString(), QStringLiteral("task"), shared);
+    RunningJob *second = JobRegistry::instance().start(
+        JobKind::Transfer, QStringList{QStringLiteral("version")},
+        JobDescription{}, QString(), QStringLiteral("task"), shared);
+
+    QVERIFY(first != nullptr && second != nullptr);
+    QCOMPARE(first->requestId(), shared);
+    QVERIFY2(second->requestId() != shared,
+             "two runs were filed under one id, so one history row");
+    QVERIFY(!second->requestId().isEmpty());
+
+    // And both left a row of their own.
+    QVERIFY(!RunHistory::find(first->requestId()).requestId.isEmpty());
+    QVERIFY(!RunHistory::find(second->requestId()).requestId.isEmpty());
+
+    first->stop();
+    second->stop();
+  }
 };
 
 QTEST_GUILESS_MAIN(TestJobRegistry)

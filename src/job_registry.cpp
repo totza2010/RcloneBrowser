@@ -163,8 +163,19 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
   // job runs perfectly and simply never appears in the history. That is
   // exactly what happened when check, dedupe and export were first moved
   // here. See docs/LAYER-SPLIT.md block 5.
-  const QString id =
+  QString id =
       requestId.isEmpty() ? QUuid::createUuid().toString() : requestId;
+
+  // And an id is one run's. Three callers in the window passed the same
+  // literal placeholder for every run, so every one of them was written over
+  // the same history row. Those callers are fixed, but the rule belongs here
+  // for the same reason the minting does: a caller that can get it wrong
+  // will, and the result is silent.
+  if (find(id) != nullptr) {
+    qCDebug(rbJob) << "request id" << id
+                   << "is already a job's; giving this run its own";
+    id = QUuid::createUuid().toString();
+  }
 
   auto *job =
       new RunningJob(kind, args, description, taskId, transferMode, id, this);

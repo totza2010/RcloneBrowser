@@ -454,9 +454,17 @@ function jobCard(job) {
   );
 }
 
+// Running first, then the newest. The daemon hands jobs over in the order
+// they were started and a live event put a new one at the top, so the same
+// list came out in two different orders depending on how it had arrived.
+function jobOrder(a, b) {
+  if (a.running !== b.running) return a.running ? -1 : 1;
+  return String(b.startedAt || "").localeCompare(String(a.startedAt || ""));
+}
+
 function drawJobs() {
   $("tab-jobs").innerHTML = state.jobs.length
-    ? state.jobs.map(jobCard).join("")
+    ? state.jobs.slice().sort(jobOrder).map(jobCard).join("")
     : '<p class="empty">Nothing is running.</p>';
 }
 
@@ -523,13 +531,21 @@ function drawSchedules() {
     : '<p class="empty">No schedules.</p>';
 }
 
+function duration(row) {
+  if (!row.startedAt || !row.finishedAt) return "";
+  const took = (new Date(row.finishedAt) - new Date(row.startedAt)) / 1000;
+  return isNaN(took) || took < 0 ? "" : seconds(took);
+}
+
 function drawHistory() {
   const rows = state.history.map((row) => (
     "<tr>" +
+      "<td>" + esc(when(row.startedAt)) + "</td>" +
       "<td>" + esc(row.taskName || row.kind) + "</td>" +
       "<td>" + esc(row.kind) + "</td>" +
       "<td>" + esc(row.startedBy) + "</td>" +
       '<td><span class="tag ' + esc(row.state) + '">' + esc(row.state) + "</span></td>" +
+      "<td>" + esc(duration(row)) + "</td>" +
       "<td>" + bytes(row.bytes) + "</td>" +
       '<td style="text-align:right">' +
         '<button class="ghost small" data-log="' + esc(row.requestId) + '">Log</button>' +
@@ -538,7 +554,7 @@ function drawHistory() {
   ));
 
   $("tab-history").innerHTML = rows.length
-    ? "<table><thead><tr><th>Task</th><th>Kind</th><th>Started by</th><th>Result</th><th>Bytes</th><th></th></tr></thead><tbody>" +
+    ? "<table><thead><tr><th>Started</th><th>Task</th><th>Kind</th><th>Started by</th><th>Result</th><th>Took</th><th>Bytes</th><th></th></tr></thead><tbody>" +
       rows.join("") + "</tbody></table>"
     : '<p class="empty">Nothing has run yet.</p>';
 }

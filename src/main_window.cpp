@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "api_server.h"
 #include "job_options.h"
 #include "app_core.h"
 #include "app_settings.h"
@@ -31,6 +32,7 @@
 #include "osx_helper.h"
 #endif
 #include "file_dialog.h"
+#include <QClipboard>
 #include <QStyleFactory>
 #include <QInputDialog>
 #if defined(Q_OS_WIN)
@@ -705,6 +707,52 @@ MainWindow::MainWindow() {
     close();
   });
 
+  // The page that shows what this window shows. Offered here because the
+  // address and the token are otherwise printed only by the daemon, and a
+  // window prints nothing.
+  auto *openWeb = new QAction(tr("Open &web interface..."), this);
+  ui.menuHelp->insertAction(ui.openLogFolder, openWeb);
+  QObject::connect(openWeb, &QAction::triggered, this, [=]() {
+    if (!ApiServer::instance().isListening()) {
+      // Said, with the two usual reasons, rather than opening a browser at
+      // an address nothing is listening on.
+      QMessageBox::information(
+          this, "Rclone Browser",
+          "The web interface is not running.\n\nEither it is switched off "
+          "(Settings/apiEnabled), or its port was already in use when the "
+          "program started. The log says which.");
+      return;
+    }
+
+    const QString url =
+        QStringLiteral("http://%1:%2/")
+            .arg(GetSettings()
+                     ->value("Settings/apiAddress",
+                             QStringLiteral("127.0.0.1"))
+                     .toString())
+            .arg(ApiServer::instance().port());
+
+    QMessageBox box(this);
+    box.setWindowTitle("Rclone Browser");
+    box.setIcon(QMessageBox::Information);
+    box.setText(QString("The web interface is at\n%1").arg(url));
+    box.setInformativeText(
+        "It asks for the administrator password if one has been set, and "
+        "for the token otherwise.");
+    QPushButton *open = box.addButton(tr("Open in browser"),
+                                      QMessageBox::AcceptRole);
+    QPushButton *copy = box.addButton(tr("Copy token"),
+                                      QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+
+    if (box.clickedButton() == open) {
+      QDesktopServices::openUrl(QUrl(url));
+    } else if (box.clickedButton() == copy) {
+      QGuiApplication::clipboard()->setText(ApiServer::token());
+    }
+  });
+
   QObject::connect(ui.openLogFolder, &QAction::triggered, this, [=]() {
     const QString dir = JobLogWriter::logDir();
     // The folder is only created when the first job writes something, so a
@@ -1151,7 +1199,8 @@ MainWindow::MainWindow() {
         foreach (auto i, items) {
           JobOptionsListWidgetItem *item =
               static_cast<JobOptionsListWidgetItem *>(i);
-          runItem(item->GetData(), "task", "requestId_placeholder", true);
+          runItem(item->GetData(), "task", QUuid::createUuid().toString(),
+                  true);
         }
       }
     }
@@ -1269,7 +1318,13 @@ MainWindow::MainWindow() {
         foreach (auto i, items) {
           JobOptionsListWidgetItem *item =
               static_cast<JobOptionsListWidgetItem *>(i);
-          runItem(item->GetData(), "task", "requestID_placeholder");
+          // An id of its own. This passed the same literal word for every
+          // run, and the history keeps one row per id -- so each run
+          // started here overwrote the one before it, and kept the
+          // date of the very first. A run stopped by hand a minute ago
+          // was filed under a day in August and looked as if it had
+          // never been recorded.
+          runItem(item->GetData(), "task", QUuid::createUuid().toString());
         }
       }
     }
@@ -2059,7 +2114,8 @@ void MainWindow::autoStartMounts(void) {
         static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(k));
     JobOptions *joTasks = item->GetData();
     if (joTasks->operation == JobOptions::Mount && joTasks->mountAutoStart) {
-      runItem(item->GetData(), "autostart", "requestID_placeholder");
+      runItem(item->GetData(), "autostart",
+              QUuid::createUuid().toString());
     }
   }
 }
