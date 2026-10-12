@@ -324,6 +324,33 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
 .modal-box dt { color: var(--muted); }
 .modal-box dd { margin: 0; }
 
+.pick-list {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  max-height: 44vh;
+  min-height: 120px;
+  overflow: auto;
+}
+
+.pick-list button {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--text);
+  display: block;
+  font-weight: 400;
+  padding: 7px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.pick-list button:hover { background: var(--panel-2); filter: none; }
+.pick-list p { color: var(--muted); margin: 0; padding: 10px; }
+
+label.check { align-items: center; color: var(--text); display: flex; gap: 8px; }
+label.check input { margin: 0; width: auto; }
+
 select {
   background: var(--panel-2);
   border: 1px solid var(--line);

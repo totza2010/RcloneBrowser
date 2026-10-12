@@ -250,4 +250,68 @@ RunningJob *Dedupe(const QString &remote, const QString &path,
                target, target);
 }
 
+RunningJob *CopyBetween(bool move, const QString &sourceRemote,
+                        const QString &sourcePath, const QString &destRemote,
+                        const QString &destPath, const QStringList &args,
+                        const QString &info) {
+  const QString source = Target(sourceRemote, sourcePath);
+  const QString dest = Target(destRemote, destPath);
+  qCDebug(rbRemote) << (move ? "moving" : "copying") << source << "to" << dest;
+
+  QStringList command{move ? QStringLiteral("move") : QStringLiteral("copy"),
+                      source, dest};
+  command << args;
+
+  return start(JobKind::Transfer, command,
+               info.isEmpty()
+                   ? QStringLiteral("%1: \"%2\" to \"%3\"")
+                         .arg(move ? QStringLiteral("Move")
+                                   : QStringLiteral("Copy"),
+                              source, dest)
+                   : info,
+               source, dest);
+}
+
+RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
+                     const QString &destFolder, bool dryRun, QString *why) {
+  const auto refuse = [why](const QString &reason) {
+    if (why != nullptr) {
+      *why = reason;
+    }
+    return nullptr;
+  };
+
+  const QString from = trimSlashes(what.path);
+  const QString into = trimSlashes(destFolder);
+  const bool sameRemote = destRemote == what.remote;
+
+  if (from.isEmpty()) {
+    return refuse(QStringLiteral(
+        "that is the whole remote; choose something inside it"));
+  }
+
+  if (sameRemote) {
+    if (into == ParentOf(from)) {
+      return refuse(QStringLiteral("it is already in that folder"));
+    }
+    // A folder cannot go inside itself. rclone would start copying it into
+    // its own copy, and for a move there is no outcome that makes sense.
+    if (what.isFolder &&
+        (into == from || into.startsWith(from + QLatin1Char('/')))) {
+      return refuse(QStringLiteral("a folder cannot be put inside itself"));
+    }
+  }
+
+  // rclone copies the *contents* of a folder into the destination, so a
+  // folder is given a place of its own name there. A file needs none: it is
+  // copied into the destination as it is.
+  const QString destPath = what.isFolder ? Join(into, NameOf(from)) : into;
+
+  QStringList args;
+  if (dryRun) {
+    args << QStringLiteral("--dry-run");
+  }
+  return CopyBetween(move, what.remote, from, destRemote, destPath, args);
+}
+
 } // namespace RemoteOps

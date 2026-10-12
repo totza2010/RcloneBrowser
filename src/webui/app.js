@@ -42,6 +42,11 @@ const browsing = {
 
 const $ = (id) => document.getElementById(id);
 
+// Jobs started from the file browser, and the folder that was on screen when
+// each began -- so it can be read again when the job ends, if it is still
+// the one being looked at.
+const watching = new Map();
+
 // Everything that came from outside goes through this before it becomes
 // HTML. Task names, remote paths and file names are all somebody else's text.
 function esc(value) {
@@ -361,6 +366,14 @@ function handleEvent(block) {
     if (at >= 0) state.jobs[at] = data;
     else state.jobs.unshift(data);
 
+    if (!data.running && watching.has(data.requestId)) {
+      const was = watching.get(data.requestId);
+      watching.delete(data.requestId);
+      if (was.remote === browsing.remote && was.path === browsing.path) {
+        browse(browsing.remote, browsing.path);
+      }
+    }
+
     // A job that ended changes the queue and the history too, and neither of
     // those announces itself in as much detail.
     if (!data.running) refresh();
@@ -627,7 +640,8 @@ function runDetails(heading, run) {
           '<button class="ghost small" data-log="' + esc(run.requestId) + '">Log</button>' +
         "</div>" +
       "</div>" +
-      '<div class="path">' + esc(run.taskName) + " · " + esc(run.source) + " → " + esc(run.dest) + "</div>" +
+      '<div class="path">' + (run.taskName ? esc(run.taskName) + " · " : "") +
+        esc(run.source) + " → " + esc(run.dest) + "</div>" +
       '<div class="figures">' +
         "<span>started " + esc(when(run.startedAt)) + "</span>" +
         "<span>" + (still ? "still running" : "finished " + esc(when(run.finishedAt))) + "</span>" +
@@ -704,6 +718,8 @@ function drawChosen() {
   $("remote-rename").disabled = !entry;
   $("remote-delete").disabled = !entry;
   $("remote-link").disabled = !entry;
+  $("remote-copy").disabled = !entry;
+  $("remote-move").disabled = !entry;
   $("remote-chosen").textContent = entry ? entry.name : "";
   for (const row of document.querySelectorAll("#listing tbody tr")) {
     row.classList.toggle("chosen", row.dataset.entry === browsing.chosen);
@@ -877,6 +893,126 @@ $("remote-about").addEventListener("click", () => {
                        : '<p class="muted">This backend reported nothing.</p>';
   });
 });
+
+// ---- choosing a folder ----------------------------------------------------
+//
+// One chooser for everything that needs a destination. It walks a remote's
+// folders the way the listing does, with the same request, and resolves with
+// the place chosen or with null when it is closed.
+
+const picking = { remote: "", path: "", done: null };
+
+async function pickLoad() {
+  $("pick-error").textContent = "";
+  $("pick-list").innerHTML = "<p>reading…</p>";
+
+  const parts = picking.path ? picking.path.split("/") : [];
+  let walked = "";
+  const crumbs = ['<button data-pick="">' + esc(picking.remote) + ":</button>"];
+  for (const part of parts) {
+    walked = walked ? walked + "/" + part : part;
+    crumbs.push("<span>/</span>");
+    crumbs.push('<button data-pick="' + esc(walked) + '">' + esc(part) + "</button>");
+  }
+  $("pick-crumbs").innerHTML = crumbs.join("");
+
+  let answer;
+  try {
+    answer = await api("GET", "/remotes/" + encodeURIComponent(picking.remote) +
+                       "/ls?path=" + encodeURIComponent(picking.path));
+  } catch (e) {
+    $("pick-list").innerHTML = "<p>could not reach the daemon</p>";
+    return;
+  }
+  if (answer.status !== 200) {
+    // The reason, where the folders would have been.
+    $("pick-list").innerHTML = "<p>" + esc(reasonFrom(answer)) + "</p>";
+    return;
+  }
+
+  const folders = (answer.data.entries || []).filter((e) => e.isDir)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $("pick-list").innerHTML = folders.length
+    ? folders.map((f) =>
+        '<button data-pick="' + esc(f.path) + '">📁 ' + esc(f.name) + "</button>").join("")
+    : "<p>No folders in here. This folder can still be chosen.</p>";
+}
+
+function pickFolder(title, action, remote, path) {
+  picking.remote = remote;
+  picking.path = path || "";
+
+  $("pick-title").textContent = title;
+  $("pick-ok").textContent = action;
+  $("pick-dry").checked = false;
+  $("pick-remote").innerHTML = state.remotes.map((r) =>
+    '<option value="' + esc(r.name) + '"' + (r.name === remote ? " selected" : "") +
+    ">" + esc(r.name) + " (" + esc(r.type) + ")</option>").join("");
+  $("pickbox").classList.remove("hidden");
+  pickLoad();
+
+  return new Promise((resolve) => { picking.done = resolve; });
+}
+
+function pickClose(result) {
+  $("pickbox").classList.add("hidden");
+  if (picking.done) picking.done(result);
+  picking.done = null;
+}
+
+$("pick-remote").addEventListener("change", () => {
+  picking.remote = $("pick-remote").value;
+  picking.path = "";
+  pickLoad();
+});
+$("pickbox").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-pick]");
+  if (!button) return;
+  event.stopPropagation();
+  picking.path = button.dataset.pick;
+  pickLoad();
+});
+$("pick-cancel").addEventListener("click", () => pickClose(null));
+$("pick-ok").addEventListener("click", () =>
+  pickClose({ remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked }));
+
+// ---- copying and moving ---------------------------------------------------
+
+async function copyOrMove(move) {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (!entry) return;
+
+  const verb = move ? "Move" : "Copy";
+  const from = { remote: browsing.remote, path: browsing.path };
+  const where = await pickFolder(
+    verb + " " + entry.name + " to…", verb + " here", browsing.remote, browsing.path);
+  if (!where) return;
+
+  // Started, not finished: this takes as long as the files are large. The
+  // Jobs tab shows how it is going, and the folder is read again when it
+  // ends if it is still the one on screen.
+  let answer;
+  try {
+    answer = await api("POST", remoteUrl(move ? "move" : "copy"), {
+      path: entry.path, isDir: entry.isDir,
+      to: where.path, toRemote: where.remote, dryRun: where.dryRun,
+    });
+  } catch (e) {
+    toast("could not reach the daemon");
+    return;
+  }
+  if (answer.status !== 202) {
+    toast(reasonFrom(answer));
+    return;
+  }
+
+  watching.set(answer.data.requestId, from);
+  toast(verb + (where.dryRun ? " (dry run)" : "") + " started — see Jobs");
+  refresh();
+}
+
+$("remote-copy").addEventListener("click", () => copyOrMove(false));
+$("remote-move").addEventListener("click", () => copyOrMove(true));
 
 // ---- the ones that change something other than a name or a place ---------
 

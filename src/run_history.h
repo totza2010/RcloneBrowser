@@ -84,6 +84,10 @@ int count();
 //
 // remote is the name without its colon. A run still going counts -- it is
 // the latest thing that happened -- and says so by its state.
+//
+// An upload comes from this machine and a download arrives on it. A copy or
+// a move from one place on a remote to another, or from one remote to
+// another, is neither: nothing was sent up from here and nothing came down.
 JobRunRecord lastUploadTo(const QString &remote);
 JobRunRecord lastDownloadFrom(const QString &remote);
 

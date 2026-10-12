@@ -135,4 +135,30 @@ RunningJob *Dedupe(const QString &remote, const QString &path,
                    const QStringList &extra = QStringList(),
                    QString *why = nullptr);
 
+// ---- copying and moving, which are transfers -------------------------------
+//
+// These run as long as a transfer runs and are jobs of that kind: they get a
+// card, report progress, and count as the last time the destination was
+// written to.
+
+// Copies or moves `sourcePath` to `destPath`, each given whole. `args` is
+// whatever else the command should carry. This is the form the window uses,
+// because it has already worked out both ends -- including, for several
+// selected items at once, a parent folder and filters naming them.
+RunningJob *CopyBetween(bool move, const QString &sourceRemote,
+                        const QString &sourcePath, const QString &destRemote,
+                        const QString &destPath, const QStringList &args,
+                        const QString &info = QString());
+
+// Copies or moves one file or folder *into* a folder, which is how somebody
+// choosing a destination thinks of it. A folder arrives under its own name
+// inside the destination; a file arrives in it.
+//
+// Refused before anything runs: the root of a remote as the thing to move,
+// a folder into itself or into something inside itself, and a destination
+// that is where the thing already is.
+RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
+                     const QString &destFolder, bool dryRun,
+                     QString *why = nullptr);
+
 } // namespace RemoteOps

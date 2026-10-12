@@ -738,6 +738,48 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     return;
   }
 
+  if (operation == QLatin1String("copy") ||
+      operation == QLatin1String("move")) {
+    const bool move = operation == QLatin1String("move");
+
+    RemoteOps::Item item;
+    item.remote = remote;
+    item.path = path;
+    item.isFolder = given.value(QStringLiteral("isDir")).toBool(false);
+
+    // Somewhere else on the same remote unless another is named.
+    const QString toRemote =
+        given.value(QStringLiteral("toRemote")).toString(remote);
+    if (RemoteRegistry::instance().find(toRemote) == nullptr) {
+      refuse(404, QStringLiteral("no_such_remote"),
+             QStringLiteral("no such remote to copy to"));
+      return;
+    }
+
+    QString why;
+    RunningJob *job = RemoteOps::CopyInto(
+        move, item, toRemote, given.value(QStringLiteral("to")).toString(),
+        given.value(QStringLiteral("dryRun")).toBool(false), &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API" << operation << remote << path << "to" << toRemote
+                   << given.value(QStringLiteral("to")).toString();
+
+    // Answered now, not when it is done. Everything else here takes as long
+    // as a question takes; a copy takes as long as the files are large, and
+    // nobody should hold a connection open for that. It is a job like any
+    // transfer: /jobs and the event stream say how it is going.
+    QJsonObject started;
+    started.insert(QStringLiteral("requestId"), job->requestId());
+    started.insert(QStringLiteral("started"), operation);
+    started.insert(QStringLiteral("source"), job->description().source);
+    started.insert(QStringLiteral("dest"), job->description().dest);
+    socket->write(FormatHttpResponse(202, toJson(started)));
+    return;
+  }
+
   if (operation == QLatin1String("link")) {
     QString why;
     RunningJob *job = RemoteOps::Link(remote, path, &why);
@@ -1117,7 +1159,8 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
     static const QStringList operations = {
         QStringLiteral("mkdir"),   QStringLiteral("rename"),
         QStringLiteral("delete"),  QStringLiteral("link"),
-        QStringLiteral("cleanup"), QStringLiteral("dedupe")};
+        QStringLiteral("cleanup"), QStringLiteral("dedupe"),
+        QStringLiteral("copy"),    QStringLiteral("move")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {

@@ -3,6 +3,7 @@
 #include "database.h"
 #include "job_options.h"
 #include "job_queue.h"
+#include "job_registry.h"
 #include "list_of_job_options.h"
 #include "remote_registry.h"
 #include "run_history.h"
@@ -1057,6 +1058,59 @@ private slots:
     QCOMPARE(statusOf(reply), 502);
     QVERIFY(bodyOf(reply).object().value(QStringLiteral("error")).toString()
                 .contains(QStringLiteral("does not support")));
+  }
+
+  // ---- copying and moving ---------------------------------------------------
+
+  // A copy is answered when it starts, not when it ends: it takes as long as
+  // the files are large. It is a transfer like any other from then on.
+  void aCopyIsStartedAndReportedAsAJob() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/copy", mToken,
+             "{\"path\":\"films/2026\",\"isDir\":true,\"to\":\"backup\"}");
+    QCOMPARE(statusOf(reply), 202);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("source")).toString(),
+             QStringLiteral("fake:films/2026"));
+    // A folder arrives under its own name inside the destination. Without
+    // that rclone would spill its contents straight into "backup".
+    QCOMPARE(object.value(QStringLiteral("dest")).toString(),
+             QStringLiteral("fake:backup/2026"));
+
+    const QString request = object.value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(request);
+    QVERIFY(job != nullptr);
+    QCOMPARE(JobKindToString(job->kind()), QStringLiteral("transfer"));
+
+    // A file goes into the folder as it is.
+    const QByteArray file =
+        send("POST", "/api/v1/remotes/fake/move", mToken,
+             "{\"path\":\"films/a.mkv\",\"to\":\"backup\"}");
+    QCOMPARE(statusOf(file), 202);
+    QCOMPARE(bodyOf(file).object().value(QStringLiteral("dest")).toString(),
+             QStringLiteral("fake:backup"));
+  }
+
+  void aCopyThatCannotMakeSenseIsRefused() {
+    QVERIFY(useFakeRclone(1));
+
+    for (const char *body :
+         {"{\"path\":\"\",\"isDir\":true,\"to\":\"backup\"}",
+          "{\"path\":\"films\",\"isDir\":true,\"to\":\"films/inside\"}",
+          "{\"path\":\"films/a.mkv\",\"to\":\"films\"}"}) {
+      QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/copy", mToken, body)),
+               400);
+    }
+
+    // And to a remote that is not there.
+    QCOMPARE(statusOf(send(
+                 "POST", "/api/v1/remotes/fake/copy", mToken,
+                 "{\"path\":\"a\",\"to\":\"b\",\"toRemote\":\"nowhere\"}")),
+             404);
   }
 
   void makingAFolderNeedsASecretAndARealRemote() {

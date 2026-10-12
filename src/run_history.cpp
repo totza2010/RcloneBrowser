@@ -178,16 +178,41 @@ namespace {
 // called things like tgdrive_main_01 -- so LIKE would also have matched a
 // remote named tgdriveXmain-01, and reported one remote's upload as
 // another's.
-JobRunRecord lastOnRemote(const char *column, const QString &remote) {
+// Whether the path in `column` is on a remote rather than on this machine,
+// as SQL.
+//
+// A remote path is "name:rest", so it has a colon before any slash. A
+// Windows path has one too -- "C:/films" -- but after a single letter, and a
+// drive is not a remote; TaskBuilder::RemoteOf draws the same line. A path
+// beginning with a slash is local wherever its colons are.
+QString onARemote(const char *column) {
+  // An end that was never recorded is not known to be on a remote, and in
+  // SQL a comparison with nothing is itself nothing -- which would quietly
+  // drop the row. Treated as empty, and so as local.
+  const QString c = QStringLiteral("COALESCE(%1, '')").arg(QLatin1String(column));
+  return QStringLiteral("(instr(%1, ':') > 2 AND substr(%1, 1, 1) <> '/' "
+                        "AND (instr(%1, '/') = 0 OR instr(%1, ':') < instr(%1, '/')))")
+      .arg(c);
+}
+
+// The newest transfer between this machine and that remote: `column` is the
+// end that is on the remote, `otherEnd` the one that has to be local.
+JobRunRecord lastOnRemote(const char *column, const char *otherEnd,
+                          const QString &remote) {
   if (remote.isEmpty()) {
     return JobRunRecord();
   }
   const QString prefix = remote + QLatin1Char(':');
   const QList<JobRunRecord> rows = select(
       // A dry run sent nothing, so it is not the last time anything was sent.
+      //
+      // And the other end has to be this machine. Without that, copying a
+      // file from one folder of a remote to another showed up as that
+      // remote's last upload *and* its last download at once, which is how
+      // it was found.
       QStringLiteral("WHERE kind = 'transfer' AND substr(%1, 1, ?) = ? "
-                     "AND dry_run = 0")
-          .arg(QLatin1String(column)),
+                     "AND dry_run = 0 AND NOT %2")
+          .arg(QLatin1String(column), onARemote(otherEnd)),
       {prefix.size(), prefix}, 1);
   return rows.isEmpty() ? JobRunRecord() : rows.first();
 }
@@ -195,11 +220,11 @@ JobRunRecord lastOnRemote(const char *column, const QString &remote) {
 } // namespace
 
 JobRunRecord RunHistory::lastUploadTo(const QString &remote) {
-  return lastOnRemote("dest", remote);
+  return lastOnRemote("dest", "source", remote);
 }
 
 JobRunRecord RunHistory::lastDownloadFrom(const QString &remote) {
-  return lastOnRemote("source", remote);
+  return lastOnRemote("source", "dest", remote);
 }
 
 QList<JobRunRecord> RunHistory::forTask(const QString &taskId, int limit) {

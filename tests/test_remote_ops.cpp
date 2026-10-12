@@ -101,6 +101,38 @@ private slots:
     }
   }
 
+  // Putting a thing somewhere: refused when there is nowhere for it to go
+  // that makes sense, before rclone is asked to try.
+  void copyingIsRefusedWhenItCannotMakeSense() {
+    const auto item = [](const char *path, bool folder) {
+      RemoteOps::Item it;
+      it.remote = QStringLiteral("gdrive");
+      it.path = QString::fromLatin1(path);
+      it.isFolder = folder;
+      return it;
+    };
+    QString why;
+
+    // The whole remote is not a thing to be copied into part of itself.
+    QVERIFY(RemoteOps::CopyInto(false, item("", true), QStringLiteral("gdrive"),
+                                QStringLiteral("backup"), false, &why) == nullptr);
+
+    // Where it already is.
+    QVERIFY(RemoteOps::CopyInto(true, item("films/a.mkv", false),
+                                QStringLiteral("gdrive"),
+                                QStringLiteral("films"), false, &why) == nullptr);
+
+    // A folder into itself, and into something inside itself.
+    QVERIFY(RemoteOps::CopyInto(true, item("films", true),
+                                QStringLiteral("gdrive"),
+                                QStringLiteral("films"), false, &why) == nullptr);
+    QVERIFY(RemoteOps::CopyInto(false, item("films", true),
+                                QStringLiteral("gdrive"),
+                                QStringLiteral("films/2026/old"), false,
+                                &why) == nullptr);
+    QVERIFY(!why.isEmpty());
+  }
+
   // A name that will not do starts nothing, and says why. No job, no process,
   // no row in the history for something that was never attempted.
   void aNameThatWillNotDoStartsNothing() {

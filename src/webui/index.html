@@ -97,6 +97,8 @@
           <button id="remote-refresh" class="ghost small">Refresh</button>
           <button id="remote-mkdir" class="ghost small">New folder</button>
           <button id="remote-rename" class="ghost small" disabled>Rename</button>
+          <button id="remote-copy" class="ghost small" disabled>Copy</button>
+          <button id="remote-move" class="ghost small" disabled>Move</button>
           <button id="remote-delete" class="danger small" disabled>Delete</button>
           <button id="remote-size" class="ghost small">Size</button>
           <button id="remote-tree" class="ghost small">Tree</button>
@@ -127,6 +129,22 @@
       <button id="log-close" class="ghost">Close</button>
     </div>
     <pre id="log-body"></pre>
+  </div>
+
+  <!-- Choosing a folder on a remote: where a copy or a move should go. -->
+  <div id="pickbox" class="modal hidden">
+    <div class="modal-box wide">
+      <h2 id="pick-title"></h2>
+      <p><select id="pick-remote"></select></p>
+      <div id="pick-crumbs" class="crumbs"></div>
+      <div id="pick-list" class="pick-list"></div>
+      <label class="check"><input type="checkbox" id="pick-dry"> Dry run — say what would happen, do none of it</label>
+      <p id="pick-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" id="pick-cancel" class="ghost">Cancel</button>
+        <button type="button" id="pick-ok"></button>
+      </div>
+    </div>
   </div>
 
   <!-- What a question to rclone came back with: a size, a quota, a tree. -->

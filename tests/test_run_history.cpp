@@ -373,6 +373,58 @@ private slots:
                 .requestId.isEmpty());
   }
 
+  // An upload comes from this machine and a download arrives on it. Copying
+  // a file from one folder of a remote to another is neither -- and the
+  // first time anybody did it from the page, the remote showed that copy as
+  // its last upload and its last download both.
+  void aCopyWithinOrBetweenRemotesIsNeitherAnUploadNorADownload() {
+    // A real upload and a real download, older than what follows.
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("up"), 1000, QStringLiteral("C:/films"),
+        QStringLiteral("gdrive:films"))));
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("down"), 2000, QStringLiteral("gdrive:films"),
+        QStringLiteral("/home/me/films"))));
+
+    // Newer: within one remote, and from one remote to another.
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("within"), 5000, QStringLiteral("gdrive:a.jpeg"),
+        QStringLiteral("gdrive:test"))));
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("across"), 6000, QStringLiteral("gdrive:films"),
+        QStringLiteral("OneDrive:films"))));
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("across-back"), 7000, QStringLiteral("OneDrive:x"),
+        QStringLiteral("gdrive:x"))));
+
+    QCOMPARE(RunHistory::lastUploadTo(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("up"));
+    QCOMPARE(RunHistory::lastDownloadFrom(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("down"));
+
+    // The other remote was only ever copied to and from another remote.
+    QVERIFY(RunHistory::lastUploadTo(QStringLiteral("OneDrive"))
+                .requestId.isEmpty());
+    QVERIFY(RunHistory::lastDownloadFrom(QStringLiteral("OneDrive"))
+                .requestId.isEmpty());
+  }
+
+  // What counts as this machine: a drive letter, a path from the root, a
+  // bare folder name. None of them is a remote, whatever colons they hold.
+  void aPathOnThisMachineIsToldFromOneOnARemote() {
+    int at = 1000;
+    for (const char *local :
+         {"C:/films", "D:\\films\\2026", "/mnt/media", "/srv/a:b", "films",
+          "relative/with:colon"}) {
+      const QString id = QStringLiteral("r%1").arg(at);
+      QVERIFY(RunHistory::recordStarted(transfer(
+          id, at, QString::fromLatin1(local), QStringLiteral("gdrive:in"))));
+      QVERIFY2(RunHistory::lastUploadTo(QStringLiteral("gdrive")).requestId == id,
+               local);
+      at += 1000;
+    }
+  }
+
   // A dry run sent nothing, so it is not the last time anything was sent --
   // however recent it is, and whatever size rclone said it would have been.
   //

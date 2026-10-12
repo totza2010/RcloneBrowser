@@ -831,11 +831,8 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     // A copy inside a remote is a transfer like any other, and now says so:
     // it gets a history row, a log file and a card in the Jobs tab.
-    RunningJob *job =
-        StartTool(JobKind::Transfer,
-                  QStringList() << "copy" << remote + ":" + path
-                                << remote + ":" + destFolder << args,
-                  pathMsg, remote + ":" + path, remote + ":" + destFolder);
+    RunningJob *job = RemoteOps::CopyBetween(false, remote, path, remote,
+                                             destFolder, args, pathMsg);
 
     ProgressDialog progress(
         "Copy", "Copying... ", pathMsg, job, this,
@@ -975,11 +972,8 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
       return;
     }
 
-    RunningJob *job =
-        StartTool(JobKind::Transfer,
-                  QStringList() << "move" << remote + ":" + path
-                                << remote + ":" + destFolder << args,
-                  pathMsg, remote + ":" + path, remote + ":" + destFolder);
+    RunningJob *job = RemoteOps::CopyBetween(true, remote, path, remote,
+                                             destFolder, args, pathMsg);
 
     ProgressDialog progress(
         "Move", "Moving... ", pathMsg, job, this,
