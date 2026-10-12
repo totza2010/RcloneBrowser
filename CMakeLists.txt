@@ -1,10 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(WIN32)
-  # Match Qt's prebuilt MSVC libraries (/MD) and avoid LNK4098 CRT conflicts.
+  # Match Qt's prebuilt MSVC libraries and avoid LNK4098 CRT conflicts.
   # Must be set before project() for the policy to take effect.
+  #
+  # Per configuration, not one setting for all of them: Qt's debug libraries
+  # are built against the debug runtime, and a debug build of this that used
+  # the release one was mixing two incompatible ideas of what a std::string
+  # is. It linked and it ran, which is the worst way to be wrong -- strings
+  # handed across the boundary came back as rubbish and four of the tests
+  # died of heap corruption, none of which happens in a release build.
   cmake_policy(SET CMP0091 NEW)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   # link automatically to qtmain.lib on Windows
   cmake_policy(SET CMP0020 NEW)
 endif()

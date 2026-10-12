@@ -40,10 +40,13 @@ QCronField::QCronField() : _is_valid(false) {}
 QCronIntNode *QCronField::_parseInt(QString &str) {
   int value = 0;
   int char_idx = 0;
-  QChar c = str[char_idx];
-  while (c.isDigit()) {
-    value = value * 10 + c.digitValue();
-    c = str[++char_idx];
+  // Asking how long the string is before reading the next character. It read
+  // one past the end of every field that ends in a digit -- "30 6 * * *" is
+  // two of them -- and got away with it because a QString happens to keep a
+  // null after the last character. In a debug build Qt says so and stops.
+  while (char_idx < str.size() && str.at(char_idx).isDigit()) {
+    value = value * 10 + str.at(char_idx).digitValue();
+    ++char_idx;
   }
   if (char_idx == 0) {
     throw QCronFieldException(
