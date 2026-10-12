@@ -324,6 +324,16 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
 .modal-box dt { color: var(--muted); }
 .modal-box dd { margin: 0; }
 
+select {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+  width: 100%;
+}
+
 .modal-box h2 { margin: 0; font-size: 17px; }
 .modal-box p { margin: 0; font-size: 13px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }

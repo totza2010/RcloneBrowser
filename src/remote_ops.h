@@ -106,4 +106,33 @@ RunningJob *About(const QString &remote, bool json = false);
 // always asked for it.
 RunningJob *Tree(const QString &remote, const QString &path);
 
+// ---- the ones that change something other than a file's name or place ------
+
+// Makes a public link to a file or folder and prints it. This changes who
+// can reach the thing: anybody holding the link can. Refuses the root of a
+// remote, for the reason Delete does -- a path left empty is not a request
+// to share everything.
+RunningJob *Link(const QString &remote, const QString &path,
+                 QString *why = nullptr);
+
+// Empties the trash, or removes old versions, whichever the backend means by
+// it. What goes this way does not come back.
+RunningJob *Cleanup(const QString &remote);
+
+// The ways rclone can settle files that share a name. "skip" removes
+// identical copies and leaves the rest alone; the others each pick a
+// survivor, and "rename" keeps everything under new names.
+QStringList DedupeModes();
+
+// Settles duplicates under a path. `mode` is one of DedupeModes(); anything
+// else is refused rather than passed on, because rclone's own default when
+// it does not recognise a mode is to ask at a terminal nobody is sitting at.
+//
+// `extra` is flags typed into the window's dialog. A request that did not
+// come from somebody at the keyboard passes none.
+RunningJob *Dedupe(const QString &remote, const QString &path,
+                   const QString &mode, bool dryRun,
+                   const QStringList &extra = QStringList(),
+                   QString *why = nullptr);
+
 } // namespace RemoteOps

@@ -15,6 +15,11 @@ public:
   QStringList getOptions() const;
   bool isDryRun() const;
 
+  // The two things the dialog decides, apart from each other, so the command
+  // can be put together in one place rather than here. See remote_ops.h.
+  QString mode() const;
+  QStringList extra() const;
+
 private:
   Ui::DedupeDialog ui;
   QString mTarget;

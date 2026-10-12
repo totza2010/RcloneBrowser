@@ -1105,9 +1105,12 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                          metrix.elidedText(remote, Qt::ElideMiddle, 150) +
                          ":" + pathMsg + "\"";
 
-    RunningJob *job =
-        StartTool(JobKind::Link, QStringList() << "link" << remote + ":" + path,
-                  info, remote + ":" + path, QString());
+    QString why;
+    RunningJob *job = RemoteOps::Link(remote, path, &why);
+    if (job == nullptr) {
+      QMessageBox::warning(this, "Fetch Public Link", why);
+      return;
+    }
 
     ProgressDialog *progress =
         new ProgressDialog("Fetch Public Link", "Running... ", info, job, NULL,
@@ -1553,16 +1556,13 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
           GetRemoteModeRcloneOptions().join(" ") + " " +
           GetDefaultOptionsList("defaultRcloneOptions").join(" ");
 
-      JobDescription description;
-      description.info = info;
-      description.source = remote + ":" + path.path();
-      description.dest = description.source;
-
-      RunningJob *job = JobRegistry::instance().start(
-          JobKind::Dedupe,
-          QStringList() << e.getOptions() << GetRemoteModeRcloneOptions()
-                        << GetDefaultOptionsList("defaultRcloneOptions"),
-          description, QString(), QStringLiteral("dedupe"), QString());
+      QString why;
+      RunningJob *job = RemoteOps::Dedupe(remote, path.path(), e.mode(),
+                                          e.isDryRun(), e.extra(), &why);
+      if (job == nullptr) {
+        QMessageBox::warning(this, "rclone dedupe", why);
+        return;
+      }
 
       ProgressDialog *progress =
           new ProgressDialog("rclone dedupe", "Running... ", info, job, NULL,
@@ -1628,10 +1628,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
           "rclone cleanup \"" +
           metrix.elidedText(remote, Qt::ElideMiddle, 150) + ":\"";
 
-      RunningJob *job = StartTool(JobKind::Cleanup,
-                                  QStringList() << "cleanup" << remote + ":"
-                                                << "-vv",
-                                  info, remote + ":", QString());
+      RunningJob *job = RemoteOps::Cleanup(remote);
 
       ProgressDialog progress("Cleanup", "Runnning... ", info, job, NULL, false,
                               false, toolTip);

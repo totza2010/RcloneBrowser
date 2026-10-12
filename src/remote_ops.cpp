@@ -188,4 +188,66 @@ RunningJob *Tree(const QString &remote, const QString &path) {
                QString());
 }
 
+RunningJob *Link(const QString &remote, const QString &path, QString *why) {
+  if (trimSlashes(path).isEmpty()) {
+    if (why != nullptr) {
+      *why = QStringLiteral(
+          "that is the whole remote; sharing it is not done from here");
+    }
+    return nullptr;
+  }
+
+  const QString target = Target(remote, path);
+  qCDebug(rbRemote) << "making a public link for" << target;
+
+  return start(JobKind::Link, QStringList{QStringLiteral("link"), target},
+               QStringLiteral("Public link for: \"%1\"").arg(target), target,
+               QString());
+}
+
+RunningJob *Cleanup(const QString &remote) {
+  const QString target = Target(remote, QString());
+  qCDebug(rbRemote) << "cleaning up" << target;
+
+  return start(JobKind::Cleanup,
+               QStringList{QStringLiteral("cleanup"), target,
+                           QStringLiteral("-vv")},
+               QStringLiteral("rclone cleanup \"%1\"").arg(target), target,
+               QString());
+}
+
+QStringList DedupeModes() {
+  return {QStringLiteral("skip"),    QStringLiteral("first"),
+          QStringLiteral("newest"),  QStringLiteral("oldest"),
+          QStringLiteral("largest"), QStringLiteral("smallest"),
+          QStringLiteral("rename")};
+}
+
+RunningJob *Dedupe(const QString &remote, const QString &path,
+                   const QString &mode, bool dryRun, const QStringList &extra,
+                   QString *why) {
+  if (!DedupeModes().contains(mode)) {
+    if (why != nullptr) {
+      *why = QStringLiteral("the mode has to be one of: %1")
+                 .arg(DedupeModes().join(QStringLiteral(", ")));
+    }
+    return nullptr;
+  }
+
+  const QString target = Target(remote, path);
+
+  QStringList command{QStringLiteral("dedupe"),
+                      QStringLiteral("--dedupe-mode"), mode};
+  command << extra << target;
+  if (dryRun) {
+    command << QStringLiteral("--dry-run");
+  }
+  qCDebug(rbRemote) << "deduplicating" << target << "mode=" << mode
+                    << "dryRun=" << dryRun;
+
+  return start(JobKind::Dedupe, command,
+               QStringLiteral("rclone %1").arg(command.join(QLatin1Char(' '))),
+               target, target);
+}
+
 } // namespace RemoteOps

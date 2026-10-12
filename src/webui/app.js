@@ -703,6 +703,7 @@ function drawChosen() {
   const entry = browsing.entries.find((e) => e.path === browsing.chosen);
   $("remote-rename").disabled = !entry;
   $("remote-delete").disabled = !entry;
+  $("remote-link").disabled = !entry;
   $("remote-chosen").textContent = entry ? entry.name : "";
   for (const row of document.querySelectorAll("#listing tbody tr")) {
     row.classList.toggle("chosen", row.dataset.entry === browsing.chosen);
@@ -875,6 +876,99 @@ $("remote-about").addEventListener("click", () => {
     return rows.length ? figures(rows)
                        : '<p class="muted">This backend reported nothing.</p>';
   });
+});
+
+// ---- the ones that change something other than a name or a place ---------
+
+// A command whose output is its result, shown in the result box.
+async function run(title, path, body, draw) {
+  showResult(title, '<p class="muted">running…</p>');
+  let answer;
+  try {
+    answer = await api("POST", path, body);
+  } catch (e) {
+    showResult(title, '<p class="error">could not reach the daemon</p>');
+    return false;
+  }
+  if (answer.status !== 200) {
+    showResult(title, '<pre class="error">' + esc(reasonFrom(answer)) + "</pre>");
+    return false;
+  }
+  showResult(title, draw(answer.data));
+  return true;
+}
+
+const remoteUrl = (operation) =>
+  "/remotes/" + encodeURIComponent(browsing.remote) + "/" + operation;
+
+$("remote-link").addEventListener("click", () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (!entry) return;
+
+  // Said before it is done, because it cannot be seen afterwards: nothing in
+  // a listing shows that a file has been shared.
+  const what = browsing.remote + ":" + entry.path;
+  if (!confirm("Make a public link to\n\n" + what +
+               "\n\n? Anybody who has the link will be able to open it.")) {
+    return;
+  }
+
+  run("Public link for " + what, remoteUrl("link"), { path: entry.path }, (d) =>
+    d.url
+      ? '<p><input type="text" readonly value="' + esc(d.url) + '"></p>' +
+        '<p class="muted">Select it and copy. Anybody with this address can open the file.</p>'
+      : "<pre>" + esc(d.output || "rclone gave no address") + "</pre>");
+});
+
+$("remote-cleanup").addEventListener("click", () => {
+  // The window's own wording, because what this does is not obvious from its
+  // name and differs from one backend to another.
+  if (!confirm("Clean up remote " + browsing.remote + ": ?\n\n" +
+               "This empties the trash, or deletes old versions of files, " +
+               "depending on what the backend supports. Files removed this " +
+               "way cannot be recovered.\n\n" +
+               "It does not touch files you can currently see.")) {
+    return;
+  }
+  run("Cleanup of " + browsing.remote + ":", remoteUrl("cleanup"), {}, (d) =>
+    '<p>Done.</p><pre>' + esc(d.output || "") + "</pre>");
+});
+
+$("remote-dedupe").addEventListener("click", () => {
+  const path = subject();
+  const what = browsing.remote + ":" + path;
+  const modes = [
+    ["skip", "skip — remove identical copies, leave the rest"],
+    ["newest", "newest — keep the newest of each"],
+    ["oldest", "oldest — keep the oldest of each"],
+    ["largest", "largest — keep the largest of each"],
+    ["smallest", "smallest — keep the smallest of each"],
+    ["first", "first — keep the first of each"],
+    ["rename", "rename — keep them all, under different names"],
+  ];
+
+  showResult("Duplicates under " + what,
+    '<p class="muted">Files that share a name in one folder. Try it as a dry ' +
+    "run first: it says what would be done and does none of it.</p>" +
+    '<p><select id="dedupe-mode">' + modes.map((m) =>
+      '<option value="' + m[0] + '">' + esc(m[1]) + "</option>").join("") +
+    "</select></p>" +
+    '<p><button id="dedupe-dry" class="small">Dry run</button> ' +
+    '<button id="dedupe-run" class="danger small">Run for real</button></p>');
+
+  const go = (dryRun) => {
+    const mode = $("dedupe-mode").value;
+    if (!dryRun && !confirm("Run dedupe (" + mode + ") on\n\n" + what +
+                            "\n\nfor real? Files it removes do not come back.")) {
+      return;
+    }
+    run((dryRun ? "Dry run: duplicates under " : "Duplicates under ") + what,
+        remoteUrl("dedupe"), { path: path, mode: mode, dryRun: dryRun }, (d) =>
+      "<pre>" + esc(d.output || "nothing was reported") + "</pre>")
+      .then((done) => { if (done && !dryRun) browse(browsing.remote, browsing.path); });
+  };
+  $("dedupe-dry").addEventListener("click", () => go(true));
+  $("dedupe-run").addEventListener("click", () => go(false));
 });
 
 // ---- a job's log ----------------------------------------------------------

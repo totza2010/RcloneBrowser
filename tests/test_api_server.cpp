@@ -974,6 +974,91 @@ private slots:
     }
   }
 
+  // ---- link, cleanup, dedupe ------------------------------------------------
+
+  // The address is what was asked for, so it comes back as a field of its
+  // own and not buried in rclone's output for the caller to dig out.
+  void aPublicLinkComesBackAsAnAddress() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/link", mToken,
+             "{\"path\":\"films/a.mkv\"}");
+    QCOMPARE(statusOf(reply), 200);
+    QCOMPARE(bodyOf(reply).object().value(QStringLiteral("url")).toString(),
+             QStringLiteral("https://example.test/share/abc123"));
+  }
+
+  // Sharing changes who can reach something. A path left blank is not a
+  // request to share the whole remote.
+  void theWholeRemoteCannotBeSharedByLeavingThePathEmpty() {
+    QVERIFY(useFakeRclone(1));
+    for (const char *body : {"{\"path\":\"\"}", "{}", "{\"path\":\"/\"}"}) {
+      QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/link", mToken, body)),
+               400);
+    }
+  }
+
+  // A mode rclone does not know is refused here. Passed on, rclone falls
+  // back to asking at a terminal nobody is sitting at.
+  void dedupeTakesOnlyAModeItKnows() {
+    QVERIFY(useFakeRclone(1));
+    for (const char *body :
+         {"{\"path\":\"films\"}", "{\"path\":\"films\",\"mode\":\"\"}",
+          "{\"path\":\"films\",\"mode\":\"interactive\"}",
+          "{\"path\":\"films\",\"mode\":\"newest --max-delete 0\"}"}) {
+      const QByteArray reply =
+          send("POST", "/api/v1/remotes/fake/dedupe", mToken, body);
+      QCOMPARE(statusOf(reply), 400);
+      QCOMPARE(bodyOf(reply).object().value(QStringLiteral("code")).toString(),
+               QStringLiteral("bad_mode"));
+    }
+  }
+
+  // A dry run says what it would do, and the history records that it was
+  // one -- so nobody reading it later takes a rehearsal for the real thing.
+  void aDedupeDryRunIsRecordedAsARehearsal() {
+    QVERIFY(useFakeRclone(1));
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/dedupe", mToken,
+             "{\"path\":\"films\",\"mode\":\"newest\",\"dryRun\":true}");
+    QCOMPARE(statusOf(reply), 200);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QVERIFY(object.value(QStringLiteral("output")).toString().contains(
+        QStringLiteral("Skipped delete as --dry-run is set")));
+
+    const JobRunRecord row = RunHistory::find(
+        object.value(QStringLiteral("requestId")).toString());
+    QCOMPARE(row.kind, QStringLiteral("dedupe"));
+    QVERIFY(row.dryRun);
+
+    // And the real one is not.
+    const QByteArray real =
+        send("POST", "/api/v1/remotes/fake/dedupe", mToken,
+             "{\"path\":\"films\",\"mode\":\"newest\"}");
+    QCOMPARE(statusOf(real), 200);
+    QVERIFY(!RunHistory::find(bodyOf(real).object()
+                                  .value(QStringLiteral("requestId"))
+                                  .toString())
+                 .dryRun);
+  }
+
+  void cleanupRunsAndABackendThatCannotSaysSo() {
+    QVERIFY(useFakeRclone(1));
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/cleanup", mToken, "{}")),
+             200);
+
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/cleanup", mToken, "{}");
+    qunsetenv("FAKE_RCLONE_FAIL");
+    QCOMPARE(statusOf(reply), 502);
+    QVERIFY(bodyOf(reply).object().value(QStringLiteral("error")).toString()
+                .contains(QStringLiteral("does not support")));
+  }
+
   void makingAFolderNeedsASecretAndARealRemote() {
     QVERIFY(useFakeRclone(1));
     const QByteArray body = "{\"path\":\"\",\"name\":\"x\"}";

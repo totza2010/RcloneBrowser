@@ -105,6 +105,26 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  if (std::strcmp(command, "link") == 0 || std::strcmp(command, "cleanup") == 0 ||
+      std::strcmp(command, "dedupe") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "2026/10/12 12:00:00 ERROR : this backend does "
+                           "not support that\n");
+      return 1;
+    }
+    if (std::strcmp(command, "link") == 0) {
+      std::printf("https://example.test/share/abc123\n");
+    } else if (std::strcmp(command, "dedupe") == 0) {
+      std::printf("2026/10/12 12:00:00 NOTICE: a.txt: Found 2 files with "
+                  "duplicate names\n");
+      if (has("--dry-run")) {
+        std::printf("2026/10/12 12:00:00 NOTICE: a.txt: Skipped delete as "
+                    "--dry-run is set\n");
+      }
+    }
+    return 0;
+  }
+
   // Making a folder. Refuses when told to, with a line of the kind rclone
   // prints, so the code that has to pass that line on has one to pass.
   if (std::strcmp(command, "mkdir") == 0 ||

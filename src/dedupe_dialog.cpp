@@ -91,6 +91,20 @@ QStringList DedupeDialog::getOptions() const {
   return list;
 }
 
+QString DedupeDialog::mode() const {
+  if (ui.cb_first->isChecked()) return QStringLiteral("first");
+  if (ui.cb_newest->isChecked()) return QStringLiteral("newest");
+  if (ui.cb_oldest->isChecked()) return QStringLiteral("oldest");
+  if (ui.cb_largest->isChecked()) return QStringLiteral("largest");
+  if (ui.cb_smallest->isChecked()) return QStringLiteral("smallest");
+  if (ui.cb_rename->isChecked()) return QStringLiteral("rename");
+  return QStringLiteral("skip");
+}
+
+QStringList DedupeDialog::extra() const {
+  return SplitRcloneOptions(ui.textExtra->text());
+}
+
 void DedupeDialog::done(int r) {
   if (r == QDialog::Accepted) {
   }

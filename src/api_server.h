@@ -131,7 +131,7 @@ private:
   void remoteOperation(QTcpSocket *socket, const HttpRequest &request,
                        const QString &remote, const QString &operation);
   void answerWhenDone(QTcpSocket *socket, class RunningJob *job,
-                      const QJsonObject &onSuccess);
+                      const QJsonObject &onSuccess, bool withOutput = false);
 
   // Something found out about a remote: the answer is what rclone printed,
   // so it is kept and handed to `read`, which turns it into the reply.

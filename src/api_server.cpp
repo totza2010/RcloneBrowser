@@ -506,24 +506,39 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
 }
 
 void ApiServer::answerWhenDone(QTcpSocket *socket, RunningJob *job,
-                               const QJsonObject &onSuccess) {
-  // What rclone said, kept in case it is the explanation. Only the last few
-  // lines: an error is at the end, and the whole output of a long command is
-  // not something to send back as an error message.
+                               const QJsonObject &onSuccess, bool withOutput) {
+  // What rclone said. For most commands only the end of it matters, as the
+  // explanation when something went wrong. For some the output is the
+  // result -- the link that was made, the list of duplicates found -- and
+  // then all of it is kept, up to a size nobody would want more than.
+  const int keep = withOutput ? 4000 : 8;
   auto said = QSharedPointer<QStringList>::create();
   QObject::connect(job, &RunningJob::outputLine, socket,
-                   [said](const QString &line) {
+                   [said, keep](const QString &line) {
                      said->append(line);
-                     while (said->size() > 8) {
+                     while (said->size() > keep) {
                        said->removeFirst();
                      }
                    });
 
-  const auto finish = [socket, job, said, onSuccess]() {
+  const auto finish = [socket, job, said, onSuccess, withOutput]() {
     QJsonObject object = onSuccess;
     object.insert(QStringLiteral("requestId"), job->requestId());
 
     if (job->state() == JobState::Finished) {
+      if (withOutput) {
+        object.insert(QStringLiteral("output"), said->join(QLatin1Char('\n')));
+
+        // A link is the one line of it that is an address.
+        for (int i = said->size() - 1; i >= 0; --i) {
+          const QString line = said->at(i).trimmed();
+          if (line.startsWith(QLatin1String("http://")) ||
+              line.startsWith(QLatin1String("https://"))) {
+            object.insert(QStringLiteral("url"), line);
+            break;
+          }
+        }
+      }
       socket->write(FormatHttpResponse(200, toJson(object)));
       return;
     }
@@ -720,6 +735,55 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     renamed.insert(QStringLiteral("path"),
                    RemoteOps::Join(RemoteOps::ParentOf(path), name));
     answerWhenDone(socket, job, renamed);
+    return;
+  }
+
+  if (operation == QLatin1String("link")) {
+    QString why;
+    RunningJob *job = RemoteOps::Link(remote, path, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API making a public link" << remote << path;
+
+    QJsonObject shared;
+    shared.insert(QStringLiteral("remote"), remote);
+    shared.insert(QStringLiteral("path"), RemoteOps::Join(QString(), path));
+    answerWhenDone(socket, job, shared, true);
+    return;
+  }
+
+  if (operation == QLatin1String("cleanup")) {
+    qCDebug(rbApp) << "API cleaning up" << remote;
+    QJsonObject cleaned;
+    cleaned.insert(QStringLiteral("remote"), remote);
+    answerWhenDone(socket, RemoteOps::Cleanup(remote), cleaned, true);
+    return;
+  }
+
+  if (operation == QLatin1String("dedupe")) {
+    const QString mode = given.value(QStringLiteral("mode")).toString();
+    const bool dryRun = given.value(QStringLiteral("dryRun")).toBool(false);
+
+    // No flags of the caller's own. The window's dialog has a box for them;
+    // a request over HTTP does not, for the reason tasks cannot be written
+    // this way either.
+    QString why;
+    RunningJob *job =
+        RemoteOps::Dedupe(remote, path, mode, dryRun, QStringList(), &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("bad_mode"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API deduplicating" << remote << path << mode << dryRun;
+
+    QJsonObject settled;
+    settled.insert(QStringLiteral("remote"), remote);
+    settled.insert(QStringLiteral("path"), RemoteOps::Join(QString(), path));
+    settled.insert(QStringLiteral("mode"), mode);
+    settled.insert(QStringLiteral("dryRun"), dryRun);
+    answerWhenDone(socket, job, settled, true);
     return;
   }
 
@@ -1050,9 +1114,10 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   // Nor is this: it runs rclone and answers when rclone has finished.
   {
     const QStringList parts = segmentsOf(asked.path);
-    static const QStringList operations = {QStringLiteral("mkdir"),
-                                           QStringLiteral("rename"),
-                                           QStringLiteral("delete")};
+    static const QStringList operations = {
+        QStringLiteral("mkdir"),   QStringLiteral("rename"),
+        QStringLiteral("delete"),  QStringLiteral("link"),
+        QStringLiteral("cleanup"), QStringLiteral("dedupe")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {
