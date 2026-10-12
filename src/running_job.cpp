@@ -19,12 +19,28 @@ RunningJob::RunningJob(JobKind kind, const QStringList &args,
       // A mount brings its own: the port is part of the saved task, because
       // unmounting on Windows has to reach the same one every time -- there
       // is nobody to read an announcement back to after a restart.
+      //
+      // And it is asked to state its totals when it finishes, because the
+      // remote control cannot be asked after rclone has gone. See
+      // ApplyFinalTotalsLine().
       mArgs(kind == JobKind::Transfer
                 ? args + QStringList{QStringLiteral("--rc"),
-                                     QStringLiteral("--rc-addr=localhost:0")}
+                                     QStringLiteral("--rc-addr=localhost:0")} +
+                      FinalTotalsFlags(args)
                 : args),
       mDescription(description), mTaskId(taskId), mTransferMode(transferMode),
       mRequestId(requestId) {}
+
+bool RunningJob::isDryRun() const {
+  for (const QString &arg : mArgs) {
+    // "-n" is rclone's short form. "--dry-run=false" is somebody saying no.
+    if (arg == QLatin1String("--dry-run") || arg == QLatin1String("-n") ||
+        arg == QLatin1String("--dry-run=true")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 QString JobKindToString(JobKind kind) {
   switch (kind) {
@@ -50,6 +66,8 @@ QString JobKindToString(JobKind kind) {
     return QStringLiteral("about");
   case JobKind::Cleanup:
     return QStringLiteral("cleanup");
+  case JobKind::Mkdir:
+    return QStringLiteral("mkdir");
   }
   return QStringLiteral("transfer");
 }
@@ -177,6 +195,14 @@ void RunningJob::handleOutput() {
       }
     }
 
+    // The totals rclone states as it finishes. Kept apart from the figures
+    // asked for while it ran and put in their place only at the end: a
+    // report part way through a long transfer is older than the last answer
+    // from core/stats, and must not be allowed to set the progress back.
+    if (mKind == JobKind::Transfer && ApplyFinalTotalsLine(line, &mTotals)) {
+      mHaveTotals = true;
+    }
+
     // Our own polling would otherwise dominate the log at -vv and above.
     if (IsRcPollingNoise(line)) {
       continue;
@@ -196,6 +222,13 @@ void RunningJob::handleFinished(int exitCode) {
     mRc->stop();
   }
 
+  // Whatever rclone said last, before anything is concluded from it. Its
+  // totals are the last lines it prints, and they can still be waiting to be
+  // read when the news that it has exited arrives.
+  if (mProcess != nullptr) {
+    handleOutput();
+  }
+
   // The script exists to serve the mount; when the mount is gone it has
   // nothing left to serve.
   if (mScriptProcess != nullptr &&
@@ -205,6 +238,21 @@ void RunningJob::handleFinished(int exitCode) {
 
   mExitCode = exitCode;
   mFinishedAt = QDateTime::currentDateTime();
+
+  // What rclone said it did, in place of what it had done by the last time
+  // it was asked. Never smaller than what was already seen: a job that was
+  // killed states no totals, and one that printed an early report and then
+  // carried on has only stale ones.
+  if (mHaveTotals) {
+    mStats.bytes = qMax(mStats.bytes, mTotals.bytes);
+    mStats.totalBytes = qMax(mStats.totalBytes, mTotals.totalBytes);
+    mStats.transfers = qMax(mStats.transfers, mTotals.transfers);
+    mStats.totalTransfers = qMax(mStats.totalTransfers, mTotals.totalTransfers);
+    mStats.checks = qMax(mStats.checks, mTotals.checks);
+    mStats.totalChecks = qMax(mStats.totalChecks, mTotals.totalChecks);
+    mStats.errors = qMax(mStats.errors, mTotals.errors);
+    mStats.valid = true;
+  }
 
   // A job the user cancelled is not a job that failed, even though rclone
   // exits non-zero either way.

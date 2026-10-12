@@ -119,6 +119,39 @@ bool IsRcPollingNoise(const QString &line);
 // Shared formatting so the widget and any future client agree.
 QString FormatBytes(qint64 bytes);
 
+// "297.852 KiB" as a number of bytes, or -1 when it is not a size.
+//
+// rclone prints sizes in binary units to three places, so the answer is the
+// printed figure and not the exact count: within a twentieth of a percent,
+// which is as much as anybody reading "298 KiB" is being told anyway.
+qint64 ParseRcloneSize(const QString &text);
+
+// Reads one line of the totals rclone prints when it finishes:
+//
+//   Transferred:        297.852 KiB / 297.852 KiB, 100%, 0 B/s, ETA -
+//   Checks:                 0 / 0, -, Listed 2
+//   Transferred:            2 / 2, 100%
+//   Errors:                 1 (retrying may help)
+//
+// Fills in whatever the line says and returns true if it said anything.
+//
+// The figures during a transfer come from core/stats, asked for once a
+// second. That is right for a progress bar and wrong for a total: whatever
+// was sent after the last answer is never counted, and a transfer shorter
+// than a second is recorded as nothing at all. Of 145 runs in one real
+// history, 144 had a size of zero. The totals rclone states on its way out
+// are the only ones that include the end.
+bool ApplyFinalTotalsLine(const QString &line, JobStats *stats);
+
+// The flags that make rclone state those totals, given the arguments a job
+// already has. Empty when the job's own flags already produce them.
+//
+// "--stats-log-level NOTICE" is what makes the totals appear at the default
+// log level. A very long "--stats" keeps the once-a-minute report that would
+// otherwise come with it out of the log -- unless the task asked for stats
+// or for verbose output itself, in which case its own choice is left alone.
+QStringList FinalTotalsFlags(const QStringList &args);
+
 // Exact, for a stopwatch: "1h5m3s". The seconds have to keep ticking or an
 // elapsed counter looks stopped.
 QString FormatSeconds(qint64 seconds);

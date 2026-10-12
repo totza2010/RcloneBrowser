@@ -143,7 +143,11 @@ void HistoryWidget::refresh() {
                     cell(QDateTime::fromMSecsSinceEpoch(row.startedAt)
                              .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
     mTable->setItem(i, ColName, cell(nameText(row)));
-    mTable->setItem(i, ColKind, cell(row.kind));
+    // A rehearsal says so in the same column, because every figure on the
+    // row means "would have" when it was one.
+    mTable->setItem(i, ColKind,
+                    cell(row.dryRun ? row.kind + QStringLiteral(" (dry run)")
+                                    : row.kind));
 
     QTableWidgetItem *result = cell(resultText(row, liveHere));
     if (row.state == QStringLiteral("error")) {

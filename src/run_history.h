@@ -33,6 +33,11 @@ struct JobRunRecord {
   QString state;
   int exitCode = -1;
 
+  // rclone was told to rehearse rather than do. It reports the sizes it
+  // would have sent as though it had sent them, so every figure below means
+  // "would have" when this is set -- and nothing was written anywhere.
+  bool dryRun = false;
+
   qint64 bytes = 0;
   qint64 totalBytes = 0;
   qint64 transfers = 0;
@@ -68,6 +73,19 @@ QList<JobRunRecord> forTask(const QString &taskId, int limit = 50);
 
 JobRunRecord find(const QString &requestId);
 int count();
+
+// The most recent transfer that wrote to a remote, and the most recent that
+// read from one. An empty record (no requestId) when there has been none.
+//
+// "When was this remote last uploaded to" is a question about the history,
+// not about the remote, and until now nothing could ask it: the remotes tab
+// drew a name and an icon, and the history was a separate table somebody had
+// to read down looking for that name.
+//
+// remote is the name without its colon. A run still going counts -- it is
+// the latest thing that happened -- and says so by its state.
+JobRunRecord lastUploadTo(const QString &remote);
+JobRunRecord lastDownloadFrom(const QString &remote);
 
 // How long history is kept. 0 for "keep everything", which is also what an
 // unreadable setting falls back to being refused -- see the implementation.

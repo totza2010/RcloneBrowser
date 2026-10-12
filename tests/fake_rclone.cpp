@@ -9,6 +9,8 @@
 //                "listremotes --long" produces
 //   lsjson       a directory of FAKE_RCLONE_ENTRIES entries (default 5),
 //                every other one a folder
+//   mkdir        succeeds, or fails with rclone's kind of message when
+//                FAKE_RCLONE_FAIL is set
 //   copy, sync,  does nothing for FAKE_RCLONE_SLEEP_MS (default 0) and then
 //   move         exits 0 -- a transfer that is still going when asked about
 //
@@ -61,6 +63,17 @@ int main(int argc, char *argv[]) {
       ms = std::atoi(asked);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return 0;
+  }
+
+  // Making a folder. Refuses when told to, with a line of the kind rclone
+  // prints, so the code that has to pass that line on has one to pass.
+  if (std::strcmp(command, "mkdir") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "2026/10/12 12:00:00 ERROR : Attempt 1/3 failed "
+                           "with 1 errors and: directory not found\n");
+      return 3;
+    }
     return 0;
   }
 

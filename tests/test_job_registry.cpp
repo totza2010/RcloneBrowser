@@ -135,10 +135,68 @@ private slots:
     QVERIFY(registry.find(QStringLiteral("{request-id}")) == nullptr);
   }
 
+  // A transfer of one small file is over before anything can be asked about
+  // it. Its size used to be recorded as zero -- the figures came from asking
+  // rclone once a second, and there was no second. In one real history 144
+  // runs of 145 said they had sent nothing. The size now comes from what
+  // rclone states as it finishes.
+  void aTransferTooShortToBeAskedAboutStillRecordsWhatItSent() {
+    QTemporaryDir fresh;
+    QVERIFY(fresh.isValid());
+
+    RunningJob *job = JobRegistry::instance().start(
+        JobKind::Transfer,
+        QStringList{"copy", mSource->path(), fresh.path()},
+        JobDescription{QStringLiteral("short"), mSource->path(), fresh.path()},
+        QString(), QStringLiteral("task"), QString());
+    QVERIFY(job != nullptr);
+
+    QSignalSpy ended(job, &RunningJob::finished);
+    QVERIFY(ended.wait(30000));
+    QCOMPARE(job->finalStatus(), QStringLiteral("finished"));
+
+    const qint64 size =
+        QFileInfo(QDir(mSource->path()).filePath("hello.txt")).size();
+    QVERIFY(size > 0);
+
+    QCOMPARE(job->stats().bytes, size);
+    QCOMPARE(job->stats().transfers, Q_INT64_C(1));
+
+    // And it is what the history says, which is what every view reads.
+    const JobRunRecord row = RunHistory::find(job->requestId());
+    QCOMPARE(row.bytes, size);
+    QCOMPARE(row.transfers, Q_INT64_C(1));
+  }
+
   // The figures on the card come from core/stats over rclone's remote
   // control, which the job now turns on itself. If that stops working the
   // card goes blank, so it is worth an assertion that does not involve a
   // card.
+  // A rehearsal is known by the command it was given, whoever asked for it.
+  // The Dry run button is one way and a task's own flags are another, and
+  // only the command line knows about both.
+  void aDryRunIsKnownByItsCommandAndRecordedAsOne() {
+    QTemporaryDir fresh;
+    QVERIFY(fresh.isValid());
+
+    RunningJob *job = JobRegistry::instance().start(
+        JobKind::Transfer,
+        QStringList{"copy", mSource->path(), fresh.path(), "--dry-run"},
+        JobDescription{QStringLiteral("Task: an ordinary description"),
+                       mSource->path(), fresh.path()},
+        QString(), QStringLiteral("task"), QString());
+    QVERIFY(job != nullptr);
+    QVERIFY(job->isDryRun());
+
+    QSignalSpy ended(job, &RunningJob::finished);
+    QVERIFY(ended.wait(30000));
+
+    // Nothing was written, and the history says it was a rehearsal even
+    // though nothing in its description does.
+    QVERIFY(!QFile::exists(QDir(fresh.path()).filePath("hello.txt")));
+    QVERIFY(RunHistory::find(job->requestId()).dryRun);
+  }
+
   void reportsProgressFromTheRemoteControl() {
     JobRegistry &registry = JobRegistry::instance();
 

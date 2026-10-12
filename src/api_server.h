@@ -124,6 +124,15 @@ private:
   void listDirectory(QTcpSocket *socket, const HttpRequest &request,
                      const QString &remote, const QString &path);
 
+  // Something done to a remote's files: answered when rclone has finished,
+  // with what it said if it did not manage. Held open like a listing, for
+  // the same reason -- the caller wants to know whether the folder exists
+  // now, not that somebody has been asked to make it.
+  void remoteOperation(QTcpSocket *socket, const HttpRequest &request,
+                       const QString &remote, const QString &operation);
+  void answerWhenDone(QTcpSocket *socket, class RunningJob *job,
+                      const QJsonObject &onSuccess);
+
   void openEventStream(QTcpSocket *socket);
   void broadcast(const QString &event, const QJsonObject &data);
 

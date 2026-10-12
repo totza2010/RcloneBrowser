@@ -23,6 +23,7 @@ JobRunRecord recordFor(const RunningJob *job) {
   r.source = job->description().source;
   r.dest = job->description().dest;
   r.startedAt = job->startedAt().toMSecsSinceEpoch();
+  r.dryRun = job->isDryRun();
 
   // Copied in at the time it ran, because the task can be renamed or deleted
   // and the history still has to say what this was.

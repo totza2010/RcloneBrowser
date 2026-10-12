@@ -360,6 +360,100 @@ private slots:
     QVERIFY2(text.contains(QStringLiteral("512.0 KiB")), qPrintable(text));
     QVERIFY2(text.contains(QStringLiteral("1.00 MiB/s")), qPrintable(text));
   }
+
+  // ---- the totals rclone states when it finishes --------------------------
+
+  void aPrintedSizeIsReadBackAsBytes() {
+    QCOMPARE(ParseRcloneSize(QStringLiteral("0 B")), Q_INT64_C(0));
+    QCOMPARE(ParseRcloneSize(QStringLiteral("512 B")), Q_INT64_C(512));
+    QCOMPARE(ParseRcloneSize(QStringLiteral("1 KiB")), Q_INT64_C(1024));
+    QCOMPARE(ParseRcloneSize(QStringLiteral("297.852 KiB")), Q_INT64_C(305000));
+    QCOMPARE(ParseRcloneSize(QStringLiteral("1.500 GiB")),
+             Q_INT64_C(1610612736));
+
+    // Not a size: a count, a dash, nothing.
+    QCOMPARE(ParseRcloneSize(QStringLiteral("2")), Q_INT64_C(-1));
+    QCOMPARE(ParseRcloneSize(QStringLiteral("-")), Q_INT64_C(-1));
+    QCOMPARE(ParseRcloneSize(QString()), Q_INT64_C(-1));
+  }
+
+  // Copied from rclone 1.73 finishing a copy of two files. Two lines carry
+  // the same label and mean different things; reading the second as bytes or
+  // the first as a count is the mistake to guard against.
+  void theClosingTotalsAreRead() {
+    JobStats stats;
+    const QStringList lines = {
+        QStringLiteral("2026/10/12 14:16:42 NOTICE: "),
+        QStringLiteral("Transferred:   	  297.852 KiB / 297.852 KiB, 100%, "
+                       "0 B/s, ETA -"),
+        QStringLiteral("Checks:                 4 / 6, 67%, Listed 2"),
+        QStringLiteral("Transferred:            2 / 3, 67%"),
+        QStringLiteral("Errors:                 1 (retrying may help)"),
+        QStringLiteral("Elapsed time:         0.0s")};
+
+    int understood = 0;
+    for (const QString &line : lines) {
+      understood += ApplyFinalTotalsLine(line, &stats) ? 1 : 0;
+    }
+
+    QCOMPARE(understood, 4);
+    QCOMPARE(stats.bytes, Q_INT64_C(305000));
+    QCOMPARE(stats.totalBytes, Q_INT64_C(305000));
+    QCOMPARE(stats.transfers, Q_INT64_C(2));
+    QCOMPARE(stats.totalTransfers, Q_INT64_C(3));
+    QCOMPARE(stats.checks, Q_INT64_C(4));
+    QCOMPARE(stats.totalChecks, Q_INT64_C(6));
+    QCOMPARE(stats.errors, Q_INT64_C(1));
+  }
+
+  // Nothing to send is an answer too: zero, stated, rather than unknown.
+  void aRunThatSentNothingSaysZero() {
+    JobStats stats;
+    stats.bytes = 999;
+    QVERIFY(ApplyFinalTotalsLine(
+        QStringLiteral("Transferred:   	          0 B / 0 B, -, 0 B/s, ETA -"),
+        &stats));
+    QCOMPARE(stats.bytes, Q_INT64_C(0));
+  }
+
+  void anOrdinaryLineOfOutputIsLeftAlone() {
+    JobStats stats;
+    for (const char *line :
+         {"2026/10/12 14:16:57 NOTICE: a.bin: Skipped copy as --dry-run is set",
+          "Transferred: something that is neither a size nor a count",
+          "Elapsed time:         0.0s", ""}) {
+      QVERIFY2(!ApplyFinalTotalsLine(QString::fromLatin1(line), &stats), line);
+    }
+    QCOMPARE(stats.bytes, Q_INT64_C(0));
+  }
+
+  // The flags that make rclone state its totals -- and the cases where the
+  // task has already said something about it and is left to have its way.
+  void theTotalsAreAskedForWithoutOverrulingTheTask() {
+    QCOMPARE(FinalTotalsFlags({QStringLiteral("copy"), QStringLiteral("a"),
+                               QStringLiteral("b")}),
+             QStringList({QStringLiteral("--stats-log-level"),
+                          QStringLiteral("NOTICE"), QStringLiteral("--stats"),
+                          QStringLiteral("8760h")}));
+
+    // Verbose: the minute-by-minute report is wanted, so the interval is not
+    // stretched -- only the level is set, so the totals still appear.
+    QCOMPARE(FinalTotalsFlags({QStringLiteral("copy"), QStringLiteral("-v")}),
+             QStringList({QStringLiteral("--stats-log-level"),
+                          QStringLiteral("NOTICE")}));
+
+    // An interval of the task's own choosing is kept.
+    QCOMPARE(FinalTotalsFlags({QStringLiteral("copy"),
+                               QStringLiteral("--stats=30s")}),
+             QStringList({QStringLiteral("--stats-log-level"),
+                          QStringLiteral("NOTICE")}));
+
+    // And a task that set the level itself is not touched at all.
+    QVERIFY(FinalTotalsFlags({QStringLiteral("copy"),
+                              QStringLiteral("--stats-log-level"),
+                              QStringLiteral("DEBUG")})
+                .isEmpty());
+  }
 };
 
 QTEST_MAIN(TestJobStats)

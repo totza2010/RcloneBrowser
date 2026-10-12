@@ -19,6 +19,7 @@
 #include "mount_widget.h"
 #include "preferences_dialog.h"
 #include "job_registry.h"
+#include "job_stats.h"
 #include "rclone_flags.h"
 #include "remote_widget.h"
 #include "scheduler_widget.h"
@@ -880,7 +881,9 @@ MainWindow::MainWindow() {
     if (ui.remotes->selectedItems().size() != 0) {
       auto item = ui.remotes->selectedItems().front();
       QString type = item->data(Qt::UserRole).toString();
-      QString name = item->text();
+      // The name on its own, not the label: the label now carries a second
+      // line saying when the remote was last uploaded to.
+      QString name = item->data(Qt::UserRole + 1).toString();
       QString remoteType = type;
 
       auto remote = new RemoteWidget(&mIcons, name, remoteType, ui.tabs);
@@ -1907,6 +1910,12 @@ MainWindow::MainWindow() {
                        addJobCard(job);
                      }
                    });
+
+  // A transfer starting or ending is when "last uploaded" changes.
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
+                   [this](RunningJob *) { refreshRemoteActivity(); });
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,
+                   [this](RunningJob *) { refreshRemoteActivity(); });
 
   // And a card for anything already going. AppCore reads the stored queue
   // before this window exists, so a queue left running has its first job
@@ -3077,11 +3086,123 @@ void MainWindow::drawRemotes() {
 
             QListWidgetItem *item = new QListWidgetItem(icon, name);
             item->setData(Qt::UserRole, type);
+            item->setData(Qt::UserRole + 1, name);
             item->setToolTip(tooltip);
             ui.remotes->addItem(item);
           }
     }
     ui.open->setEnabled(false);
+  }
+
+  refreshRemoteActivity();
+}
+
+namespace {
+
+// "8s", "4m 12s", "2h 05m". Seconds stop mattering once there are hours.
+QString DurationText(qint64 ms) {
+  const qint64 total = ms / 1000;
+  if (total < 60) {
+    return QString("%1s").arg(total);
+  }
+  if (total < 3600) {
+    return QString("%1m %2s").arg(total / 60).arg(total % 60, 2, 10, QChar('0'));
+  }
+  return QString("%1h %2m")
+      .arg(total / 3600)
+      .arg((total % 3600) / 60, 2, 10, QChar('0'));
+}
+
+// The lines of the tooltip for one run: when it began, when it ended, how
+// long that was and how it went.
+QString RunDetails(const QString &heading, const JobRunRecord &run) {
+  if (run.requestId.isEmpty()) {
+    return heading + ": never";
+  }
+  const QString format = "yyyy-MM-dd HH:mm:ss";
+  QString text = heading + ": " + run.taskName;
+  text += "\n    started:   " +
+          QDateTime::fromMSecsSinceEpoch(run.startedAt).toString(format);
+  if (run.finishedAt > 0) {
+    text += "\n    finished:  " +
+            QDateTime::fromMSecsSinceEpoch(run.finishedAt).toString(format);
+    text += "\n    took:      " + DurationText(run.finishedAt - run.startedAt);
+  } else {
+    text += "\n    finished:  still running";
+  }
+  text += "\n    result:    " + run.state;
+  text += "\n    sent:      " + FormatBytes(run.bytes);
+  if (run.transfers > 0) {
+    text += QString(" in %1 file(s)").arg(run.transfers);
+  }
+  return text;
+}
+
+} // namespace
+
+// Puts under each remote when it was last uploaded to, and in its tooltip
+// the whole of it: started, finished, how long, how it ended, and the same
+// for the last download.
+//
+// Kept apart from drawRemotes() so that a transfer ending can update the
+// labels in place. Redrawing the list would do it too, and would also throw
+// away whichever remote was selected at the time.
+void MainWindow::refreshRemoteActivity() {
+  const bool tiles = ui.remotes->viewMode() == QListWidget::IconMode;
+
+  for (int i = 0; i < ui.remotes->count(); ++i) {
+    QListWidgetItem *item = ui.remotes->item(i);
+    const QString name = item->data(Qt::UserRole + 1).toString();
+    const QString type = item->data(Qt::UserRole).toString();
+
+    const JobRunRecord up = RunHistory::lastUploadTo(name);
+    const JobRunRecord down = RunHistory::lastDownloadFrom(name);
+
+    QString label = name;
+    if (!up.requestId.isEmpty()) {
+      const QDateTime started = QDateTime::fromMSecsSinceEpoch(up.startedAt);
+      // An upward arrow and a middle dot, by number rather than typed into
+      // the source, so they do not depend on how this file is encoded.
+      const QString dot = QString(" ") + QChar(0x00B7) + " ";
+      QString line = QString(QChar(0x2191)) + " " +
+                     started.toString("d MMM HH:mm");
+      if (up.finishedAt > 0) {
+        line += dot + DurationText(up.finishedAt - up.startedAt);
+      } else {
+        line += dot + "running";
+      }
+      // Said only when it did not go well: "finished" on every remote is
+      // noise, and the ones that failed are the ones worth seeing.
+      if (up.finishedAt > 0 && up.state != QLatin1String("finished")) {
+        line += dot + up.state;
+      }
+      // How much went up that time. Left off when nothing did, rather than
+      // saying "0 B" under a remote that was only checked against.
+      if (up.bytes > 0) {
+        line += dot + FormatBytes(up.bytes);
+      }
+      label += (tiles ? "\n" : "    ") + line;
+    }
+    item->setText(label);
+
+    item->setToolTip("type: " + type + "\nname: " + name + "\n\n" +
+                     RunDetails("last upload", up) + "\n\n" +
+                     RunDetails("last download", down));
+  }
+
+  if (tiles) {
+    // Room for the second line, which the grid was never sized for.
+    ui.remotes->setWordWrap(true);
+    const QSize grid = ui.remotes->gridSize();
+    const int wanted = ui.remotes->iconSize().height() + 40 +
+                       ui.remotes->fontMetrics().lineSpacing() * 2;
+    if (grid.height() < wanted) {
+      ui.remotes->setGridSize(
+          QSize(qMax(grid.width(), ui.remotes->fontMetrics().horizontalAdvance(
+                                       "^ 30 MMM 00:00 - 00m 00s ") +
+                                       12),
+                wanted));
+    }
   }
 }
 

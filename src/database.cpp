@@ -140,6 +140,38 @@ bool migrateTo2(QSqlDatabase &db) {
                                 "args TEXT NOT NULL)"));
 }
 
+// Whether a run was a dry run, as a fact of its own.
+//
+// It was only ever recorded in the words a run described itself with, and
+// only when the dry run was asked for from the Dry run button. A task can
+// carry --dry-run among its own flags, and then nothing anywhere said so: the
+// run was filed as an ordinary transfer that happened to send nothing. That
+// is how a remote came to show a "last upload" that had uploaded nothing.
+bool migrateTo3(QSqlDatabase &db) {
+  if (!run(db, QStringLiteral("ALTER TABLE job_run ADD COLUMN dry_run "
+                              "INTEGER NOT NULL DEFAULT 0"))) {
+    return false;
+  }
+
+  // What can be worked out about the runs already there.
+  //
+  // Those started from the Dry run button said so in their description.
+  if (!run(db, QStringLiteral("UPDATE job_run SET dry_run = 1 "
+                              "WHERE info LIKE 'Dry run%'"))) {
+    return false;
+  }
+
+  // Those of a task that carries --dry-run among its flags today. This is an
+  // inference -- the command each run actually used was never stored -- and
+  // it is wrong for a task that ran for real and had the flag added later.
+  // It is made anyway because the other mistake is the worse one: a rehearsal
+  // shown as an upload tells somebody their files are somewhere they are not.
+  return run(db, QStringLiteral(
+                     "UPDATE job_run SET dry_run = 1 WHERE kind = 'transfer' "
+                     "AND task_id IN (SELECT id FROM task WHERE "
+                     "options LIKE '%--dry-run%')"));
+}
+
 bool migrate(QSqlDatabase &db) {
   int version = readVersion(db);
   if (version == Database::kSchemaVersion) {
@@ -173,6 +205,9 @@ bool migrate(QSqlDatabase &db) {
   }
   if (ok && version < 2) {
     ok = migrateTo2(db);
+  }
+  if (ok && version < 3) {
+    ok = migrateTo3(db);
   }
 
   if (ok) {

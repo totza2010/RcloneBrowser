@@ -302,30 +302,21 @@ QStringList GetRcloneCmd(const QStringList &args) {
     }
   }
 
-  if (!rcloneOptions.isEmpty() && rcloneOptions.count() > 1) {
-    // copy/move/sync
-    rcloneTransferCmd << rcloneOptions.takeAt(0);
-
-    // source and destination
-    if (rcloneOptions.at(0).contains(" ")) {
-      rcloneTransferCmd << "\"" + rcloneOptions.takeAt(0) + "\"";
+  // The command and everything after it, each quoted if it has a space in
+  // it.
+  //
+  // This used to take the verb and then two more arguments on their own
+  // before looping over the rest -- on the assumption that every command is
+  // "verb source destination". The three were quoted exactly as the loop
+  // quotes, so nothing was gained by it, and a command with one argument
+  // after its verb ("mkdir remote:folder") read past the end of the list:
+  // an assertion in a debug build, and whatever happened to be in memory in
+  // a release one.
+  for (const QString &argument : rcloneOptions) {
+    if (argument.contains(" ")) {
+      rcloneTransferCmd << "\"" + argument + "\"";
     } else {
-      rcloneTransferCmd << rcloneOptions.takeAt(0);
-    }
-
-    if (rcloneOptions.at(0).contains(" ")) {
-      rcloneTransferCmd << "\"" + rcloneOptions.takeAt(0) + "\"";
-    } else {
-      rcloneTransferCmd << rcloneOptions.takeAt(0);
-    }
-  }
-
-  // rclone remaining options
-  for (int j = 0; j < rcloneOptions.count(); ++j) {
-    if (rcloneOptions.at(j).contains(" ")) {
-      rcloneTransferCmd << "\"" + rcloneOptions.at(j) + "\"";
-    } else {
-      rcloneTransferCmd << rcloneOptions.at(j);
+      rcloneTransferCmd << argument;
     }
   }
 

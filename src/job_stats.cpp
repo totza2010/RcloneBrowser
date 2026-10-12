@@ -278,3 +278,120 @@ quint16 ParseRcServingPort(const QString &line) {
   }
   return static_cast<quint16>(port);
 }
+
+qint64 ParseRcloneSize(const QString &text) {
+  static const QRegularExpression pattern(
+      QStringLiteral("^\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(B|KiB|MiB|GiB|TiB|PiB|EiB)\\s*$"));
+  const QRegularExpressionMatch match = pattern.match(text);
+  if (!match.hasMatch()) {
+    return -1;
+  }
+
+  static const QStringList units = {
+      QStringLiteral("B"),   QStringLiteral("KiB"), QStringLiteral("MiB"),
+      QStringLiteral("GiB"), QStringLiteral("TiB"), QStringLiteral("PiB"),
+      QStringLiteral("EiB")};
+  double value = match.captured(1).toDouble();
+  for (int i = units.indexOf(match.captured(2)); i > 0; --i) {
+    value *= 1024.0;
+  }
+  return qint64(value + 0.5);
+}
+
+bool ApplyFinalTotalsLine(const QString &line, JobStats *stats) {
+  if (stats == nullptr) {
+    return false;
+  }
+  const QString text = line.trimmed();
+
+  const auto after = [&text](const char *label) {
+    return text.mid(int(qstrlen(label))).trimmed();
+  };
+
+  if (text.startsWith(QLatin1String("Transferred:"))) {
+    // Two lines share this label: one counts bytes, the other counts files.
+    // The part before the first comma is "a / b" either way.
+    const QString pair = after("Transferred:").section(QLatin1Char(','), 0, 0);
+    const QString left = pair.section(QLatin1Char('/'), 0, 0).trimmed();
+    const QString right = pair.section(QLatin1Char('/'), 1, 1).trimmed();
+
+    const qint64 sent = ParseRcloneSize(left);
+    if (sent >= 0) {
+      stats->bytes = sent;
+      const qint64 total = ParseRcloneSize(right);
+      if (total >= 0) {
+        stats->totalBytes = total;
+      }
+      return true;
+    }
+
+    bool leftOk = false;
+    bool rightOk = false;
+    const qint64 done = left.toLongLong(&leftOk);
+    const qint64 all = right.toLongLong(&rightOk);
+    if (leftOk && rightOk) {
+      stats->transfers = done;
+      stats->totalTransfers = all;
+      return true;
+    }
+    return false;
+  }
+
+  if (text.startsWith(QLatin1String("Checks:"))) {
+    const QString pair = after("Checks:").section(QLatin1Char(','), 0, 0);
+    bool leftOk = false;
+    bool rightOk = false;
+    const qint64 done =
+        pair.section(QLatin1Char('/'), 0, 0).trimmed().toLongLong(&leftOk);
+    const qint64 all =
+        pair.section(QLatin1Char('/'), 1, 1).trimmed().toLongLong(&rightOk);
+    if (leftOk && rightOk) {
+      stats->checks = done;
+      stats->totalChecks = all;
+      return true;
+    }
+    return false;
+  }
+
+  if (text.startsWith(QLatin1String("Errors:"))) {
+    bool ok = false;
+    const qint64 count =
+        after("Errors:").section(QLatin1Char(' '), 0, 0).toLongLong(&ok);
+    if (ok) {
+      stats->errors = count;
+      return true;
+    }
+  }
+  return false;
+}
+
+QStringList FinalTotalsFlags(const QStringList &args) {
+  bool statsLevel = false;
+  bool statsInterval = false;
+  bool verbose = false;
+
+  for (const QString &arg : args) {
+    if (arg.startsWith(QLatin1String("--stats-log-level"))) {
+      statsLevel = true;
+    } else if (arg == QLatin1String("--stats") ||
+               arg.startsWith(QLatin1String("--stats="))) {
+      statsInterval = true;
+    } else if (arg == QLatin1String("-v") || arg == QLatin1String("-vv") ||
+               arg == QLatin1String("--verbose") ||
+               arg.startsWith(QLatin1String("--log-level"))) {
+      verbose = true;
+    }
+  }
+
+  QStringList flags;
+  if (!statsLevel) {
+    flags << QStringLiteral("--stats-log-level") << QStringLiteral("NOTICE");
+  }
+  // Only when the task said nothing about it either way. Somebody who asked
+  // for verbose output wants the report every minute; somebody who set an
+  // interval chose one.
+  if (!statsInterval && !verbose && !statsLevel) {
+    flags << QStringLiteral("--stats") << QStringLiteral("8760h");
+  }
+  return flags;
+}

@@ -438,6 +438,7 @@ function jobCard(job) {
       '<div class="card-head">' +
         '<span class="name">' + esc(job.info || job.kind) + "</span>" +
         '<span class="tag ' + esc(status) + '">' + esc(status) + "</span>" +
+        (job.dryRun ? '<span class="tag">dry run</span>' : "") +
         '<div class="card-actions">' +
           '<button class="ghost small" data-log="' + esc(job.requestId) + '">Log</button>' +
           (job.running
@@ -542,7 +543,7 @@ function drawHistory() {
     "<tr>" +
       "<td>" + esc(when(row.startedAt)) + "</td>" +
       "<td>" + esc(row.taskName || row.kind) + "</td>" +
-      "<td>" + esc(row.kind) + "</td>" +
+      "<td>" + esc(row.kind) + (row.dryRun ? " (dry run)" : "") + "</td>" +
       "<td>" + esc(row.startedBy) + "</td>" +
       '<td><span class="tag ' + esc(row.state) + '">' + esc(row.state) + "</span></td>" +
       "<td>" + esc(duration(row)) + "</td>" +
@@ -568,6 +569,7 @@ function drawRemotes() {
           (r.name === browsing.remote ? ' class="on"' : "") + ">" +
           esc(r.name) +
           '<span class="type">' + esc(r.type) + "</span>" +
+          '<span class="type">' + esc(lastRunLine("↑", r.lastUpload)) + "</span>" +
         "</button>"
       )).join("")
     : '<p class="empty">No remotes. They are configured with rclone itself.</p>';
@@ -575,8 +577,62 @@ function drawRemotes() {
   $("browser").classList.toggle("hidden", !browsing.remote);
   if (!browsing.remote) return;
 
+  const chosen = state.remotes.find((r) => r.name === browsing.remote);
+  $("remote-info").innerHTML = chosen
+    ? runDetails("Last upload", chosen.lastUpload) +
+      runDetails("Last download", chosen.lastDownload)
+    : "";
+
   drawCrumbs();
   drawListing();
+}
+
+// The one line under a remote's name: when it was last uploaded to and how
+// long that took. The same line the desktop window puts there, from the same
+// row of the history.
+function lastRunLine(arrow, run) {
+  if (!run) return arrow + " never";
+  const started = new Date(run.startedAt);
+  let line = arrow + " " + started.toLocaleString(undefined, {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+  if (run.durationSeconds === null || run.durationSeconds === undefined) {
+    return line + " · running";
+  }
+  line += " · " + seconds(run.durationSeconds);
+  // Said only when it did not go well: "finished" on every remote is noise.
+  if (run.state !== "finished") line += " · " + run.state;
+  // How much went up that time. Left off when nothing did.
+  if (run.bytes > 0) line += " · " + bytes(run.bytes);
+  return line;
+}
+
+// The whole of one run: began, ended, how long, how it went.
+function runDetails(heading, run) {
+  if (!run) {
+    return '<div class="card"><div class="card-head"><span class="name">' +
+      esc(heading) + '</span><span class="muted">never</span></div></div>';
+  }
+  const still = run.durationSeconds === null || run.durationSeconds === undefined;
+  return (
+    '<div class="card">' +
+      '<div class="card-head">' +
+        '<span class="name">' + esc(heading) + "</span>" +
+        '<span class="tag ' + esc(run.state) + '">' + esc(run.state) + "</span>" +
+        '<div class="card-actions">' +
+          '<button class="ghost small" data-log="' + esc(run.requestId) + '">Log</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="path">' + esc(run.taskName) + " · " + esc(run.source) + " → " + esc(run.dest) + "</div>" +
+      '<div class="figures">' +
+        "<span>started " + esc(when(run.startedAt)) + "</span>" +
+        "<span>" + (still ? "still running" : "finished " + esc(when(run.finishedAt))) + "</span>" +
+        (still ? "" : "<span>took " + esc(seconds(run.durationSeconds)) + "</span>") +
+        "<span>sent " + bytes(run.bytes) +
+          (run.transfers ? " in " + run.transfers + " file(s)" : "") + "</span>" +
+      "</div>" +
+    "</div>"
+  );
 }
 
 function drawCrumbs() {
@@ -660,6 +716,27 @@ async function browse(remote, path) {
   }
   drawRemotes();
 }
+
+// ---- doing things to a remote's files ------------------------------------
+//
+// The same commands the desktop window has on a remote's tab, arriving here
+// one at a time as each is moved into the core. See docs/WEB-API-PLAN.md.
+
+$("remote-refresh").addEventListener("click", () =>
+  browse(browsing.remote, browsing.path));
+
+$("remote-mkdir").addEventListener("click", async () => {
+  const where = browsing.remote + ":" + browsing.path;
+  const name = prompt("Create folder in " + where);
+  if (name === null || !name.trim()) return;
+
+  // Answered when rclone has finished, so the listing read straight after
+  // has the new folder in it -- or the reason there is none.
+  const made = await command(
+    "POST", "/remotes/" + encodeURIComponent(browsing.remote) + "/mkdir",
+    { path: browsing.path, name: name });
+  if (made) browse(browsing.remote, browsing.path);
+});
 
 // ---- a job's log ----------------------------------------------------------
 

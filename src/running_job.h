@@ -46,6 +46,10 @@ enum class JobKind {
   Link,
   About,
   Cleanup,
+  // What is done to a remote's files from its tab, one kind each for the
+  // same reason as the tools above: the history is read by a person, and
+  // "made a folder" is not the same news as "deleted one".
+  Mkdir,
 };
 
 enum class JobState {
@@ -118,6 +122,12 @@ public:
   // all. Both are kept because a caller that reports an exit code has to
   // tell these apart from rclone's own: "--run-task" documents 69 for an
   // rclone that would not start and 70 for one that did not exit normally.
+  // Whether rclone was told to rehearse. Read from the arguments it was
+  // actually given, not from how the job was started: the Dry run button is
+  // one way to ask for it and a task's own flags are another, and only the
+  // command line knows about both.
+  bool isDryRun() const;
+
   bool crashed() const { return mCrashed; }
   bool everStarted() const { return mEverStarted; }
 
@@ -202,4 +212,6 @@ private:
   JobState mState = JobState::Running;
   bool mStopRequested = false;
   JobStats mStats;
+  JobStats mTotals; // what rclone stated on its way out
+  bool mHaveTotals = false;
 };

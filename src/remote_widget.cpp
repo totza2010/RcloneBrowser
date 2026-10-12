@@ -1,4 +1,5 @@
 #include "remote_widget.h"
+#include "remote_ops.h"
 #include "job_registry.h"
 #include "check_dialog.h"
 #include "dedupe_dialog.h"
@@ -644,18 +645,20 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
           (isLocal ? QDir::toNativeSeparators(folder) : folder),
           Qt::ElideMiddle, 500);
 
-      QProcess process;
-      UseRclonePassword(&process);
-      process.setProgram(GetRclone());
-      process.setArguments(QStringList()
-                           << "mkdir" << GetRcloneConf()
-                           << GetRemoteModeRcloneOptions()
-                           << GetDefaultOptionsList("defaultRcloneOptions")
-                           << remote + ":" + folder);
-      process.setProcessChannelMode(QProcess::MergedChannels);
+      // Through the core, like everything else that runs rclone. This built
+      // a QProcess of its own here, which is why making a folder left no
+      // trace in the history and why nothing but this button could ask for
+      // one. See remote_ops.h.
+      QString why;
+      RunningJob *job =
+          RemoteOps::MakeFolder(remote, path.path(), name, &why);
+      if (job == nullptr) {
+        QMessageBox::warning(this, "New Folder", why);
+        return;
+      }
 
       ProgressDialog progress("New Folder", "Creating...",
-                              "\"" + folderMsg + "\"", &process, this);
+                              "\"" + folderMsg + "\"", job, this);
       if (progress.exec() == QDialog::Accepted) {
         model->refresh(index);
       }

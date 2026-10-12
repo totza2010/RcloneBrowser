@@ -289,6 +289,193 @@ private slots:
 private:
   std::unique_ptr<QTemporaryDir> mScratch;
   int mCounter = 0;
+
+  // ---- when a remote was last used ----------------------------------------
+
+  JobRunRecord transfer(const QString &id, qint64 started, const QString &source,
+                        const QString &dest) {
+    JobRunRecord r = sample(id, started);
+    r.kind = QStringLiteral("transfer");
+    r.source = source;
+    r.dest = dest;
+    return r;
+  }
+
+private slots:
+  // The question the remotes tab could not ask: when was this one last
+  // uploaded to, and when did that begin and end.
+  void theLastUploadToARemoteIsTheNewestOneWrittenThere() {
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("old"), 1000, QStringLiteral("C:/a"),
+        QStringLiteral("gdrive:backup"))));
+    JobRunRecord newer = transfer(QStringLiteral("new"), 5000,
+                                  QStringLiteral("C:/b"),
+                                  QStringLiteral("gdrive:films/2026"));
+    newer.finishedAt = 9000;
+    newer.state = QStringLiteral("finished");
+    QVERIFY(RunHistory::recordFinished(newer));
+
+    const JobRunRecord last = RunHistory::lastUploadTo(QStringLiteral("gdrive"));
+    QCOMPARE(last.requestId, QStringLiteral("new"));
+    QCOMPARE(last.startedAt, qint64(5000));
+    QCOMPARE(last.finishedAt, qint64(9000));
+    QCOMPARE(last.state, QStringLiteral("finished"));
+  }
+
+  // Up and down are different questions. A download from a remote is not an
+  // upload to it, however recently it happened.
+  void anUploadAndADownloadAreToldApart() {
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("up"), 1000, QStringLiteral("C:/a"),
+        QStringLiteral("gdrive:in"))));
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("down"), 2000, QStringLiteral("gdrive:out"),
+        QStringLiteral("C:/b"))));
+
+    QCOMPARE(RunHistory::lastUploadTo(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("up"));
+    QCOMPARE(RunHistory::lastDownloadFrom(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("down"));
+  }
+
+  // The names in use are tgdrive_main_01 and the like, and in SQL's LIKE an
+  // underscore matches any one character. One remote's upload must not be
+  // reported as another's because their names differ only where an
+  // underscore is -- nor because one name begins with the other.
+  void oneRemoteIsNotMistakenForAnotherWithASimilarName() {
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("x"), 1000, QStringLiteral("C:/a"),
+        QStringLiteral("tgdriveXmain:folder"))));
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("long"), 2000, QStringLiteral("C:/a"),
+        QStringLiteral("gdrive2:folder"))));
+
+    QVERIFY2(RunHistory::lastUploadTo(QStringLiteral("tgdrive_main"))
+                 .requestId.isEmpty(),
+             "an underscore in a remote's name matched a different remote");
+    QVERIFY2(RunHistory::lastUploadTo(QStringLiteral("gdrive"))
+                 .requestId.isEmpty(),
+             "a remote was matched by one whose name merely begins the same");
+  }
+
+  // Never used is an answer too, and it is an empty one rather than an error
+  // or somebody else's run.
+  void aRemoteNeverUsedHasNoLastRun() {
+    QVERIFY(RunHistory::lastUploadTo(QStringLiteral("gdrive"))
+                .requestId.isEmpty());
+    QVERIFY(RunHistory::lastUploadTo(QString()).requestId.isEmpty());
+
+    // A local folder that happens to have a colon in it is not a remote.
+    QVERIFY(RunHistory::recordStarted(transfer(
+        QStringLiteral("local"), 1000, QStringLiteral("gdrive:a"),
+        QStringLiteral("C:/gdrive:odd"))));
+    QVERIFY(RunHistory::lastUploadTo(QStringLiteral("gdrive"))
+                .requestId.isEmpty());
+  }
+
+  // A dry run sent nothing, so it is not the last time anything was sent --
+  // however recent it is, and whatever size rclone said it would have been.
+  //
+  // Told by the run's own flag and by nothing else. The first version looked
+  // for the words "Dry run" in how the run described itself, and those are
+  // only there when the Dry run button was used: a task that carries
+  // --dry-run among its own flags describes itself as an ordinary task, and
+  // every remote in the real history was showing one of those as its last
+  // upload.
+  void aDryRunIsNotAnUpload() {
+    JobRunRecord real = transfer(QStringLiteral("real"), 1000,
+                                 QStringLiteral("C:/a"),
+                                 QStringLiteral("gdrive:in"));
+    real.info = QStringLiteral("Task: \"films\", Copy from C:/a");
+    QVERIFY(RunHistory::recordStarted(real));
+
+    JobRunRecord dry = transfer(QStringLiteral("dry"), 9000,
+                                QStringLiteral("C:/a"),
+                                QStringLiteral("gdrive:in"));
+    dry.info = QStringLiteral("Task: \"films\", Copy from C:/a"); // no hint
+    dry.dryRun = true;
+    dry.bytes = 123456;
+    QVERIFY(RunHistory::recordStarted(dry));
+
+    QCOMPARE(RunHistory::lastUploadTo(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("real"));
+
+    // And the flag survives the round trip, so a view can say which it was.
+    QVERIFY(RunHistory::find(QStringLiteral("dry")).dryRun);
+    QVERIFY(!RunHistory::find(QStringLiteral("real")).dryRun);
+  }
+
+  // A history written before runs said whether they were rehearsals. What can
+  // be worked out about the old rows is worked out once, when the database is
+  // brought up to date -- and what cannot be, is left as a real run.
+  void anOlderHistoryLearnsWhichRunsWereRehearsals() {
+    const QString path = Database::path();
+    {
+      // The database as the previous build left it: version 2, no dry_run.
+      QSqlDatabase old =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), "old-shape");
+      old.setDatabaseName(path);
+      QVERIFY(old.open());
+      QSqlQuery q(old);
+      QVERIFY(q.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)"));
+      QVERIFY(q.exec("INSERT INTO meta VALUES('schema_version','2')"));
+      QVERIFY(q.exec(
+          "CREATE TABLE job_run (request_id TEXT PRIMARY KEY, task_id TEXT, "
+          "task_name TEXT, kind TEXT, transfer_mode TEXT, info TEXT, "
+          "source TEXT, dest TEXT, started_at INTEGER NOT NULL, "
+          "finished_at INTEGER, state TEXT, exit_code INTEGER, "
+          "bytes INTEGER DEFAULT 0, total_bytes INTEGER DEFAULT 0, "
+          "transfers INTEGER DEFAULT 0, errors INTEGER DEFAULT 0, "
+          "log_path TEXT, log_bytes INTEGER DEFAULT 0)"));
+      QVERIFY(q.exec(
+          "CREATE TABLE task (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+          "operation INTEGER, source TEXT, dest TEXT, options TEXT NOT NULL, "
+          "position INTEGER DEFAULT 0, created_at INTEGER, updated_at INTEGER)"));
+
+      QVERIFY(q.exec("INSERT INTO task (id, name, options) VALUES "
+                     "('rehearsing', 'r', '{\"extra\":\"--dry-run\"}'), "
+                     "('plain', 'p', '{\"extra\":\"\"}')"));
+
+      QVERIFY(q.exec(
+          "INSERT INTO job_run (request_id, task_id, kind, info, dest, "
+          "started_at) VALUES "
+          // started from the Dry run button: it said so itself
+          "('button', 'plain', 'transfer', 'Dry run, task: x', 'gdrive:a', 3000), "
+          // a task whose own flags make every run a rehearsal
+          "('flagged', 'rehearsing', 'transfer', 'Task: r', 'gdrive:a', 2000), "
+          // an ordinary upload
+          "('real', 'plain', 'transfer', 'Task: p', 'gdrive:a', 1000)"));
+      old.close();
+    }
+    QSqlDatabase::removeDatabase("old-shape");
+
+    // Opening it brings it up to date.
+    QVERIFY2(Database::connection().isOpen(), qPrintable(Database::lastError()));
+    QCOMPARE(Database::schemaVersion(), Database::kSchemaVersion);
+
+    QVERIFY(RunHistory::find(QStringLiteral("button")).dryRun);
+    QVERIFY(RunHistory::find(QStringLiteral("flagged")).dryRun);
+    QVERIFY(!RunHistory::find(QStringLiteral("real")).dryRun);
+
+    // Which is the whole point: the newest two were rehearsals, and the
+    // remote's last upload is the older, real one.
+    QCOMPARE(RunHistory::lastUploadTo(QStringLiteral("gdrive")).requestId,
+             QStringLiteral("real"));
+    QCOMPARE(RunHistory::count(), 3); // nothing was lost on the way
+  }
+
+  // Only transfers. A mount of the remote, or a size check on it, is not
+  // "the last time something was uploaded".
+  void onlyATransferCounts() {
+    JobRunRecord mount = transfer(QStringLiteral("m"), 3000,
+                                  QStringLiteral("C:/x"),
+                                  QStringLiteral("gdrive:"));
+    mount.kind = QStringLiteral("mount");
+    QVERIFY(RunHistory::recordStarted(mount));
+
+    QVERIFY(RunHistory::lastUploadTo(QStringLiteral("gdrive"))
+                .requestId.isEmpty());
+  }
 };
 
 QTEST_GUILESS_MAIN(TestRunHistory)

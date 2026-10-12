@@ -151,6 +151,33 @@ private slots:
     QFETCH(unsigned int, expected);
     QCOMPARE(::compareVersion(a.toStdString(), b.toStdString()), expected);
   }
+
+  // The command as it is shown, for any command and not only a transfer. It
+  // assumed "verb source destination" and took three arguments by position,
+  // so a command with one argument after its verb read past the end of the
+  // list. Nothing ran one until making a folder went through the registry.
+  void aShownCommandNeedNotBeATransfer() {
+    SetRclone(QStringLiteral("rclone"));
+    SetRcloneConf(QString());
+
+    QCOMPARE(GetRcloneCmd({QStringLiteral("mkdir"),
+                           QStringLiteral("gdrive:new folder")}),
+             QStringList({QStringLiteral("rclone"), QStringLiteral("mkdir"),
+                          QStringLiteral("\"gdrive:new folder\"")}));
+
+    QCOMPARE(GetRcloneCmd({QStringLiteral("version")}),
+             QStringList({QStringLiteral("rclone"), QStringLiteral("version")}));
+    QCOMPARE(GetRcloneCmd({}), QStringList({QStringLiteral("rclone")}));
+
+    // And a transfer comes out as it always did.
+    QCOMPARE(GetRcloneCmd({QStringLiteral("copy"), QStringLiteral("C:/my films"),
+                           QStringLiteral("gdrive:films"),
+                           QStringLiteral("--verbose")}),
+             QStringList({QStringLiteral("rclone"), QStringLiteral("copy"),
+                          QStringLiteral("\"C:/my films\""),
+                          QStringLiteral("gdrive:films"),
+                          QStringLiteral("--verbose")}));
+  }
 };
 
 QTEST_MAIN(TestUtils)

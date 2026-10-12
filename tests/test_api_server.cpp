@@ -5,6 +5,7 @@
 #include "job_queue.h"
 #include "list_of_job_options.h"
 #include "remote_registry.h"
+#include "run_history.h"
 #include "utils.h"
 
 #include <QCoreApplication>
@@ -662,6 +663,138 @@ private slots:
                    .toObject().value(QStringLiteral("path")).toString(),
                QStringLiteral("films/item-0"));
     }
+  }
+
+  // When a remote was last uploaded to, from the history. The window shows
+  // it under each remote; the page has to be able to say the same, and from
+  // the same row.
+  void aRemoteSaysWhenItWasLastUploadedTo() {
+    QVERIFY(useFakeRclone(1));
+
+    JobRunRecord run;
+    run.requestId = QStringLiteral("{last-upload-test}");
+    run.taskName = QStringLiteral("nightly");
+    run.kind = QStringLiteral("transfer");
+    run.transferMode = QStringLiteral("task");
+    run.source = QStringLiteral("C:/films");
+    run.dest = QStringLiteral("fake:films");
+    run.startedAt = QDateTime::currentMSecsSinceEpoch() - 90000;
+    run.finishedAt = run.startedAt + 61500;
+    run.state = QStringLiteral("finished");
+    QVERIFY(RunHistory::recordFinished(run));
+
+    const QByteArray reply = ask("GET", "/api/v1/remotes", mToken);
+    QCOMPARE(statusOf(reply), 200);
+
+    QJsonObject remote;
+    for (const QJsonValue &value : bodyOf(reply).array()) {
+      if (value.toObject().value(QStringLiteral("name")).toString() ==
+          QLatin1String("fake")) {
+        remote = value.toObject();
+      }
+    }
+    QVERIFY2(!remote.isEmpty(), "the remote was not listed");
+
+    const QJsonObject up = remote.value(QStringLiteral("lastUpload")).toObject();
+    QCOMPARE(up.value(QStringLiteral("requestId")).toString(), run.requestId);
+    QCOMPARE(up.value(QStringLiteral("state")).toString(),
+             QStringLiteral("finished"));
+    QCOMPARE(up.value(QStringLiteral("durationSeconds")).toDouble(), 61.5);
+
+    // The moment carries its offset from UTC. Without one, the same string
+    // means a different instant to a reader in another time zone.
+    const QString started = up.value(QStringLiteral("startedAt")).toString();
+    QVERIFY2(QDateTime::fromString(started, Qt::ISODate).toMSecsSinceEpoch() /
+                     1000 ==
+                 run.startedAt / 1000,
+             qPrintable(started));
+    QVERIFY2(started.contains(QLatin1Char('+')) ||
+                 started.endsWith(QLatin1Char('Z')) ||
+                 started.lastIndexOf(QLatin1Char('-')) > 10,
+             qPrintable(started));
+
+    // Never downloaded from: null, not an empty object and not somebody
+    // else's run.
+    QVERIFY(remote.value(QStringLiteral("lastDownload")).isNull());
+  }
+
+  // ---- doing things to a remote's files ------------------------------------
+
+  // Making a folder, from outside the window. The answer comes when rclone
+  // has finished, so whoever asked knows the folder is there and not merely
+  // that somebody has been asked to make it.
+  void aFolderCanBeMadeThroughTheApi() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/mkdir", mToken,
+             "{\"path\":\"films\",\"name\":\"2026\"}");
+    QCOMPARE(statusOf(reply), 200);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("path")).toString(),
+             QStringLiteral("films/2026"));
+
+    // And it went through the registry like any other job, so it is in the
+    // history -- which the button in the window never managed.
+    const QString request = object.value(QStringLiteral("requestId")).toString();
+    QVERIFY(!request.isEmpty());
+    const JobRunRecord row = RunHistory::find(request);
+    QCOMPARE(row.kind, QStringLiteral("mkdir"));
+    QCOMPARE(row.state, QStringLiteral("finished"));
+    QCOMPARE(row.dest, QStringLiteral("fake:films/2026"));
+  }
+
+  // When rclone cannot, the caller is told what rclone said. "It failed" is
+  // the one thing they already know.
+  void aFolderThatCannotBeMadeSaysWhyInRclonesWords() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_FAIL", "1");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/mkdir", mToken,
+             "{\"path\":\"\",\"name\":\"nope\"}");
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    QCOMPARE(statusOf(reply), 502);
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("code")).toString(),
+             QStringLiteral("rclone_failed"));
+    QVERIFY2(object.value(QStringLiteral("error")).toString().contains(
+                 QStringLiteral("directory not found")),
+             qPrintable(object.value(QStringLiteral("error")).toString()));
+  }
+
+  // A name is one name. Refused before anything is started, so there is no
+  // job and no row for something that was never attempted.
+  void aFolderNameThatReachesElsewhereIsRefused() {
+    QVERIFY(useFakeRclone(1));
+    const int before = RunHistory::count();
+
+    for (const char *body :
+         {"{\"path\":\"films\",\"name\":\"../../etc\"}",
+          "{\"path\":\"films\",\"name\":\"a/b\"}",
+          "{\"path\":\"films\",\"name\":\"\"}",
+          "{\"path\":\"films\"}"}) {
+      const QByteArray reply =
+          send("POST", "/api/v1/remotes/fake/mkdir", mToken, body);
+      QCOMPARE(statusOf(reply), 400);
+      QCOMPARE(bodyOf(reply).object().value(QStringLiteral("code")).toString(),
+               QStringLiteral("bad_name"));
+    }
+    QCOMPARE(RunHistory::count(), before);
+  }
+
+  void makingAFolderNeedsASecretAndARealRemote() {
+    QVERIFY(useFakeRclone(1));
+    const QByteArray body = "{\"path\":\"\",\"name\":\"x\"}";
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mkdir", QByteArray(),
+                           body)),
+             401);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/no-such/mkdir", mToken,
+                           body)),
+             404);
   }
 
   // The one that was broken in the first version. Hitting the limit cancels

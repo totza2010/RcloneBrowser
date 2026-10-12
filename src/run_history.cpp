@@ -33,6 +33,7 @@ JobRunRecord readRow(const QSqlQuery &query) {
   r.errors = query.value(QStringLiteral("errors")).toLongLong();
   r.logPath = query.value(QStringLiteral("log_path")).toString();
   r.logBytes = query.value(QStringLiteral("log_bytes")).toLongLong();
+  r.dryRun = query.value(QStringLiteral("dry_run")).toInt() != 0;
   return r;
 }
 
@@ -76,8 +77,9 @@ bool upsert(const JobRunRecord &r) {
   query.prepare(QStringLiteral(
       "INSERT INTO job_run (request_id, task_id, task_name, kind, "
       "transfer_mode, info, source, dest, started_at, finished_at, state, "
-      "exit_code, bytes, total_bytes, transfers, errors, log_path, log_bytes) "
-      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+      "exit_code, bytes, total_bytes, transfers, errors, log_path, log_bytes, "
+      "dry_run) "
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
       "ON CONFLICT(request_id) DO UPDATE SET "
       "task_id=excluded.task_id, task_name=excluded.task_name, "
       "kind=excluded.kind, transfer_mode=excluded.transfer_mode, "
@@ -86,7 +88,7 @@ bool upsert(const JobRunRecord &r) {
       "exit_code=excluded.exit_code, bytes=excluded.bytes, "
       "total_bytes=excluded.total_bytes, transfers=excluded.transfers, "
       "errors=excluded.errors, log_path=excluded.log_path, "
-      "log_bytes=excluded.log_bytes"));
+      "log_bytes=excluded.log_bytes, dry_run=excluded.dry_run"));
   // started_at is deliberately not updated: the first record of when a job
   // began is the true one.
 
@@ -110,6 +112,7 @@ bool upsert(const JobRunRecord &r) {
   query.addBindValue(r.errors);
   query.addBindValue(r.logPath);
   query.addBindValue(r.logBytes);
+  query.addBindValue(r.dryRun ? 1 : 0);
 
   return query.exec();
 }
@@ -164,6 +167,39 @@ bool RunHistory::recordFinished(const JobRunRecord &record) {
 
 QList<JobRunRecord> RunHistory::recent(int limit) {
   return select(QString(), {}, limit);
+}
+
+namespace {
+
+// The newest transfer whose `column` is on that remote.
+//
+// Matched on the leading "name:" with substr() rather than LIKE, on purpose:
+// in LIKE an underscore stands for any one character, and remotes here are
+// called things like tgdrive_main_01 -- so LIKE would also have matched a
+// remote named tgdriveXmain-01, and reported one remote's upload as
+// another's.
+JobRunRecord lastOnRemote(const char *column, const QString &remote) {
+  if (remote.isEmpty()) {
+    return JobRunRecord();
+  }
+  const QString prefix = remote + QLatin1Char(':');
+  const QList<JobRunRecord> rows = select(
+      // A dry run sent nothing, so it is not the last time anything was sent.
+      QStringLiteral("WHERE kind = 'transfer' AND substr(%1, 1, ?) = ? "
+                     "AND dry_run = 0")
+          .arg(QLatin1String(column)),
+      {prefix.size(), prefix}, 1);
+  return rows.isEmpty() ? JobRunRecord() : rows.first();
+}
+
+} // namespace
+
+JobRunRecord RunHistory::lastUploadTo(const QString &remote) {
+  return lastOnRemote("dest", remote);
+}
+
+JobRunRecord RunHistory::lastDownloadFrom(const QString &remote) {
+  return lastOnRemote("source", remote);
 }
 
 QList<JobRunRecord> RunHistory::forTask(const QString &taskId, int limit) {

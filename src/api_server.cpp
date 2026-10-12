@@ -8,6 +8,7 @@
 #include "job_queue.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
+#include "remote_ops.h"
 #include "remote_registry.h"
 #include "run_history.h"
 #include "running_job.h"
@@ -71,6 +72,7 @@ QJsonObject describe(const RunningJob &job) {
   object.insert(QStringLiteral("source"), job.description().source);
   object.insert(QStringLiteral("dest"), job.description().dest);
   object.insert(QStringLiteral("running"), job.isRunning());
+  object.insert(QStringLiteral("dryRun"), job.isDryRun());
   object.insert(QStringLiteral("state"), job.finalStatus());
   object.insert(QStringLiteral("startedAt"),
                 job.startedAt().toString(Qt::ISODate));
@@ -91,6 +93,49 @@ QJsonObject describe(const RunningJob &job) {
     figures.insert(QStringLiteral("elapsedSeconds"), stats.elapsedSeconds);
     object.insert(QStringLiteral("stats"), figures);
   }
+  return object;
+}
+
+// A moment, with its offset from UTC. Without one, "10:52" means a different
+// instant to every reader in a different time zone, and a program reading
+// this has no window to look at to guess which.
+QString stamp(qint64 msSinceEpoch) {
+  if (msSinceEpoch <= 0) {
+    return QString();
+  }
+  const QDateTime local = QDateTime::fromMSecsSinceEpoch(msSinceEpoch);
+  return local.toOffsetFromUtc(local.offsetFromUtc()).toString(Qt::ISODate);
+}
+
+// One run, as the answer to "when did this last happen": when it began, when
+// it ended, how long that was and how it went. Null when it never has.
+QJsonValue describeRun(const JobRunRecord &run) {
+  if (run.requestId.isEmpty()) {
+    return QJsonValue(QJsonValue::Null);
+  }
+
+  QJsonObject object;
+  object.insert(QStringLiteral("requestId"), run.requestId);
+  object.insert(QStringLiteral("taskName"), run.taskName);
+  object.insert(QStringLiteral("state"), run.state);
+  object.insert(QStringLiteral("startedAt"), stamp(run.startedAt));
+  object.insert(QStringLiteral("finishedAt"), stamp(run.finishedAt));
+
+  // Given, not left for the reader to subtract: a run still going has no
+  // end to subtract from, and null says that where a number could not.
+  if (run.finishedAt > 0 && run.startedAt > 0) {
+    object.insert(QStringLiteral("durationSeconds"),
+                  double(run.finishedAt - run.startedAt) / 1000.0);
+  } else {
+    object.insert(QStringLiteral("durationSeconds"),
+                  QJsonValue(QJsonValue::Null));
+  }
+  object.insert(QStringLiteral("dryRun"), run.dryRun);
+  object.insert(QStringLiteral("bytes"), double(run.bytes));
+  object.insert(QStringLiteral("transfers"), double(run.transfers));
+  object.insert(QStringLiteral("errors"), double(run.errors));
+  object.insert(QStringLiteral("source"), run.source);
+  object.insert(QStringLiteral("dest"), run.dest);
   return object;
 }
 
@@ -460,6 +505,95 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
   listing->start();
 }
 
+void ApiServer::answerWhenDone(QTcpSocket *socket, RunningJob *job,
+                               const QJsonObject &onSuccess) {
+  // What rclone said, kept in case it is the explanation. Only the last few
+  // lines: an error is at the end, and the whole output of a long command is
+  // not something to send back as an error message.
+  auto said = QSharedPointer<QStringList>::create();
+  QObject::connect(job, &RunningJob::outputLine, socket,
+                   [said](const QString &line) {
+                     said->append(line);
+                     while (said->size() > 8) {
+                       said->removeFirst();
+                     }
+                   });
+
+  const auto finish = [socket, job, said, onSuccess]() {
+    QJsonObject object = onSuccess;
+    object.insert(QStringLiteral("requestId"), job->requestId());
+
+    if (job->state() == JobState::Finished) {
+      socket->write(FormatHttpResponse(200, toJson(object)));
+      return;
+    }
+
+    // rclone's own words, because "it failed" is the one thing the caller
+    // already knows. Falls back to the exit code when rclone said nothing.
+    QString why = said->join(QLatin1Char('\n')).trimmed();
+    if (why.isEmpty()) {
+      why = QStringLiteral("rclone exited with code %1").arg(job->exitCode());
+    }
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), QStringLiteral("rclone_failed"));
+    socket->write(FormatHttpResponse(502, toJson(object)));
+  };
+
+  if (!job->isRunning()) {
+    finish(); // could not be started at all, and has already ended
+    return;
+  }
+  QObject::connect(job, &RunningJob::finished, socket,
+                   [finish](JobState) { finish(); });
+}
+
+void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
+                                const QString &remote,
+                                const QString &operation) {
+  const auto refuse = [socket](int status, const QString &code,
+                               const QString &why) {
+    QJsonObject object;
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), code);
+    socket->write(FormatHttpResponse(status, toJson(object)));
+  };
+
+  if (AppCore::instance().isStopping()) {
+    refuse(503, QStringLiteral("shutting_down"),
+           QStringLiteral("the program is shutting down"));
+    return;
+  }
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    refuse(404, QStringLiteral("no_such_remote"),
+           QStringLiteral("no such remote"));
+    return;
+  }
+
+  const QJsonObject given = options(request);
+  const QString path = given.value(QStringLiteral("path")).toString();
+
+  if (operation == QLatin1String("mkdir")) {
+    const QString name = given.value(QStringLiteral("name")).toString();
+
+    QString why;
+    RunningJob *job = RemoteOps::MakeFolder(remote, path, name, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("bad_name"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API making folder" << remote << path << name;
+
+    QJsonObject made;
+    made.insert(QStringLiteral("remote"), remote);
+    made.insert(QStringLiteral("path"), RemoteOps::Join(path, name));
+    answerWhenDone(socket, job, made);
+    return;
+  }
+
+  refuse(404, QStringLiteral("no_such_operation"),
+         QStringLiteral("no such operation"));
+}
+
 void ApiServer::openEventStream(QTcpSocket *socket) {
   socket->setProperty("stream", true);
 
@@ -732,6 +866,17 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
       }
       listDirectory(socket, asked, parts.at(1),
                     asked.queryValue(QStringLiteral("path")));
+      return;
+    }
+  }
+
+  // Nor is this: it runs rclone and answers when rclone has finished.
+  {
+    const QStringList parts = segmentsOf(asked.path);
+    if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("mkdir")) {
+      remoteOperation(socket, asked, parts.at(1), parts.at(2));
       return;
     }
   }
@@ -1110,6 +1255,10 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       QJsonObject object;
       object.insert(QStringLiteral("name"), remote.name);
       object.insert(QStringLiteral("type"), remote.type);
+      object.insert(QStringLiteral("lastUpload"),
+                    describeRun(RunHistory::lastUploadTo(remote.name)));
+      object.insert(QStringLiteral("lastDownload"),
+                    describeRun(RunHistory::lastDownloadFrom(remote.name)));
       array.append(object);
     }
     *body = toJson(array);
@@ -1226,6 +1375,8 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       object.insert(QStringLiteral("state"), row.state);
       object.insert(QStringLiteral("exitCode"), row.exitCode);
       object.insert(QStringLiteral("bytes"), double(row.bytes));
+      // A rehearsal. The size beside it is what would have been sent.
+      object.insert(QStringLiteral("dryRun"), row.dryRun);
 
       // When, as well as what. A history that does not say when is a list
       // of things that happened at some point.
