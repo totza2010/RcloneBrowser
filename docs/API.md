@@ -390,8 +390,8 @@ GET    /api/v1/events                     SSE — progress สดของทุ
 | **S10** | Mounts / Streams | `mount_widget` / `stream_widget` | ชนิดหนึ่งของ `RunningJob` | S2 | M | ✅ **mount เสร็จ** · stream ไม่ย้าย (มีเหตุผล) |
 | **S14** | **Extension เฉพาะ backend** | ยังไม่มี — ความรู้เรื่อง teldrive ไม่มีที่อยู่ | `rbext_teldrive` (โมดูลตอนคอมไพล์) | S13 | M | ⬜ ดู [`PLAN.md` §6.9](PLAN.md) |
 | **S13** | **Store + ประวัติ** | SQLite ไฟล์เดียว (schema v2) | `database.*` · `run_history.*` · `config_store.*` (L1) | S2 | **L** | ✅ เสร็จ — ดู [`PLAN.md` §6.8](PLAN.md) |
-| **S11** | HTTP API | — | `api_server` (L2) | S1–S6, S10 | L | 🟨 อ่านได้แล้ว |
-| **S12** | Web UI | — | static (L3) | S11 | L | ⬜ |
+| **S11** | HTTP API | — | `api_server` (L2) | S1–S6, S10 | L | 🟨 อ่าน + สั่ง + events |
+| **S12** | Web UI | — | `webui.qrc` (L3) | S11 | L | 🟨 หน้าแรกใช้ได้ |
 
 **S7–S9 เสร็จไปแล้วโดยไม่ได้ตั้งใจ** — ทั้งสามเกิดจากงาน P1/เฟส 2 ที่เขียนเป็น L0 ตั้งแต่แรก
 ซึ่งเป็นหลักฐานว่าวิธี "เจอ core ก็แยกเลยถ้าต้นทุนไม่เกินครึ่งชั่วโมง" ได้ผลจริง
@@ -785,7 +785,12 @@ test ที่เขียนได้ครอบแค่ *รูปร่า�
 ### S11 · HTTP API · S12 · Web UI
 
 เริ่มได้เมื่อ S1–S6 และ S10 เสร็จ · รายละเอียด endpoint อยู่ใน §11
-รีโปอ้างอิงของ Web UI อยู่ใน [`ARCHITECTURE.md` §7](ARCHITECTURE.md)
+สถานะและวิธีใช้: [`HTTP-API.md`](HTTP-API.md) · [`WEB-UI.md`](WEB-UI.md)
+
+**ผลการประเมินตาม [`ARCHITECTURE.md` §7](ARCHITECTURE.md): ไม่เอา `rclone-web` มาใช้**
+มันคุยกับ rc API ของ rclone ซึ่งไม่มีคิว ไม่มี task ไม่มีตารางเวลา ไม่มีประวัติ —
+หน้าที่เราต้องการต้องเขียนเองทั้งหมดอยู่ดี แลกมากับ npm/Vite ใน build และ `rclone rcd`
+เป็น process ที่สอง · เหตุผลเต็มอยู่ใน [`WEB-UI.md`](WEB-UI.md)
 
 ---
 

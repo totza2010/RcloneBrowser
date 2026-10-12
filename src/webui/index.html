@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<!--
+  The Web UI (S12), served by the daemon itself.
+
+  Written by hand rather than taken from rclone's own web interfaces: both of
+  those talk to rclone's rc API, which has no queue, no saved tasks and no
+  schedules -- which is all of what this program is. See docs/WEB-UI.md.
+
+  No build step, no framework, no request to anywhere but this daemon. It is
+  three files inside the executable, so the Docker image needs nothing but the
+  binary and a browser on the other side.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rclone Browser</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- Shown until a password or a token is accepted. Nothing behind it is even
+     asked for. -->
+<div id="gate" class="gate hidden">
+  <div class="gate-box">
+    <h1>Rclone Browser</h1>
+
+    <!-- When an administrator password has been set. -->
+    <form id="login-form" class="gate-form hidden">
+      <label>User
+        <input id="login-user" type="text" autocomplete="username" value="admin">
+      </label>
+      <label>Password
+        <input id="login-password" type="password" autocomplete="current-password">
+      </label>
+      <button type="submit">Sign in</button>
+      <button type="button" id="use-token" class="link">Use the token instead</button>
+    </form>
+
+    <!-- When none has been set, and for anyone who would rather use the
+         token the daemon printed. -->
+    <form id="token-form" class="gate-form hidden">
+      <p id="token-why" class="muted"></p>
+      <label>Token
+        <input id="gate-token" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="submit">Connect</button>
+      <button type="button" id="use-password" class="link hidden">Sign in with a password</button>
+    </form>
+
+    <p id="gate-error" class="error"></p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <span id="live" class="dot" title="event stream"></span>
+      <strong>Rclone Browser</strong>
+      <span id="version" class="muted"></span>
+    </div>
+    <div class="controls">
+      <span id="summary" class="muted"></span>
+      <button id="queue-toggle" class="ghost"></button>
+      <button id="theme-toggle" class="ghost" title="light or dark"></button>
+      <button id="password-open" class="ghost">Password</button>
+      <button id="sign-out" class="ghost" title="forget this browser">Sign out</button>
+    </div>
+  </header>
+
+  <!-- Offered rather than forced: an installation on a machine nobody else
+       can reach is entitled to have no password. -->
+  <div id="no-password" class="banner hidden">
+    No administrator password is set — anyone who has the token can control
+    this daemon.
+    <button id="password-open-2" class="small">Set one</button>
+  </div>
+
+  <nav id="tabs">
+    <button data-tab="jobs" class="on">Jobs</button>
+    <button data-tab="queue">Queue</button>
+    <button data-tab="tasks">Tasks</button>
+    <button data-tab="remotes">Remotes</button>
+    <button data-tab="schedules">Schedules</button>
+    <button data-tab="history">History</button>
+  </nav>
+
+  <main>
+    <section id="tab-jobs" class="tab on"></section>
+    <section id="tab-queue" class="tab"></section>
+    <section id="tab-tasks" class="tab"></section>
+    <section id="tab-remotes" class="tab">
+      <div id="remote-list" class="remote-list"></div>
+      <div id="browser" class="hidden">
+        <div id="crumbs" class="crumbs"></div>
+        <div id="listing"></div>
+      </div>
+    </section>
+    <section id="tab-schedules" class="tab"></section>
+    <section id="tab-history" class="tab"></section>
+  </main>
+
+  <!-- One place for what the API said when it refused something. Its
+       refusals carry reasons, and a UI that swallows them is a UI that turns
+       "its last run has not finished" back into silence. -->
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="logbox" class="logbox hidden">
+    <div class="logbox-head">
+      <strong id="log-title"></strong>
+      <span class="grow"></span>
+      <button id="log-refresh" class="ghost">Refresh</button>
+      <button id="log-close" class="ghost">Close</button>
+    </div>
+    <pre id="log-body"></pre>
+  </div>
+
+  <div id="passwordbox" class="modal hidden">
+    <form id="password-form" class="modal-box">
+      <h2 id="password-title">Administrator password</h2>
+      <label id="current-wrap" class="hidden">Current password
+        <input id="password-current" type="password" autocomplete="current-password">
+      </label>
+      <label>New password
+        <input id="password-new" type="password" autocomplete="new-password">
+      </label>
+      <label>Again
+        <input id="password-again" type="password" autocomplete="new-password">
+      </label>
+      <p class="muted">At least 8 characters. Everyone signed in elsewhere is
+        signed out.</p>
+      <p id="password-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" id="password-close" class="ghost">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

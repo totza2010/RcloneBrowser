@@ -1,0 +1,15 @@
+<!--
+  The Web UI, compiled into the binary.
+
+  In the resource rather than in a directory next to the executable so that
+  the daemon has no files to find: a Docker image is the binary and nothing
+  else, and a UI that depends on a path is a UI that is missing in half the
+  installations. See docs/WEB-UI.md.
+-->
+<RCC>
+  <qresource prefix="/webui">
+    <file alias="index.html">webui/index.html</file>
+    <file alias="app.css">webui/app.css</file>
+    <file alias="app.js">webui/app.js</file>
+  </qresource>
+</RCC>

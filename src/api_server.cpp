@@ -1,5 +1,7 @@
 #include "api_server.h"
+#include "api_auth.h"
 #include "app_core.h"
+#include "directory_listing.h"
 #include "debug_log.h"
 #include "http_message.h"
 #include "job_options.h"
@@ -13,14 +15,24 @@
 #include "scheduler_store.h"
 #include "utils.h"
 
+#include <QFile>
+#include <QFileInfo>
+#include <QMimeDatabase>
 #include <QHostAddress>
+#include <QSharedPointer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QUuid>
+
+// The resource is compiled into rbcore, and a static library's resources are
+// not registered unless something asks for them. Left out, the daemon serves
+// a blank page and nothing says why.
+static void InitWebUiResources() { Q_INIT_RESOURCE(webui); }
 
 namespace {
 
@@ -98,6 +110,116 @@ QJsonObject describe(const Schedule &schedule) {
   return object;
 }
 
+
+// The options a command was given. A command with no options is one sent
+// with no body at all, so a missing body is an empty object rather than an
+// error -- otherwise every caller would have to send "{}".
+QJsonObject options(const HttpRequest &request) {
+  if (request.body.isEmpty()) {
+    return QJsonObject();
+  }
+  return QJsonDocument::fromJson(request.body).object();
+}
+
+// Accepted in the body or in the query, because a dry run is the one option
+// somebody types by hand into curl.
+bool wantsDryRun(const HttpRequest &request) {
+  const QString asked = request.queryValue(QStringLiteral("dryRun"));
+  if (!asked.isEmpty()) {
+    return asked != QLatin1String("0") && asked != QLatin1String("false");
+  }
+  return options(request).value(QStringLiteral("dryRun")).toBool();
+}
+
+// The same rule the queue keeps for itself: a second copy of a task that is
+// already going would be two rclone processes writing one destination. The
+// API is a third way to start a task, and a rule that only two of the three
+// obey is not a rule.
+bool alreadyRunning(const QString &taskId) {
+  for (const RunningJob *job : JobRegistry::instance().jobs()) {
+    if (job->isRunning() && job->taskId() == taskId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The path a job's output went to, whether it is still running or long
+// finished. A log that can only be read while the job is alive is no use for
+// the thing people actually ask -- what happened last night.
+QString logPathFor(const QString &requestId) {
+  if (const RunningJob *job = JobRegistry::instance().find(requestId)) {
+    if (!job->logPath().isEmpty()) {
+      return job->logPath();
+    }
+  }
+  return RunHistory::find(requestId).logPath;
+}
+
+// The last `lines` lines of a file, without reading the whole of it. A
+// transfer of a large tree writes a log that is measured in megabytes and
+// nobody wants all of it down a socket.
+QByteArray tailOf(const QString &path, int lines) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    return QByteArray();
+  }
+
+  const qint64 window = 1024 * 1024;
+  const qint64 size = file.size();
+  if (size > window) {
+    file.seek(size - window);
+    file.readLine(); // the first line in the window is probably half a line
+  }
+
+  QByteArray text = file.readAll();
+  int cut = text.size();
+  for (int found = 0; cut > 0; --cut) {
+    if (text.at(cut - 1) == '\n' && ++found > lines) {
+      break;
+    }
+  }
+  return cut > 0 ? text.mid(cut) : text;
+}
+
+// Whether this is something the API can show, for telling "there is no such
+// endpoint" from "that endpoint does not do that". A client that sent POST
+// where it meant GET deserves to be told which of the two it got wrong.
+bool isSomethingWeCanShow(const QString &path) {
+  static const QStringList exact = {
+      QStringLiteral("/api/v1/ping"),      QStringLiteral("/api/v1/system"),
+      QStringLiteral("/api/v1/remotes"),   QStringLiteral("/api/v1/tasks"),
+      QStringLiteral("/api/v1/queue"),     QStringLiteral("/api/v1/jobs"),
+      QStringLiteral("/api/v1/schedules"), QStringLiteral("/api/v1/history"),
+      QStringLiteral("/api/v1/events")};
+  if (exact.contains(path)) {
+    return true;
+  }
+  for (const QString &prefix :
+       {QStringLiteral("/api/v1/tasks/"), QStringLiteral("/api/v1/jobs/")}) {
+    if (path.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The segments after /api/v1/, empty when the path is not ours at all.
+QStringList segmentsOf(const QString &path) {
+  const QString prefix = QStringLiteral("/api/v1/");
+  if (!path.startsWith(prefix)) {
+    return QStringList();
+  }
+  return path.mid(prefix.size()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+}
+
+QByteArray startedJob(const QString &requestId, const QString &how) {
+  QJsonObject object;
+  object.insert(QStringLiteral("requestId"), requestId);
+  object.insert(QStringLiteral("started"), how);
+  return toJson(object);
+}
+
 } // namespace
 
 ApiServer &ApiServer::instance() {
@@ -128,6 +250,29 @@ QString ApiServer::ensureToken() {
   return existing;
 }
 
+bool ApiServer::mayAsk(const HttpRequest &request) {
+  const QString offered = request.header(QStringLiteral("authorization"));
+  if (!offered.startsWith(QLatin1String("Bearer "))) {
+    return false;
+  }
+
+  const QString presented = offered.mid(7);
+  if (presented.isEmpty()) {
+    return false;
+  }
+
+  // The token, for anything unattended. Compared against the stored one, and
+  // an empty stored token is refused rather than matched: "none set" must
+  // never come out as "none required".
+  const QString expected = token();
+  if (!expected.isEmpty() && presented == expected) {
+    return true;
+  }
+
+  // Or a session, for a person who signed in.
+  return ApiAuth::Sessions::instance().accepts(presented);
+}
+
 bool ApiServer::isListening() const {
   return mServer != nullptr && mServer->isListening();
 }
@@ -142,6 +287,7 @@ bool ApiServer::start(const QString &address, quint16 port, QString *error) {
   }
 
   ensureToken();
+  InitWebUiResources();
 
   if (mServer == nullptr) {
     mServer = new QTcpServer(this);
@@ -176,6 +322,302 @@ void ApiServer::stop() {
   emit stopped();
 }
 
+void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
+                             const QString &remote, const QString &asked) {
+  // Trimmed once, here, so that "films", "/films" and "films/" are one
+  // folder rather than three -- and so joining a name onto it below cannot
+  // produce a double slash.
+  QString path = asked;
+  while (path.startsWith(QLatin1Char('/'))) {
+    path.remove(0, 1);
+  }
+  while (path.endsWith(QLatin1Char('/'))) {
+    path.chop(1);
+  }
+
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    socket->write(
+        FormatHttpResponse(404, problem(QStringLiteral("no such remote"))));
+    return;
+  }
+
+  bool readable = true;
+  const int wanted = request.queryValue(QStringLiteral("limit")).toInt(&readable);
+  const int limit = readable && wanted > 0 ? qMin(wanted, 100000) : 20000;
+
+  auto collected = QSharedPointer<QVector<LsjsonEntry>>::create();
+  auto truncated = QSharedPointer<bool>::create(false);
+  auto answered = QSharedPointer<bool>::create(false);
+
+  auto *listing = new DirectoryListing(remote, path, this);
+
+  // Every way out of here goes through this, and it can only happen once.
+  //
+  // That is the whole lesson of the first version: it answered from
+  // finished() alone, and the path that stopped early -- a folder with more
+  // entries than were asked for -- cancelled the listing instead, which
+  // emits nothing by design. The request was never answered at all. A folder
+  // of 7,103 files sat on "reading..." forever with nothing in any log to say
+  // why, because nothing had gone wrong; something had simply not happened.
+  const auto respond = [socket, listing, answered](int status,
+                                                   const QByteArray &body) {
+    if (*answered) {
+      return;
+    }
+    *answered = true;
+    socket->write(FormatHttpResponse(status, body));
+    listing->cancel();
+    listing->deleteLater();
+  };
+
+  const auto sendWhatWeHave = [=]() {
+    QJsonArray array;
+    for (const LsjsonEntry &entry : *collected) {
+      // The path rclone gives is relative to the folder that was listed, so
+      // an entry of "films/2012" comes back as plain "2012". Sent on as it
+      // stands, the next click asks for "2012" at the root of the remote --
+      // which is a different folder, or, as the first person to try it saw,
+      // no folder at all.
+      //
+      // Joined here rather than in the page: "path" means "the path to pass
+      // back to ls", and every client that ever reads this should get the
+      // same answer to what it means.
+      const QString full =
+          path.isEmpty() ? entry.path
+                         : path + QLatin1Char('/') + entry.path;
+
+      QJsonObject object;
+      object.insert(QStringLiteral("name"), entry.name);
+      object.insert(QStringLiteral("path"), full);
+      object.insert(QStringLiteral("isDir"), entry.isDir);
+      object.insert(QStringLiteral("size"), double(entry.size));
+      object.insert(QStringLiteral("modTime"),
+                    entry.modTime.isValid()
+                        ? entry.modTime.toString(Qt::ISODate)
+                        : QString());
+      array.append(object);
+    }
+
+    QJsonObject object;
+    object.insert(QStringLiteral("remote"), remote);
+    object.insert(QStringLiteral("path"), path);
+    object.insert(QStringLiteral("truncated"), *truncated);
+    object.insert(QStringLiteral("entries"), array);
+    respond(200, toJson(object));
+  };
+
+  QObject::connect(
+      listing, &DirectoryListing::entries, socket,
+      [=](const QVector<LsjsonEntry> &batch) {
+        for (const LsjsonEntry &entry : batch) {
+          if (collected->size() >= limit) {
+            // Answered with what there is rather than read to the end: a
+            // folder of a hundred thousand entries would otherwise be held in
+            // memory twice and sent down a socket nobody can read it from.
+            *truncated = true;
+            sendWhatWeHave();
+            return;
+          }
+          collected->append(entry);
+        }
+      });
+
+  QObject::connect(listing, &DirectoryListing::finished, socket,
+                   [=]() { sendWhatWeHave(); });
+
+  QObject::connect(listing, &DirectoryListing::failed, socket,
+                   [=](const QString &reason) {
+                     // Said, not swallowed. A folder that will not open used
+                     // to show as an empty list, which reads as "there is
+                     // nothing here" -- a different thing entirely.
+                     qCDebug(rbApp) << "listing" << remote << path
+                                    << "failed:" << reason;
+                     respond(502, problem(reason));
+                   });
+
+  // A backstop, not a working part. Every path above answers on its own; this
+  // is here so that a path nobody thought of cannot leave somebody waiting
+  // forever -- which is exactly what happened the first time.
+  auto *deadline = new QTimer(listing);
+  deadline->setSingleShot(true);
+  deadline->setInterval(120000);
+  QObject::connect(deadline, &QTimer::timeout, socket, [=]() {
+    qCDebug(rbApp) << "listing" << remote << path << "gave up after 120s";
+    respond(504, problem(QStringLiteral(
+                     "the remote did not answer within two minutes")));
+  });
+  deadline->start();
+
+  // The listing belongs to whoever asked for it. If they go away -- closed
+  // the tab, lost the network -- rclone should stop, not go on reading a
+  // directory for nobody.
+  QObject::connect(socket, &QTcpSocket::disconnected, listing, [listing]() {
+    listing->cancel();
+    listing->deleteLater();
+  });
+
+  qCDebug(rbApp) << "API listing" << remote << path << "limit=" << limit;
+  listing->start();
+}
+
+void ApiServer::openEventStream(QTcpSocket *socket) {
+  socket->setProperty("stream", true);
+
+  // Written by hand rather than through FormatHttpResponse: that one ends
+  // the message with a Content-Length, and the length of this is not known
+  // because it is not over.
+  QByteArray head = "HTTP/1.1 200 OK\r\n";
+  head += "Content-Type: text/event-stream\r\n";
+  head += "Cache-Control: no-store\r\n";
+  head += "X-Content-Type-Options: nosniff\r\n";
+  head += "Connection: keep-alive\r\n\r\n";
+  socket->write(head);
+  socket->flush();
+
+  mListeners.append(socket);
+  QObject::connect(socket, &QTcpSocket::disconnected, this,
+                   [this, socket]() { mListeners.removeAll(socket); });
+
+  qCDebug(rbApp) << "an event stream opened; listeners=" << mListeners.size();
+
+  // Something straight away, so a client knows it is connected rather than
+  // waiting for the first thing to happen -- which on a quiet night is never.
+  QJsonObject hello;
+  hello.insert(QStringLiteral("queued"), JobQueue::instance().count());
+  hello.insert(QStringLiteral("queueRunning"), JobQueue::instance().isRunning());
+  hello.insert(QStringLiteral("runningJobs"),
+               JobRegistry::instance().runningCount());
+  broadcast(QStringLiteral("hello"), hello);
+
+  watchWhatHappens();
+
+  if (mHeartbeat == nullptr) {
+    mHeartbeat = new QTimer(this);
+    mHeartbeat->setInterval(20000);
+    QObject::connect(mHeartbeat, &QTimer::timeout, this, [this]() {
+      // A comment, which the event-source protocol ignores. It exists so a
+      // connection that died quietly -- a sleeping laptop, a proxy with its
+      // own ideas about idle sockets -- is noticed rather than believed.
+      for (QTcpSocket *listener : mListeners) {
+        listener->write(": still here\n\n");
+        listener->flush();
+      }
+    });
+  }
+  mHeartbeat->start();
+}
+
+bool ApiServer::serveWebUi(const HttpRequest &request, QByteArray *body,
+                           QByteArray *contentType, int *status) {
+  *contentType = "application/json";
+
+  if (request.method != QLatin1String("GET")) {
+    *status = 405;
+    *body = problem(QStringLiteral("the web interface is only read"));
+    return true;
+  }
+
+  // A fixed list, not a directory. Anything that turns a path from outside
+  // into a file name is a way to read files that were never meant to be
+  // served -- and it is not needed here, because there are three files and
+  // they are known when this is compiled.
+  static const QHash<QString, QString> pages = {
+      {QStringLiteral("/"), QStringLiteral(":/webui/index.html")},
+      {QStringLiteral("/index.html"), QStringLiteral(":/webui/index.html")},
+      {QStringLiteral("/app.css"), QStringLiteral(":/webui/app.css")},
+      {QStringLiteral("/app.js"), QStringLiteral(":/webui/app.js")},
+  };
+
+  const QString resource = pages.value(request.path);
+  if (resource.isEmpty()) {
+    *status = 404;
+    *body = problem(QStringLiteral("no such page"));
+    return true;
+  }
+
+  QFile file(resource);
+  if (!file.open(QIODevice::ReadOnly)) {
+    // Only reachable if the resource was left out of the build. Said out
+    // loud, because the symptom otherwise is a blank page.
+    qCDebug(rbApp) << "the web UI is missing from this build:" << resource;
+    *status = 500;
+    *body = problem(QStringLiteral("the web interface is not in this build"));
+    return true;
+  }
+
+  *status = 200;
+  *body = file.readAll();
+  *contentType = resource.endsWith(QLatin1String(".css"))    ? "text/css"
+                 : resource.endsWith(QLatin1String(".js"))   ? "application/javascript"
+                                                             : "text/html; charset=utf-8";
+  return true;
+}
+
+void ApiServer::broadcast(const QString &event, const QJsonObject &data) {
+  if (mListeners.isEmpty()) {
+    return;
+  }
+
+  QByteArray message = "event: " + event.toUtf8() + "\n";
+  message += "data: " + toJson(data) + "\n\n";
+
+  for (QTcpSocket *listener : mListeners) {
+    listener->write(message);
+    listener->flush();
+  }
+}
+
+void ApiServer::watchWhatHappens() {
+  if (mWatching) {
+    return;
+  }
+  mWatching = true;
+
+  const auto sendJob = [this](RunningJob *job) {
+    broadcast(QStringLiteral("job"), describe(*job));
+  };
+
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
+                   [this, sendJob](RunningJob *job) {
+                     sendJob(job);
+                     // The figures come from rclone about once a second, which
+                     // is already the rate a dashboard wants. Forwarding them
+                     // beats every client polling for them separately.
+                     QObject::connect(job, &RunningJob::statsUpdated, this,
+                                      [sendJob, job]() { sendJob(job); });
+                   });
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,
+                   sendJob);
+
+  QObject::connect(&JobQueue::instance(), &JobQueue::changed, this, [this]() {
+    QJsonObject object;
+    object.insert(QStringLiteral("queued"), JobQueue::instance().count());
+    object.insert(QStringLiteral("running"), JobQueue::instance().isRunning());
+    object.insert(QStringLiteral("runningRequestId"),
+                  JobQueue::instance().runningRequestId());
+    broadcast(QStringLiteral("queue"), object);
+  });
+
+  // Held is sent as well as fired. "Nothing happened" is the thing people
+  // report, and a dashboard that can only show what did happen leaves them
+  // with the same silence as before.
+  QObject::connect(&AppCore::instance(), &AppCore::scheduleFired, this,
+                   [this](const QString &id, const QString &requestId) {
+                     QJsonObject object;
+                     object.insert(QStringLiteral("scheduleId"), id);
+                     object.insert(QStringLiteral("requestId"), requestId);
+                     object.insert(QStringLiteral("fired"), true);
+                     broadcast(QStringLiteral("schedule"), object);
+                   });
+  QObject::connect(&AppCore::instance(), &AppCore::scheduleHeld, this,
+                   [this](const QString &id, const QString &reason) {
+                     QJsonObject object;
+                     object.insert(QStringLiteral("scheduleId"), id);
+                     object.insert(QStringLiteral("held"), reason);
+                     broadcast(QStringLiteral("schedule"), object);
+                   });
+}
+
 void ApiServer::accept() {
   while (QTcpSocket *socket = mServer->nextPendingConnection()) {
     // One buffer per connection, kept on the socket itself, so a slow client
@@ -190,6 +632,14 @@ void ApiServer::accept() {
 }
 
 void ApiServer::read(QTcpSocket *socket) {
+  // Once a connection is an event stream it is ours to write to, not to read
+  // from. Anything the client sends down it afterwards is dropped rather
+  // than answered into the middle of the stream.
+  if (socket->property("stream").toBool()) {
+    socket->readAll();
+    return;
+  }
+
   QByteArray buffer = socket->property("buffer").toByteArray();
   buffer += socket->readAll();
 
@@ -213,6 +663,37 @@ void ApiServer::read(QTcpSocket *socket) {
 }
 
 void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
+  // HEAD is GET with the body cut off. Health checks and proxies send it,
+  // and a front page that answers "method not allowed" to a monitor looks
+  // exactly like a front page that is broken.
+  HttpRequest asked = request;
+  const bool headOnly = asked.method == QLatin1String("HEAD");
+  if (headOnly) {
+    asked.method = QStringLiteral("GET");
+  }
+
+  const auto reply = [socket, headOnly](const QByteArray &response) {
+    if (!headOnly) {
+      socket->write(response);
+      return;
+    }
+    // The headers a GET would have given, including the length it would have
+    // had. That is what makes the answer worth anything to whoever asked.
+    const int end = response.indexOf("\r\n\r\n");
+    socket->write(end < 0 ? response : response.left(end + 4));
+  };
+
+  // Anything that is not the API is the Web UI's, and is answered without a
+  // token -- including its 404s. See serveWebUi().
+  if (!asked.path.startsWith(QLatin1String("/api/"))) {
+    QByteArray body;
+    QByteArray contentType;
+    int status = 0;
+    serveWebUi(asked, &body, &contentType, &status);
+    reply(FormatHttpResponse(status, body, contentType));
+    return;
+  }
+
   // Checked before the path is even looked at. An endpoint that answers
   // without a token is an endpoint somebody forgot to protect, and the way
   // not to forget is for the check not to be per-endpoint at all.
@@ -220,39 +701,342 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   // /ping is the one exception, and it says nothing: it exists so a client
   // can tell "the server is there but my token is wrong" from "there is no
   // server", which are different problems with different fixes.
-  if (request.path != QLatin1String("/api/v1/ping")) {
-    const QString expected = token();
-    const QString offered = request.header(QStringLiteral("authorization"));
+  //
+  // Three paths are answered without one, and each is here rather than in a
+  // route because an exception nobody can see is an exception nobody checks:
+  //   /ping   says the server is there and nothing else
+  //   /auth   says whether a password has been set, so the page knows what
+  //           form to show
+  //   /login  is how the password is turned into a session in the first place
+  static const QStringList open = {QStringLiteral("/api/v1/ping"),
+                                   QStringLiteral("/api/v1/auth"),
+                                   QStringLiteral("/api/v1/login")};
 
-    if (expected.isEmpty() ||
-        offered != QStringLiteral("Bearer ") + expected) {
-      qCDebug(rbApp) << "refused an API request without a valid token"
-                     << request.method << request.path;
-      const QString why = QStringLiteral("a valid token is required");
-      socket->write(FormatHttpResponse(401, problem(why)));
+  if (!open.contains(asked.path) && !mayAsk(asked)) {
+    qCDebug(rbApp) << "refused an API request from somebody not signed in"
+                   << request.method << asked.path;
+    const QString why = QStringLiteral("a token or a session is required");
+    reply(FormatHttpResponse(401, problem(why)));
+    return;
+  }
+
+  // Not a route either: this one has to run rclone and wait for it.
+  {
+    const QStringList parts = segmentsOf(asked.path);
+    if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("ls")) {
+      if (headOnly) {
+        reply(FormatHttpResponse(200, QByteArray()));
+        return;
+      }
+      listDirectory(socket, asked, parts.at(1),
+                    asked.queryValue(QStringLiteral("path")));
       return;
     }
   }
 
+  // Not a route: a route returns a body and this one never ends.
+  if (asked.method == QLatin1String("GET") &&
+      asked.path == QLatin1String("/api/v1/events")) {
+    if (headOnly) {
+      // Answered with what the stream would say it is, and no stream. A HEAD
+      // that opened one would be a connection nobody is ever coming back for.
+      reply(FormatHttpResponse(200, QByteArray(), "text/event-stream"));
+      return;
+    }
+    openEventStream(socket);
+    return;
+  }
+
   QByteArray body;
-  const int status = route(request, &body);
-  socket->write(FormatHttpResponse(status, body));
+  QByteArray contentType = "application/json";
+  const int status = route(asked, &body, &contentType);
+  reply(FormatHttpResponse(status, body, contentType));
 }
 
-int ApiServer::route(const HttpRequest &request, QByteArray *body) {
-  const QString &path = request.path;
+int ApiServer::route(const HttpRequest &request, QByteArray *body,
+                     QByteArray *contentType) {
+  *contentType = "application/json";
 
-  // Read before write, as docs/API.md section 11 says: a dashboard has to be
-  // able to see before it needs to command, and the commands can be added
-  // later without changing any of this.
-  if (request.method != QLatin1String("GET")) {
-    *body = problem(QStringLiteral("only GET is answered so far"));
+  if (request.method == QLatin1String("GET")) {
+    return get(request, body, contentType);
+  }
+  if (request.method == QLatin1String("POST") ||
+      request.method == QLatin1String("DELETE")) {
+    return command(request, body);
+  }
+
+  *body = problem(QStringLiteral("that is not a method this answers"));
+  return 405;
+}
+
+// Everything that changes something, kept in its own function away from the
+// reading half. A GET that changes something is the oldest bug in web
+// programming, and the surest way not to write one is for the code that
+// answers a GET to have no way to.
+//
+// What is deliberately absent: creating and editing tasks, and anything that
+// says where rclone is or what scripts run. A task carries its own rclone
+// flags, so writing a task is writing a command line -- which would turn a
+// stolen token into "run any program on this machine". Those stay with the
+// window until there is a way to say them that is not a command line.
+int ApiServer::authCommand(const HttpRequest &request, QByteArray *body) {
+  const QJsonObject given = options(request);
+  const QString path = request.path;
+
+  if (path == QLatin1String("/api/v1/login")) {
+    // Refused before the password is even looked at, so that being locked
+    // out costs a guesser the same whether the user name was right or not.
+    if (ApiAuth::Attempts::instance().isLockedOut()) {
+      const int seconds = ApiAuth::Attempts::instance().secondsRemaining();
+      qCDebug(rbApp) << "refused a sign-in: locked out for" << seconds << "s";
+      *body = problem(QStringLiteral("too many attempts; wait %1 seconds")
+                          .arg(seconds));
+      return 429;
+    }
+
+    if (!ApiAuth::HasPassword()) {
+      *body = problem(QStringLiteral("no password has been set"));
+      return 409;
+    }
+
+    const QString user = given.value(QStringLiteral("user")).toString();
+    const QString password = given.value(QStringLiteral("password")).toString();
+
+    // The user name is checked too, but the answer says only that the pair
+    // was wrong: which half was right is not something to hand out.
+    if (user != ApiAuth::UserName() ||
+        !ApiAuth::PasswordMatches(password, ApiAuth::StoredPassword())) {
+      ApiAuth::Attempts::instance().failed();
+      qCDebug(rbApp) << "a sign-in was refused";
+      *body = problem(QStringLiteral("that is not the right user and password"));
+      return 401;
+    }
+
+    ApiAuth::Attempts::instance().succeeded();
+    const QString session = ApiAuth::Sessions::instance().open();
+    qCDebug(rbApp) << "somebody signed in; sessions="
+                   << ApiAuth::Sessions::instance().count();
+
+    QJsonObject object;
+    object.insert(QStringLiteral("session"), session);
+    object.insert(QStringLiteral("idleMinutes"),
+                  ApiAuth::Sessions::idleMinutes());
+    *body = toJson(object);
+    return 200;
+  }
+
+  if (path == QLatin1String("/api/v1/logout")) {
+    const QString offered = request.header(QStringLiteral("authorization"));
+    ApiAuth::Sessions::instance().close(offered.mid(7));
+    *body = QByteArray();
+    return 204;
+  }
+
+  if (path == QLatin1String("/api/v1/password")) {
+    const QString current = given.value(QStringLiteral("current")).toString();
+    const QString wanted = given.value(QStringLiteral("new")).toString();
+
+    // Setting the first password needs no old one -- there is none -- but the
+    // request still had to carry the token to get this far. Changing an
+    // existing one needs the old one even so: a page left open on an
+    // unattended machine must not be a way to take the password over.
+    if (ApiAuth::HasPassword() &&
+        !ApiAuth::PasswordMatches(current, ApiAuth::StoredPassword())) {
+      *body = problem(QStringLiteral("the current password is wrong"));
+      return 403;
+    }
+
+    if (wanted.size() < 8) {
+      *body = problem(QStringLiteral("a password needs at least 8 characters"));
+      return 400;
+    }
+
+    ApiAuth::SetPassword(wanted);
+    qCDebug(rbApp) << "the administrator password was set";
+
+    // Everybody was signed out by the change, including whoever asked for
+    // it, so they are given a session back rather than being thrown out of
+    // the page they are standing in.
+    QJsonObject object;
+    object.insert(QStringLiteral("session"),
+                  ApiAuth::Sessions::instance().open());
+    *body = toJson(object);
+    return 200;
+  }
+
+  return 0; // not one of ours
+}
+
+int ApiServer::command(const HttpRequest &request, QByteArray *body) {
+  const QStringList parts = segmentsOf(request.path);
+  const bool post = request.method == QLatin1String("POST");
+
+  if (post) {
+    const int status = authCommand(request, body);
+    if (status != 0) {
+      return status;
+    }
+  }
+
+  // tasks/{id}/run and tasks/{id}/enqueue
+  if (post && parts.size() == 3 && parts.at(0) == QLatin1String("tasks")) {
+    const QString id = parts.at(1);
+    const QString verb = parts.at(2);
+
+    JobOptions *task = ListOfJobOptions::getInstance()->find(id);
+    if (task == nullptr) {
+      *body = problem(QStringLiteral("no such task"));
+      return 404;
+    }
+
+    if (verb == QLatin1String("enqueue")) {
+      const QString requestId =
+          JobQueue::instance().enqueue(id, wantsDryRun(request));
+      qCDebug(rbApp) << "API queued task" << id << "request=" << requestId;
+      *body = startedJob(requestId, QStringLiteral("queued"));
+      return 202;
+    }
+
+    if (verb == QLatin1String("run")) {
+      if (alreadyRunning(id)) {
+        // Refused rather than started. Two copies of one task write one
+        // destination, and a caller asking twice is far more likely to be a
+        // dashboard's double click than a deliberate second copy.
+        *body = problem(QStringLiteral("that task is already running"));
+        return 409;
+      }
+
+      const QString requestId = QUuid::createUuid().toString();
+      qCDebug(rbApp) << "API running task" << id << "request=" << requestId;
+      StartTask(task, QStringLiteral("api"), requestId, wantsDryRun(request));
+      *body = startedJob(requestId, QStringLiteral("now"));
+      return 202;
+    }
+  }
+
+  // schedules/{id}/run -- the road the clock takes, not a second copy of
+  // "run this schedule".
+  if (post && parts.size() == 3 && parts.at(0) == QLatin1String("schedules") &&
+      parts.at(2) == QLatin1String("run")) {
+    QString reason;
+    const QString requestId = AppCore::instance().runNow(parts.at(1), &reason);
+    if (requestId.isEmpty()) {
+      // The reason is passed on rather than flattened into "could not run".
+      // "its last run has not finished" and "there is no such schedule" are
+      // different problems, and saying which is the whole point.
+      *body = problem(reason);
+      return reason == QLatin1String("there is no such schedule") ? 404 : 409;
+    }
+    *body = startedJob(requestId, QStringLiteral("schedule"));
+    return 202;
+  }
+
+  // jobs/{requestId}/stop
+  if (post && parts.size() == 3 && parts.at(0) == QLatin1String("jobs") &&
+      parts.at(2) == QLatin1String("stop")) {
+    RunningJob *job = JobRegistry::instance().find(parts.at(1));
+    if (job == nullptr) {
+      *body = problem(QStringLiteral("no such job"));
+      return 404;
+    }
+    if (!job->isRunning()) {
+      *body = problem(QStringLiteral("that job has already finished"));
+      return 409;
+    }
+
+    qCDebug(rbApp) << "API stopping job" << job->requestId();
+    job->stop();
+
+    // Asked, not done: a mount can refuse to come down while a file on it is
+    // open, and the ending arrives through the same signals as any other.
+    QJsonObject object;
+    object.insert(QStringLiteral("requestId"), job->requestId());
+    object.insert(QStringLiteral("stopping"), true);
+    *body = toJson(object);
+    return 202;
+  }
+
+  // queue/start and queue/pause
+  if (post && parts.size() == 2 && parts.at(0) == QLatin1String("queue")) {
+    if (parts.at(1) == QLatin1String("start")) {
+      JobQueue::instance().start();
+    } else if (parts.at(1) == QLatin1String("pause")) {
+      JobQueue::instance().pause();
+    } else {
+      *body = problem(QStringLiteral("the queue does not do that"));
+      return 404;
+    }
+
+    qCDebug(rbApp) << "API set the queue running to"
+                   << JobQueue::instance().isRunning();
+    QJsonObject object;
+    object.insert(QStringLiteral("running"), JobQueue::instance().isRunning());
+    object.insert(QStringLiteral("queued"), JobQueue::instance().count());
+    *body = toJson(object);
+    return 200;
+  }
+
+  // queue/{requestId} -- take one waiting entry out
+  if (!post && parts.size() == 2 && parts.at(0) == QLatin1String("queue")) {
+    const QString requestId = parts.at(1);
+
+    bool found = false;
+    for (const QueueEntry &entry : JobQueue::instance().entries()) {
+      found = found || entry.requestId == requestId;
+    }
+    if (!found) {
+      *body = problem(QStringLiteral("nothing in the queue by that name"));
+      return 404;
+    }
+    if (requestId == JobQueue::instance().runningRequestId()) {
+      // Taking out the entry that is running would leave rclone going with
+      // nothing holding it. Stopping the job is how that one ends, and
+      // saying so beats half doing it.
+      *body =
+          problem(QStringLiteral("that one is running; stop the job instead"));
+      return 409;
+    }
+
+    JobQueue::instance().remove(requestId);
+    qCDebug(rbApp) << "API removed queue entry" << requestId;
+    *body = QByteArray();
+    return 204;
+  }
+
+  if (isSomethingWeCanShow(request.path)) {
+    *body = problem(QStringLiteral("that endpoint can be read, not commanded"));
     return 405;
   }
+
+  *body = problem(QStringLiteral("no such endpoint"));
+  return 404;
+}
+
+int ApiServer::get(const HttpRequest &request, QByteArray *body,
+                   QByteArray *contentType) {
+  const QString &path = request.path;
 
   if (path == QLatin1String("/api/v1/ping")) {
     QJsonObject object;
     object.insert(QStringLiteral("ok"), true);
+    *body = toJson(object);
+    return 200;
+  }
+
+  // Answered without a token, and says only what a sign-in page has to know
+  // to draw itself. Whether a password exists is not a secret: the page has
+  // to show either a password box or a token box, and guessing wrong at it
+  // is worse than saying.
+  if (path == QLatin1String("/api/v1/auth")) {
+    QJsonObject object;
+    object.insert(QStringLiteral("passwordSet"), ApiAuth::HasPassword());
+    object.insert(QStringLiteral("user"), ApiAuth::UserName());
+    object.insert(QStringLiteral("lockedOut"),
+                  ApiAuth::Attempts::instance().isLockedOut());
+    object.insert(QStringLiteral("lockSeconds"),
+                  ApiAuth::Attempts::instance().secondsRemaining());
     *body = toJson(object);
     return 200;
   }
@@ -328,6 +1112,47 @@ int ApiServer::route(const HttpRequest &request, QByteArray *body) {
       array.append(describe(*job));
     }
     *body = toJson(array);
+    return 200;
+  }
+
+  // A job's output, as text. Deliberately not JSON: a log wrapped in a JSON
+  // string is a log with every newline spelled out, which nobody can read in
+  // a browser and every client has to unwrap again.
+  if (path.startsWith(QLatin1String("/api/v1/jobs/")) &&
+      path.endsWith(QLatin1String("/log"))) {
+    const QString id =
+        path.mid(QStringLiteral("/api/v1/jobs/").size(),
+                 path.size() - QStringLiteral("/api/v1/jobs//log").size());
+
+    const QString file = logPathFor(id);
+    if (file.isEmpty() || !QFileInfo::exists(file)) {
+      // Told apart on purpose: a job that wrote no log (logging off, or
+      // rclone printed nothing) is not the same as a job that never was.
+      const bool known = JobRegistry::instance().find(id) != nullptr ||
+                         !RunHistory::find(id).requestId.isEmpty();
+      *body = problem(known ? QStringLiteral("that job wrote no log")
+                            : QStringLiteral("no such job"));
+      return 404;
+    }
+
+    bool readable = true;
+    const int asked =
+        request.queryValue(QStringLiteral("tail")).toInt(&readable);
+    const int lines = readable && asked > 0 ? qMin(asked, 5000) : 200;
+
+    *contentType = "text/plain; charset=utf-8";
+    *body = tailOf(file, lines);
+    return 200;
+  }
+
+  if (path.startsWith(QLatin1String("/api/v1/jobs/"))) {
+    const QString id = path.mid(QStringLiteral("/api/v1/jobs/").size());
+    const RunningJob *job = JobRegistry::instance().find(id);
+    if (job == nullptr) {
+      *body = problem(QStringLiteral("no such job"));
+      return 404;
+    }
+    *body = toJson(describe(*job));
     return 200;
   }
 

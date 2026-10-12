@@ -2,13 +2,19 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 
 set(CMAKE_AUTOMOC ON)
 
+# A stand-in for rclone, so the code that runs it can be tested without one.
+# Built with the tests and found through RB_FAKE_RCLONE.
+add_executable(fake_rclone fake_rclone.cpp)
+
 # Tests link rbcore only. If a test ever needs Qt6::Widgets to link, something
 # that belongs in the GUI has drifted into the core.
 function(rb_add_test name)
   add_executable(${name} ${name}.cpp)
   target_link_libraries(${name} PRIVATE rbcore Qt6::Test)
   target_compile_definitions(${name} PRIVATE
-      RB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+      RB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+      RB_FAKE_RCLONE="$<TARGET_FILE:fake_rclone>")
+  add_dependencies(${name} fake_rclone)
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endfunction()
@@ -37,6 +43,7 @@ rb_add_test(test_directory_listing)
 rb_add_test(test_app_core)
 rb_add_test(test_http_message)
 rb_add_test(test_api_server)
+rb_add_test(test_api_auth)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

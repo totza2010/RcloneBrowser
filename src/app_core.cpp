@@ -4,6 +4,7 @@
 #include "job_queue.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
+#include "remote_registry.h"
 #include "schedule.h"
 #include "scheduler_store.h"
 #include "script_runner.h"
@@ -42,6 +43,15 @@ void AppCore::start() {
   // line in the job log reading: running "" with 25 arguments.
   SetRclone(GetSettings()->value("Settings/rclone").toString());
   SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
+
+  // Which remotes exist. Only the window ever asked before, so a daemon knew
+  // of none: the API answered "no remotes" to anything that asked, and a Web
+  // UI could show no folder at all. The same half-migrated shape as the
+  // scripts below -- the ability had moved and the wiring had not.
+  //
+  // Nothing waits for it. The answer arrives through RemoteRegistry's own
+  // signal, and everything that reads the list reads it when asked.
+  RemoteRegistry::instance().refresh();
 
   // Scripts before anything that could run: ScriptRunner listens for jobs
   // starting, and a queue that begins work as soon as it is read would

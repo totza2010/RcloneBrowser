@@ -54,6 +54,7 @@ set(CORE_SOURCE
   app_core.cpp
   http_message.cpp
   api_server.cpp
+  api_auth.cpp
   remote_registry.cpp
   rclone_version.cpp
   task_builder.cpp
@@ -88,6 +89,7 @@ set(CORE_HEADER
   app_core.h
   http_message.h
   api_server.h
+  api_auth.h
   remote_registry.h
   rclone_version.h
   task_builder.h
@@ -109,7 +111,11 @@ set(CORE_HEADER
   pch_core.h
 )
 
-add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER})
+# The Web UI travels inside the library that serves it, so a daemon has no
+# files to go looking for. See docs/WEB-UI.md.
+set(CORE_RESOURCE webui.qrc)
+
+add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER} ${CORE_RESOURCE})
 # No Qt6::Widgets and no Qt6::Gui here. That omission is the contract.
 # Qt6::Sql is not a GUI module, so the contract above still holds: it brings
 # in the SQLite driver and nothing that needs a screen. See docs/PLAN.md 6.8.

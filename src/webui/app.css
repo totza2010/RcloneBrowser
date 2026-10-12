@@ -1,0 +1,317 @@
+/* One file, no font from anywhere else: this has to render in a container
+   with no network beyond the host it is served from.
+
+   Dark is the default because the application it belongs to is, but the
+   colours are named once and only once, so the light theme is the same page
+   with different values -- not a second set of rules that drifts. */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #1e1e1e;
+  --panel: #252526;
+  --panel-2: #2d2d30;
+  --line: #3c3c3c;
+  --text: #e6e6e6;
+  --muted: #9a9a9a;
+  --accent: #4ea1d3;
+  --on-accent: #10222c;
+  --good: #6ac47e;
+  --bad: #e06c6c;
+  --warn: #d9a441;
+  --shadow: rgba(0, 0, 0, .5);
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --panel-2: #eceef1;
+  --line: #d5d8dd;
+  --text: #1c1f23;
+  --muted: #5f6672;
+  --accent: #1f6f9e;
+  --on-accent: #ffffff;
+  --good: #237a3c;
+  --bad: #b3261e;
+  --warn: #8a5a00;
+  --shadow: rgba(20, 25, 35, .18);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.grow { flex: 1; }
+.error { color: var(--bad); min-height: 1.2em; margin: 0; }
+
+/* ---- the gate ---------------------------------------------------------- */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.gate-box {
+  width: min(380px, 90vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 28px;
+}
+
+.gate-box h1 { margin: 0 0 16px; font-size: 20px; }
+.gate-form { display: flex; flex-direction: column; gap: 12px; }
+.gate-form p { margin: 0; }
+
+label { display: block; color: var(--muted); font-size: 13px; }
+
+input {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 9px 10px;
+  font: inherit;
+  width: 100%;
+  margin-top: 4px;
+}
+
+input:focus { outline: 1px solid var(--accent); }
+
+button {
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--on-accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 8px 14px;
+}
+
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: .45; cursor: default; filter: none; }
+
+button.ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 400;
+}
+
+button.link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-weight: 400;
+  padding: 0;
+  text-align: left;
+}
+
+button.small { padding: 4px 9px; font-size: 12px; }
+button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+
+/* ---- frame ------------------------------------------------------------- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand { display: flex; align-items: center; gap: 8px; }
+.controls { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+.dot.live { background: var(--good); }
+
+.banner {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--warn);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+}
+
+nav {
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+nav button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-weight: 400;
+  padding: 9px 14px;
+  white-space: nowrap;
+}
+
+nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+
+main { padding: 16px; }
+.tab { display: none; }
+.tab.on { display: block; }
+
+/* ---- cards and rows ---------------------------------------------------- */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.card-head .name { font-weight: 600; }
+.card-actions { margin-left: auto; display: flex; gap: 6px; }
+.card .path { color: var(--muted); font-size: 13px; word-break: break-all; }
+
+.bar {
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  margin: 9px 0 6px;
+  overflow: hidden;
+}
+
+.bar > span { display: block; height: 100%; background: var(--accent); }
+
+.figures { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+
+.tag {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.tag.running { border-color: var(--accent); color: var(--accent); }
+.tag.finished { border-color: var(--good); color: var(--good); }
+.tag.error { border-color: var(--bad); color: var(--bad); }
+.tag.stopped { border-color: var(--warn); color: var(--warn); }
+
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 10px; text-align: left; }
+th { color: var(--muted); font-weight: 400; font-size: 12px; text-transform: uppercase; }
+tbody tr:hover { background: var(--panel); }
+
+/* ---- remotes ----------------------------------------------------------- */
+
+.remote-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+
+.remote-list button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-weight: 400;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.remote-list button.on { border-color: var(--accent); color: var(--accent); }
+.remote-list .type { color: var(--muted); font-size: 12px; display: block; }
+
+.crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.crumbs button { background: transparent; border: none; color: var(--accent); font-weight: 400; padding: 3px 4px; }
+.crumbs span { color: var(--muted); }
+
+.entry-name { background: none; border: none; color: var(--text); font: inherit; padding: 0; text-align: left; }
+.entry-name.dir { color: var(--accent); cursor: pointer; }
+.entry-name.file { cursor: default; }
+
+/* ---- what the API said ------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  max-width: 420px;
+  background: var(--panel-2);
+  border: 1px solid var(--bad);
+  border-left-width: 3px;
+  border-radius: 4px;
+  padding: 10px 14px;
+  box-shadow: 0 6px 20px var(--shadow);
+}
+
+/* ---- a job's log, and the password box --------------------------------- */
+
+.logbox {
+  position: fixed;
+  inset: 8vh 6vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px var(--shadow);
+}
+
+.logbox-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 14px;
+}
+
+.logbox pre {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  font: 12px/1.45 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, .45);
+}
+
+.modal-box {
+  width: min(400px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px var(--shadow);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-box h2 { margin: 0; font-size: 17px; }
+.modal-box p { margin: 0; font-size: 13px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
