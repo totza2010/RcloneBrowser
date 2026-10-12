@@ -547,6 +547,119 @@ void ApiServer::answerWhenDone(QTcpSocket *socket, RunningJob *job,
                    [finish](JobState) { finish(); });
 }
 
+void ApiServer::remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
+                               const QString &remote,
+                               const QString &question) {
+  const auto refuse = [socket](int status, const QString &code,
+                               const QString &why) {
+    QJsonObject object;
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), code);
+    socket->write(FormatHttpResponse(status, toJson(object)));
+  };
+
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    refuse(404, QStringLiteral("no_such_remote"),
+           QStringLiteral("no such remote"));
+    return;
+  }
+
+  const QString path = request.queryValue(QStringLiteral("path"));
+
+  RunningJob *job = nullptr;
+  if (question == QLatin1String("size")) {
+    job = RemoteOps::Size(remote, path, QStringList(), true);
+  } else if (question == QLatin1String("about")) {
+    job = RemoteOps::About(remote, true);
+  } else {
+    job = RemoteOps::Tree(remote, path);
+  }
+  qCDebug(rbApp) << "API asking" << question << "of" << remote << path;
+
+  // Everything rclone prints, because here the output is the answer. Capped,
+  // because a tree of a large remote is not something to hold whole.
+  const int cap = 2 * 1024 * 1024;
+  auto said = QSharedPointer<QStringList>::create();
+  auto size = QSharedPointer<int>::create(0);
+  auto truncated = QSharedPointer<bool>::create(false);
+
+  QObject::connect(job, &RunningJob::outputLine, socket,
+                   [said, size, truncated, cap](const QString &line) {
+                     if (*size > cap) {
+                       *truncated = true;
+                       return;
+                     }
+                     *size += int(line.size()) + 1;
+                     said->append(line);
+                   });
+
+  const auto finish = [=]() {
+    const QString text = said->join(QLatin1Char('\n'));
+
+    QJsonObject object;
+    object.insert(QStringLiteral("remote"), remote);
+    object.insert(QStringLiteral("path"), RemoteOps::Join(QString(), path));
+    object.insert(QStringLiteral("requestId"), job->requestId());
+
+    if (job->state() != JobState::Finished) {
+      object.insert(QStringLiteral("error"),
+                    text.trimmed().isEmpty()
+                        ? QStringLiteral("rclone exited with code %1")
+                              .arg(job->exitCode())
+                        : text.trimmed());
+      object.insert(QStringLiteral("code"), QStringLiteral("rclone_failed"));
+      socket->write(FormatHttpResponse(502, toJson(object)));
+      return;
+    }
+
+    if (question == QLatin1String("tree")) {
+      object.insert(QStringLiteral("output"), text);
+      object.insert(QStringLiteral("truncated"), *truncated);
+      socket->write(FormatHttpResponse(200, toJson(object)));
+      return;
+    }
+
+    // Numbers, from the JSON rclone was asked for. It is found between the
+    // first brace and the last, because rclone may say something else first
+    // -- a notice about a config file, a retry.
+    const int from = text.indexOf(QLatin1Char('{'));
+    const int to = text.lastIndexOf(QLatin1Char('}'));
+    const QJsonObject figures =
+        from >= 0 && to > from
+            ? QJsonDocument::fromJson(text.mid(from, to - from + 1).toUtf8())
+                  .object()
+            : QJsonObject();
+
+    if (figures.isEmpty()) {
+      object.insert(QStringLiteral("error"),
+                    QStringLiteral("rclone answered, but not with figures"));
+      object.insert(QStringLiteral("code"), QStringLiteral("unreadable"));
+      object.insert(QStringLiteral("output"), text);
+      socket->write(FormatHttpResponse(502, toJson(object)));
+      return;
+    }
+
+    for (auto it = figures.begin(); it != figures.end(); ++it) {
+      object.insert(it.key(), it.value());
+    }
+    socket->write(FormatHttpResponse(200, toJson(object)));
+  };
+
+  if (!job->isRunning()) {
+    finish();
+    return;
+  }
+  QObject::connect(job, &RunningJob::finished, socket,
+                   [finish](JobState) { finish(); });
+
+  // Whoever asked has gone: stop asking on their behalf.
+  QObject::connect(socket, &QTcpSocket::disconnected, job, [job]() {
+    if (job->isRunning()) {
+      job->stop();
+    }
+  });
+}
+
 void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
                                 const QString &remote,
                                 const QString &operation) {
@@ -912,6 +1025,24 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
       }
       listDirectory(socket, asked, parts.at(1),
                     asked.queryValue(QStringLiteral("path")));
+      return;
+    }
+  }
+
+  // Nor are these: they run rclone and the answer is what it prints.
+  {
+    const QStringList parts = segmentsOf(asked.path);
+    static const QStringList questions = {QStringLiteral("size"),
+                                          QStringLiteral("about"),
+                                          QStringLiteral("tree")};
+    if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        questions.contains(parts.at(2))) {
+      if (headOnly) {
+        reply(FormatHttpResponse(200, QByteArray()));
+        return;
+      }
+      remoteQuestion(socket, asked, parts.at(1), parts.at(2));
       return;
     }
   }

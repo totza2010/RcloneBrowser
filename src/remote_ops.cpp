@@ -147,4 +147,45 @@ RunningJob *Delete(const Item &item, QString *why) {
                target, QString());
 }
 
+RunningJob *Size(const QString &remote, const QString &path,
+                 const QStringList &filters, bool json) {
+  const QString target = Target(remote, path);
+
+  QStringList command{QStringLiteral("size"), target};
+  command << filters;
+  if (json) {
+    command << QStringLiteral("--json");
+  }
+
+  return start(JobKind::Size, command,
+               filters.isEmpty()
+                   ? QStringLiteral("Size of \"%1\"").arg(target)
+                   : QStringLiteral("Size of selected items in \"%1\"")
+                         .arg(target),
+               target, QString());
+}
+
+RunningJob *About(const QString &remote, bool json) {
+  const QString target = Target(remote, QString());
+
+  QStringList command{QStringLiteral("about"), target};
+  if (json) {
+    command << QStringLiteral("--json");
+  }
+
+  return start(JobKind::About, command,
+               QStringLiteral("rclone about \"%1\"").arg(target), target,
+               QString());
+}
+
+RunningJob *Tree(const QString &remote, const QString &path) {
+  const QString target = Target(remote, path);
+
+  return start(JobKind::Tree,
+               QStringList{QStringLiteral("tree"), QStringLiteral("-d"),
+                           target},
+               QStringLiteral("rclone tree -d \"%1\"").arg(target), target,
+               QString());
+}
+
 } // namespace RemoteOps

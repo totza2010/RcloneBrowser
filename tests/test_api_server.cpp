@@ -898,6 +898,82 @@ private slots:
     QCOMPARE(statusOf(reply), 502);
   }
 
+  // ---- asking rclone about a remote ----------------------------------------
+
+  // Numbers, not a sentence about them: another program asking how big a
+  // folder is wants a count of bytes.
+  void theSizeOfAFolderComesBackAsNumbers() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray reply =
+        ask("GET", "/api/v1/remotes/fake/size?path=films", mToken);
+    QCOMPARE(statusOf(reply), 200);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("count")).toInt(), 3);
+    QCOMPARE(object.value(QStringLiteral("bytes")).toInt(), 1536);
+    QCOMPARE(object.value(QStringLiteral("path")).toString(),
+             QStringLiteral("films"));
+
+    // It ran as a job, so it is in the history like any other.
+    QCOMPARE(RunHistory::find(object.value(QStringLiteral("requestId")).toString())
+                 .kind,
+             QStringLiteral("size"));
+  }
+
+  // rclone prints the quota over several lines and may say something else
+  // first. The figures are still found.
+  void theQuotaIsReadOutOfWhateverRcloneSaidAroundIt() {
+    QVERIFY(useFakeRclone(1));
+    const QByteArray reply = ask("GET", "/api/v1/remotes/fake/about", mToken);
+    QCOMPARE(statusOf(reply), 200);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("total")).toInt(), 1000);
+    QCOMPARE(object.value(QStringLiteral("used")).toInt(), 400);
+    QCOMPARE(object.value(QStringLiteral("free")).toInt(), 600);
+  }
+
+  // Indentation is all that says which folder is inside which. A job's
+  // output used to be trimmed at both ends, which flattened every tree.
+  void aTreeKeepsItsShape() {
+    QVERIFY(useFakeRclone(1));
+    const QByteArray reply =
+        ask("GET", "/api/v1/remotes/fake/tree?path=", mToken);
+    QCOMPARE(statusOf(reply), 200);
+
+    const QString tree =
+        bodyOf(reply).object().value(QStringLiteral("output")).toString();
+    QVERIFY2(tree.contains(QStringLiteral("|   `-- 2026")), qPrintable(tree));
+    QVERIFY2(tree.contains(QStringLiteral("\n    `-- live")),
+             "the indentation of the last branch was lost");
+  }
+
+  // A question rclone cannot answer comes back with what rclone said.
+  void aQuestionThatFailsSaysWhy() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    const QByteArray reply = ask("GET", "/api/v1/remotes/fake/about", mToken);
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    QCOMPARE(statusOf(reply), 502);
+    QVERIFY(bodyOf(reply).object().value(QStringLiteral("error")).toString()
+                .contains(QStringLiteral("didn't find section")));
+  }
+
+  void askingAboutARemoteNeedsASecretAndARealRemote() {
+    QVERIFY(useFakeRclone(1));
+    for (const char *question : {"size", "about", "tree"}) {
+      const QByteArray target =
+          QByteArray("/api/v1/remotes/fake/") + question;
+      QCOMPARE(statusOf(ask("GET", target, QByteArray())), 401);
+      QCOMPARE(statusOf(ask("GET", QByteArray("/api/v1/remotes/nope/") + question,
+                            mToken)),
+               404);
+    }
+  }
+
   void makingAFolderNeedsASecretAndARealRemote() {
     QVERIFY(useFakeRclone(1));
     const QByteArray body = "{\"path\":\"\",\"name\":\"x\"}";

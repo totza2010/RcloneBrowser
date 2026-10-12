@@ -317,6 +317,13 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
   gap: 12px;
 }
 
+.modal-box.wide { width: min(760px, 94vw); max-height: 86vh; }
+.modal-box.wide #result-body { overflow: auto; }
+.modal-box pre { font: 12px/1.45 Consolas, "Courier New", monospace; margin: 0; white-space: pre; }
+.modal-box dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.modal-box dt { color: var(--muted); }
+.modal-box dd { margin: 0; }
+
 .modal-box h2 { margin: 0; font-size: 17px; }
 .modal-box p { margin: 0; font-size: 13px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }

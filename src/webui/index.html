@@ -98,6 +98,9 @@
           <button id="remote-mkdir" class="ghost small">New folder</button>
           <button id="remote-rename" class="ghost small" disabled>Rename</button>
           <button id="remote-delete" class="danger small" disabled>Delete</button>
+          <button id="remote-size" class="ghost small">Size</button>
+          <button id="remote-tree" class="ghost small">Tree</button>
+          <button id="remote-about" class="ghost small">Info</button>
           <span id="remote-chosen" class="muted"></span>
         </div>
         <div id="crumbs" class="crumbs"></div>
@@ -121,6 +124,17 @@
       <button id="log-close" class="ghost">Close</button>
     </div>
     <pre id="log-body"></pre>
+  </div>
+
+  <!-- What a question to rclone came back with: a size, a quota, a tree. -->
+  <div id="resultbox" class="modal hidden">
+    <div class="modal-box wide">
+      <h2 id="result-title"></h2>
+      <div id="result-body"></div>
+      <div class="modal-actions">
+        <button type="button" id="result-close" class="ghost">Close</button>
+      </div>
+    </div>
   </div>
 
   <div id="passwordbox" class="modal hidden">

@@ -18,6 +18,7 @@
 // still lives in remote_widget.cpp and is listed in the plan.
 
 #include <QString>
+#include <QStringList>
 
 class RunningJob;
 
@@ -85,5 +86,24 @@ RunningJob *Rename(const QString &remote, const QString &path,
 // Refuses the root of a remote outright. Purging a path that is empty is
 // purging everything, and nobody asks for that by leaving a field blank.
 RunningJob *Delete(const Item &item, QString *why = nullptr);
+
+// ---- finding things out, which changes nothing ----------------------------
+
+// How many files are under a path and how much they come to.
+//
+// `filters` narrows it to some of what is there, which is how the window
+// sizes several selected items at once. With `json` rclone answers in JSON,
+// for a caller that wants the numbers rather than a sentence about them.
+RunningJob *Size(const QString &remote, const QString &path,
+                 const QStringList &filters = QStringList(),
+                 bool json = false);
+
+// What the backend says about its own space: total, used, free. Not every
+// backend can say; rclone reports that itself when it cannot.
+RunningJob *About(const QString &remote, bool json = false);
+
+// The folders under a path, drawn as a tree. Folders only, as the window has
+// always asked for it.
+RunningJob *Tree(const QString &remote, const QString &path);
 
 } // namespace RemoteOps

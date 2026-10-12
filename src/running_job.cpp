@@ -178,7 +178,13 @@ bool RunningJob::start() {
 
 void RunningJob::handleOutput() {
   while (mProcess->canReadLine()) {
-    const QString line = QString(mProcess->readLine()).trimmed();
+    // The end of the line is removed and nothing else. This used to trim
+    // both ends, which took the indentation off every line of "rclone tree"
+    // -- and indentation is all that says which folder is inside which.
+    QString line = QString::fromUtf8(mProcess->readLine());
+    while (line.endsWith(QLatin1Char('\n')) || line.endsWith(QLatin1Char('\r'))) {
+      line.chop(1);
+    }
 
     // rclone announces the port it settled on. This is the only thing still
     // taken from the output; every figure comes from core/stats instead.

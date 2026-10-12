@@ -133,6 +133,11 @@ private:
   void answerWhenDone(QTcpSocket *socket, class RunningJob *job,
                       const QJsonObject &onSuccess);
 
+  // Something found out about a remote: the answer is what rclone printed,
+  // so it is kept and handed to `read`, which turns it into the reply.
+  void remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
+                      const QString &remote, const QString &question);
+
   void openEventStream(QTcpSocket *socket);
   void broadcast(const QString &event, const QJsonObject &data);
 

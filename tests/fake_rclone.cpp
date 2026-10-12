@@ -13,6 +13,8 @@
 //   moveto,      FAKE_RCLONE_FAIL is set
 //   purge,
 //   deletefile
+//   size, about, answer as rclone does, in JSON when asked with --json;
+//   tree         fail when FAKE_RCLONE_FAIL is set
 //   copy, sync,  does nothing for FAKE_RCLONE_SLEEP_MS (default 0) and then
 //   move         exits 0 -- a transfer that is still going when asked about
 //
@@ -65,6 +67,41 @@ int main(int argc, char *argv[]) {
       ms = std::atoi(asked);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return 0;
+  }
+
+  // Questions. Each answers as rclone does, and "has" says whether a flag
+  // was among the arguments.
+  const auto has = [argc, argv](const char *flag) {
+    for (int i = 2; i < argc; ++i) {
+      if (std::strcmp(argv[i], flag) == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  if (std::strcmp(command, "size") == 0 || std::strcmp(command, "about") == 0 ||
+      std::strcmp(command, "tree") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "2026/10/12 12:00:00 CRITICAL: Failed to create "
+                           "file system: didn't find section in config file\n");
+      return 1;
+    }
+    if (std::strcmp(command, "size") == 0) {
+      if (has("--json")) {
+        std::printf("{\"count\":3,\"bytes\":1536,\"sizeless\":0}\n");
+      } else {
+        std::printf("Total objects: 3\nTotal size: 1.500 KiB (1536 Byte)\n");
+      }
+    } else if (std::strcmp(command, "about") == 0) {
+      // Over several lines, as rclone prints it, with a notice first.
+      std::printf("2026/10/12 12:00:00 NOTICE: something said beforehand\n");
+      std::printf("{\n\t\"total\": 1000,\n\t\"used\": 400,\n\t\"free\": 600\n}\n");
+    } else {
+      // Indentation is the whole of what a tree says.
+      std::printf("/\n|-- films\n|   `-- 2026\n`-- music\n    `-- live\n");
+    }
     return 0;
   }
 

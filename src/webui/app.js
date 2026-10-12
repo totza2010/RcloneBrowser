@@ -798,6 +798,85 @@ $("remote-delete").addEventListener("click", async () => {
   if (gone) browse(browsing.remote, browsing.path);
 });
 
+// ---- asking rclone about a remote ----------------------------------------
+//
+// Size, Info and Tree change nothing. They take as long as rclone takes, so
+// the box opens straight away saying what is being asked, and is filled in
+// when the answer comes -- or says why there is none.
+
+function showResult(title, html) {
+  $("result-title").textContent = title;
+  $("result-body").innerHTML = html;
+  $("resultbox").classList.remove("hidden");
+}
+
+$("result-close").addEventListener("click", () =>
+  $("resultbox").classList.add("hidden"));
+
+function figures(rows) {
+  return "<dl>" + rows.map((r) =>
+    "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>").join("") + "</dl>";
+}
+
+// What a question is about: the chosen row if there is one, otherwise the
+// folder being looked at.
+function subject() {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  return entry ? entry.path : browsing.path;
+}
+
+async function ask(question, title, path, draw) {
+  showResult(title, '<p class="muted">asking rclone…</p>');
+  let answer;
+  try {
+    answer = await api(
+      "GET", "/remotes/" + encodeURIComponent(browsing.remote) + "/" + question +
+        (path === null ? "" : "?path=" + encodeURIComponent(path)));
+  } catch (e) {
+    showResult(title, '<p class="error">could not reach the daemon</p>');
+    return;
+  }
+  if (answer.status !== 200) {
+    // rclone's own words. A backend that cannot report its quota says so
+    // here, which is an answer and not a fault.
+    showResult(title, '<pre class="error">' + esc(reasonFrom(answer)) + "</pre>");
+    return;
+  }
+  showResult(title, draw(answer.data));
+}
+
+$("remote-size").addEventListener("click", () => {
+  const path = subject();
+  ask("size", "Size of " + browsing.remote + ":" + path, path, (d) =>
+    figures([
+      ["Files", String(d.count)],
+      ["Total", bytes(d.bytes) + "  (" + d.bytes + " bytes)"],
+    ].concat(d.sizeless ? [["Of unknown size", String(d.sizeless)]] : [])));
+});
+
+$("remote-tree").addEventListener("click", () => {
+  const path = subject();
+  ask("tree", "Folders under " + browsing.remote + ":" + path, path, (d) =>
+    "<pre>" + esc(d.output) + "</pre>" +
+    (d.truncated ? '<p class="muted">There is more than is shown.</p>' : ""));
+});
+
+$("remote-about").addEventListener("click", () => {
+  ask("about", "About " + browsing.remote + ":", null, (d) => {
+    const rows = [];
+    // Only what the backend reported. Not every one knows all of these, and
+    // a missing figure is not a zero.
+    for (const [key, label] of [["total", "Total"], ["used", "Used"],
+                                ["free", "Free"], ["trashed", "In the trash"],
+                                ["other", "Other"]]) {
+      if (typeof d[key] === "number") rows.push([label, bytes(d[key])]);
+    }
+    if (typeof d.objects === "number") rows.push(["Objects", String(d.objects)]);
+    return rows.length ? figures(rows)
+                       : '<p class="muted">This backend reported nothing.</p>';
+  });
+});
+
 // ---- a job's log ----------------------------------------------------------
 
 async function openLog(requestId) {

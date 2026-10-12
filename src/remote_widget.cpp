@@ -1230,10 +1230,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                          metrix.elidedText(remote, Qt::ElideMiddle, 150) +
                          ":" + pathMsg + "\"";
 
-    RunningJob *job = StartTool(JobKind::Tree,
-                                QStringList() << "tree"
-                                              << "-d" << remote + ":" + path,
-                                info, remote + ":" + path, QString());
+    RunningJob *job = RemoteOps::Tree(remote, path);
 
     ProgressDialog *progress =
         new ProgressDialog("Show directories tree", "Running... ", info, job,
@@ -1297,10 +1294,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
 
     } // if (multiSelectCount > 1)
 
-    RunningJob *job = StartTool(JobKind::Size,
-                                QStringList() << "size" << remote + ":" + path
-                                              << includedListFinal,
-                                progressMsg, remote + ":" + path, QString());
+    RunningJob *job = RemoteOps::Size(remote, path, includedListFinal);
 
     ProgressDialog *progress =
         new ProgressDialog("Get Size", "Running... ", progressMsg, job, NULL,
@@ -1592,9 +1586,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
         "rclone about \"" + metrix.elidedText(remote, Qt::ElideMiddle, 150) +
         ":\"";
 
-    RunningJob *job =
-        StartTool(JobKind::About, QStringList() << "about" << remote + ":",
-                  info, remote + ":", QString());
+    RunningJob *job = RemoteOps::About(remote);
 
     ProgressDialog *progress = new ProgressDialog(
         "Get remote Info", "Runnning... ", info, job, NULL, false, false,
