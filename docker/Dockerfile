@@ -128,8 +128,13 @@ RUN chmod +x /rb-init /usr/bin/rb-desktop \
 # would cut that short -- which is the whole thing stopping politely was
 # written to avoid. "docker stop" needs to be given at least as long:
 # compose.yaml sets stop_grace_period.
+# RB_LOCAL_ROOTS is how far the web interface may look on this side: the
+# folders it can upload from and download to. In a container that is what
+# was mounted in from the host, and /media is where compose puts it. More
+# than one is separated by semicolons. See docs/WEB-API-PLAN.md.
 ENV TITLE="Rclone Browser" \
     RB_MODE=both \
+    RB_LOCAL_ROOTS=/media \
     S6_SERVICES_GRACETIME=10000
 
 # The base image sets HOME to /config, which is the volume. The application's

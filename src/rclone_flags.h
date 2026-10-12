@@ -24,7 +24,11 @@ struct RcloneFlag {
   QString group;       // "Copy", "Backend", "Filter", ...
 
   // Boolean flags stand alone; everything else needs a value after it.
-  bool takesValue() const { return !type.isEmpty(); }
+  // "count" is how rclone lists a flag that is repeated rather than given a
+  // value: -v, -vv.
+  bool takesValue() const {
+    return !type.isEmpty() && type != QLatin1String("count");
+  }
 
   // What to put in the line when this flag is picked: a boolean is complete on
   // its own, anything else wants the cursor left after an "=".

@@ -2,18 +2,23 @@
 #include "api_auth.h"
 #include "app_core.h"
 #include "directory_listing.h"
+#include "extra_flags.h"
 #include "debug_log.h"
 #include "http_message.h"
 #include "job_options.h"
 #include "job_queue.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
+#include "local_files.h"
 #include "remote_ops.h"
+#include "rclone_flags.h"
 #include "remote_registry.h"
 #include "run_history.h"
 #include "running_job.h"
 #include "schedule.h"
 #include "scheduler_store.h"
+#include "task_json.h"
+#include "task_builder.h"
 #include "utils.h"
 
 #include <QFile>
@@ -51,15 +56,78 @@ QByteArray problem(const QString &message) {
   return toJson(object);
 }
 
-QJsonObject describe(const JobOptions &task) {
-  QJsonObject object;
-  object.insert(QStringLiteral("id"), task.uniqueId.toString());
-  object.insert(QStringLiteral("name"), task.description);
-  object.insert(QStringLiteral("source"), task.source);
-  object.insert(QStringLiteral("dest"), task.dest);
-  object.insert(QStringLiteral("isDownload"),
-                task.jobType == JobOptions::JobType::Download);
-  return object;
+// The whole task, in words. See task_json.h.
+QJsonObject describe(const JobOptions &task) { return TaskJson::Write(task); }
+
+// Whether the end of a task that is on this machine is somewhere the API may
+// use: what an upload sends from, where a download arrives. A task is a
+// transfer waiting to happen, so the line that holds for a transfer started
+// now has to hold for one saved for later -- otherwise saving it and running
+// it would be a way round.
+bool localEndAllowed(const JobOptions &task) {
+  const QString local =
+      task.jobType == JobOptions::Download ? task.dest : task.source;
+  return !LocalFiles::Allowed(local).isEmpty();
+}
+
+// Why a task may not be saved as it stands, as far as its two ends go.
+struct TaskRefusal {
+  int status = 0; // 0 when there is nothing wrong
+  QString code;
+  QString why;
+};
+
+// The ends of a task, held to what is actually there.
+//
+// A path field is somewhere anything can be typed, and what was being saved
+// was whatever was typed: a remote that does not exist, a file that is not
+// there. Such a task sits in the list looking ordinary until it runs. So the
+// remote has to be one of the remotes, and what an upload sends has to
+// exist. (Where a download lands need not: rclone makes it.)
+//
+// `before` is the task as it was, when one is being changed. An end that
+// was not touched is not judged again -- otherwise a task whose remote has
+// since been removed could not even be renamed, or have that end put right
+// one field at a time.
+TaskRefusal endsProblem(const JobOptions &task, const JobOptions *before) {
+  const bool download = task.jobType == JobOptions::Download;
+  const QString &far = download ? task.source : task.dest;
+  const QString &near = download ? task.dest : task.source;
+  const bool sameKind = before != nullptr && before->jobType == task.jobType;
+  const bool farChanged =
+      !sameKind || (download ? before->source : before->dest) != far;
+  const bool nearChanged =
+      !sameKind || (download ? before->dest : before->source) != near;
+
+  if (farChanged) {
+    const int colon = far.indexOf(QLatin1Char(':'));
+    const QString name = colon > 0 ? far.left(colon) : QString();
+    if (name.isEmpty() || RemoteRegistry::instance().find(name) == nullptr) {
+      return {400, QStringLiteral("no_such_remote"),
+              QStringLiteral("\"%1\" does not begin with a remote there is; "
+                             "it has to be written remote:path")
+                  .arg(far)};
+    }
+  }
+  if (!localEndAllowed(task)) {
+    return {403, QStringLiteral("outside_roots"),
+            QStringLiteral(
+                "that is not a folder on this machine the API may use")};
+  }
+  if (nearChanged && !download && !QFileInfo::exists(near)) {
+    return {400, QStringLiteral("no_such_path"),
+            QStringLiteral("there is no \"%1\" on the machine the program "
+                           "runs on")
+                .arg(near)};
+  }
+  return {};
+}
+
+// What is wrong with a task's extra flags, or nothing. See extra_flags.h.
+QString flagsProblem(const QString &extra) {
+  RcloneFlagRegistry::instance().ensureLoaded();
+  return ExtraFlags::Check(extra, RcloneFlagRegistry::instance().flags(),
+                           LocalFiles::IsRestricted());
 }
 
 QJsonObject describe(const RunningJob &job) {
@@ -870,6 +938,68 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     return;
   }
 
+  if (operation == QLatin1String("upload") ||
+      operation == QLatin1String("download")) {
+    const bool download = operation == QLatin1String("download");
+    const bool dryRun = given.value(QStringLiteral("dryRun")).toBool(false);
+
+    // The end on this machine, resolved and checked against what the API is
+    // allowed to see. The other end is the remote in the address.
+    const QString asked = given
+                              .value(download ? QStringLiteral("to")
+                                              : QStringLiteral("from"))
+                              .toString();
+    const QString local = LocalFiles::Allowed(asked);
+    if (local.isEmpty()) {
+      refuse(403, QStringLiteral("outside_roots"),
+             QStringLiteral(
+                 "that is not a folder on this machine the API may use"));
+      return;
+    }
+
+    RunningJob *job = nullptr;
+    if (download) {
+      if (!QFileInfo(local).isDir()) {
+        refuse(400, QStringLiteral("refused"),
+               QStringLiteral("the place to download to has to be a folder "
+                              "that exists"));
+        return;
+      }
+      RemoteOps::Item item;
+      item.remote = remote;
+      item.path = path;
+      item.isFolder = given.value(QStringLiteral("isDir")).toBool(false);
+
+      QString why;
+      job = RemoteOps::Download(item, local, dryRun, &why);
+      if (job == nullptr) {
+        refuse(400, QStringLiteral("refused"), why);
+        return;
+      }
+    } else {
+      // Whether it is a folder is read off the disk rather than taken on
+      // trust: it decides whether the upload lands under its own name.
+      const QFileInfo source(local);
+      if (!source.exists()) {
+        refuse(400, QStringLiteral("refused"),
+               QStringLiteral("there is nothing at that path to upload"));
+        return;
+      }
+      job = RemoteOps::Upload(local, source.isDir(), remote,
+                              given.value(QStringLiteral("to")).toString(),
+                              dryRun);
+    }
+    qCDebug(rbApp) << "API" << operation << remote << path << local;
+
+    QJsonObject started;
+    started.insert(QStringLiteral("requestId"), job->requestId());
+    started.insert(QStringLiteral("started"), operation);
+    started.insert(QStringLiteral("source"), job->description().source);
+    started.insert(QStringLiteral("dest"), job->description().dest);
+    socket->write(FormatHttpResponse(202, toJson(started)));
+    return;
+  }
+
   if (operation == QLatin1String("mount")) {
     RemoteOps::MountOptions options;
     options.readOnly = given.value(QStringLiteral("readOnly")).toBool(false);
@@ -1113,6 +1243,18 @@ void ApiServer::watchWhatHappens() {
     broadcast(QStringLiteral("queue"), object);
   });
 
+  // A task made, changed or deleted -- here or in the window. Without this a
+  // page open beside the window would go on showing a task the window had
+  // just deleted, and offering to run it.
+  QObject::connect(ListOfJobOptions::getInstance(),
+                   &ListOfJobOptions::tasksListUpdated, this, [this]() {
+                     QJsonObject object;
+                     object.insert(
+                         QStringLiteral("count"),
+                         int(ListOfJobOptions::getInstance()->getTasks().size()));
+                     broadcast(QStringLiteral("tasks"), object);
+                   });
+
   // Held is sent as well as fired. "Nothing happened" is the thing people
   // report, and a dashboard that can only show what did happen leaves them
   // with the same silence as before.
@@ -1278,7 +1420,8 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         QStringLiteral("delete"),  QStringLiteral("link"),
         QStringLiteral("cleanup"), QStringLiteral("dedupe"),
         QStringLiteral("copy"),    QStringLiteral("move"),
-        QStringLiteral("mount")};
+        QStringLiteral("mount"),   QStringLiteral("upload"),
+        QStringLiteral("download")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {
@@ -1326,6 +1469,7 @@ int ApiServer::route(const HttpRequest &request, QByteArray *body,
     return get(request, body, contentType);
   }
   if (request.method == QLatin1String("POST") ||
+      request.method == QLatin1String("PUT") ||
       request.method == QLatin1String("DELETE")) {
     return command(request, body);
   }
@@ -1475,6 +1619,167 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
   if (post && AppCore::instance().isStopping()) {
     *body = problem(QStringLiteral("the program is shutting down"));
     return 503;
+  }
+
+  // ---- writing tasks -------------------------------------------------------
+  //
+  // A task carries rclone flags of its own choosing ("extra"), so writing one
+  // is writing a command line. That was the reason this was left out. It is
+  // in now, with the flags held to two rules (extra_flags.h): one has to be
+  // a flag this rclone has, and the ones that run a program or move rclone's
+  // own files are refused whatever rclone thinks of them. The fields of a
+  // mount, its script among them, are not written here at all.
+  const bool put = request.method == QLatin1String("PUT");
+  const bool del = request.method == QLatin1String("DELETE");
+
+  const auto refuseTask = [body](int status, const QString &code,
+                                 const QString &why) {
+    QJsonObject object;
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), code);
+    *body = toJson(object);
+    return status;
+  };
+
+  // tasks/preview -- the command a task would run, without saving anything.
+  // What the window's dialog shows on its "rclone cmd" tab.
+  if (post && parts.size() == 2 && parts.at(0) == QLatin1String("tasks") &&
+      parts.at(1) == QLatin1String("preview")) {
+    const QJsonObject given = options(request);
+    JobOptions task(given.value(QStringLiteral("type")).toString() ==
+                    QLatin1String("download"));
+    task.operation = JobOptions::Copy;
+
+    QString why;
+    if (!TaskJson::Read(given, &task, &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    why = flagsProblem(task.extra);
+    if (!why.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_flag"), why);
+    }
+
+    QStringList command = task.getOptions();
+    if (given.value(QStringLiteral("dryRun")).toBool(false)) {
+      command << QStringLiteral("--dry-run");
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("command"),
+                  RedactArgs(GetRcloneCmd(command)).join(QLatin1Char(' ')));
+    *body = toJson(object);
+    return 200;
+  }
+
+  // tasks -- make one
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("tasks")) {
+    const QJsonObject given = options(request);
+    if (given.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_field"),
+                        QStringLiteral("a task needs to be described"));
+    }
+
+    auto *task = new JobOptions(
+        given.value(QStringLiteral("type")).toString() ==
+        QLatin1String("download"));
+    task->operation = JobOptions::Copy;
+    task->syncTiming = JobOptions::During;
+
+    QString why;
+    if (!TaskJson::Read(given, task, &why)) {
+      delete task;
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    why = flagsProblem(task->extra);
+    if (!why.isEmpty()) {
+      delete task;
+      return refuseTask(400, QStringLiteral("bad_flag"), why);
+    }
+    // Checked before the path is looked at, so a task with nothing to send
+    // is told so rather than told its nothing is out of bounds.
+    TaskBuilder::Problem problem = TaskBuilder::Check(*task);
+    if (problem != TaskBuilder::Problem::None &&
+        problem != TaskBuilder::Problem::NoName) {
+      delete task;
+      return refuseTask(400, QStringLiteral("incomplete"),
+                        TaskBuilder::Explain(problem));
+    }
+    const TaskRefusal ends = endsProblem(*task, nullptr);
+    if (ends.status != 0) {
+      delete task;
+      return refuseTask(ends.status, ends.code, ends.why);
+    }
+    // Whether an upload is of a folder is read off the disk when nobody
+    // said. It is only a description -- the paths are what run -- but a
+    // wrong one shows the wrong icon for ever after.
+    if (!given.contains(QStringLiteral("isFolder")) &&
+        task->jobType == JobOptions::Upload) {
+      task->isFolder = QFileInfo(task->source).isDir();
+    }
+
+    const QString id =
+        TaskBuilder::Create(task, QDateTime::currentDateTime(), &problem);
+    if (id.isEmpty()) {
+      delete task;
+      return refuseTask(400, QStringLiteral("incomplete"),
+                        TaskBuilder::Explain(problem));
+    }
+    qCDebug(rbApp) << "API created task" << id << task->description;
+    *body = toJson(describe(*task));
+    return 201;
+  }
+
+  // tasks/{id} -- change one, or take it away
+  if ((put || del) && parts.size() == 2 &&
+      parts.at(0) == QLatin1String("tasks")) {
+    JobOptions *task = ListOfJobOptions::getInstance()->find(parts.at(1));
+    if (task == nullptr) {
+      return refuseTask(404, QStringLiteral("no_such_task"),
+                        QStringLiteral("no such task"));
+    }
+
+    if (del) {
+      if (alreadyRunning(parts.at(1))) {
+        return refuseTask(409, QStringLiteral("running"),
+                          QStringLiteral("that task is running; stop it first"));
+      }
+      qCDebug(rbApp) << "API deleted task" << parts.at(1) << task->description;
+      ListOfJobOptions::getInstance()->Forget(task);
+      // Whatever was waiting to run it has nothing to run now.
+      JobQueue::instance().dropMissingTasks();
+      QJsonObject object;
+      object.insert(QStringLiteral("deleted"), parts.at(1));
+      *body = toJson(object);
+      return 200;
+    }
+
+    JobOptions changed = *task;
+    QString why;
+    if (!TaskJson::Read(options(request), &changed, &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    const TaskBuilder::Problem problem = TaskBuilder::Check(changed);
+    if (problem != TaskBuilder::Problem::None) {
+      return refuseTask(400, QStringLiteral("incomplete"),
+                        TaskBuilder::Explain(problem));
+    }
+    // Judged only if it was touched, like the ends: a task that already
+    // carries a flag the window let it have can still be renamed.
+    if (changed.extra != task->extra) {
+      why = flagsProblem(changed.extra);
+      if (!why.isEmpty()) {
+        return refuseTask(400, QStringLiteral("bad_flag"), why);
+      }
+    }
+    const TaskRefusal ends = endsProblem(changed, task);
+    if (ends.status != 0) {
+      return refuseTask(ends.status, ends.code, ends.why);
+    }
+
+    *task = changed;
+    ListOfJobOptions::getInstance()->Persist(task);
+    qCDebug(rbApp) << "API changed task" << parts.at(1) << task->description;
+    *body = toJson(describe(*task));
+    return 200;
   }
 
   // tasks/{id}/run and tasks/{id}/enqueue
@@ -1661,6 +1966,12 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       QJsonObject object;
       object.insert(QStringLiteral("name"), remote.name);
       object.insert(QStringLiteral("type"), remote.type);
+      // How its own flags begin, and whether it is a layer over another
+      // remote -- so a form can offer the flags that mean something to it.
+      object.insert(QStringLiteral("flagPrefix"),
+                    ExtraFlags::FlagPrefixOfType(remote.type));
+      object.insert(QStringLiteral("wraps"),
+                    ExtraFlags::WrapsAnother(remote.type));
       object.insert(QStringLiteral("lastUpload"),
                     describeRun(RunHistory::lastUploadTo(remote.name)));
       object.insert(QStringLiteral("lastDownload"),
@@ -1677,6 +1988,14 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       array.append(describe(*task));
     }
     *body = toJson(array);
+    return 200;
+  }
+
+  // What a new transfer starts from, so a form can begin where the window's
+  // dialog does.
+  if (path == QLatin1String("/api/v1/tasks/defaults")) {
+    *body = toJson(TaskJson::Defaults(
+        request.queryValue(QStringLiteral("type")) == QLatin1String("download")));
     return 200;
   }
 
@@ -1713,6 +2032,103 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       array.append(describe(*job));
     }
     *body = toJson(array);
+    return 200;
+  }
+
+  // The flags the rclone on this machine accepts, less the ones a task may
+  // not be given here. What a form offers to choose from, so that a flag
+  // cannot be mistyped into a task.
+  if (path == QLatin1String("/api/v1/rclone/flags")) {
+    RcloneFlagRegistry &registry = RcloneFlagRegistry::instance();
+    registry.ensureLoaded();
+
+    const QHash<QString, QString> backends =
+        ExtraFlags::Backends(registry.flags());
+
+    QJsonArray array;
+    for (const RcloneFlag &flag : registry.flags()) {
+      if (ExtraFlags::IsForbidden(flag.name, LocalFiles::IsRestricted())) {
+        continue;
+      }
+      QJsonObject object;
+      // Which kind of remote it is for; empty when it is for any.
+      object.insert(QStringLiteral("backend"), backends.value(flag.name));
+      object.insert(QStringLiteral("name"), flag.name);
+      object.insert(QStringLiteral("short"), flag.shortName);
+      object.insert(QStringLiteral("type"), flag.type);
+      object.insert(QStringLiteral("takesValue"), flag.takesValue());
+      object.insert(QStringLiteral("group"), flag.group);
+      object.insert(QStringLiteral("description"), flag.description);
+      array.append(object);
+    }
+
+    QJsonObject object;
+    // False while rclone has not answered, or could not: an empty list then
+    // means "not known", not "there are none".
+    object.insert(QStringLiteral("loaded"), registry.isLoaded());
+    object.insert(QStringLiteral("flags"), array);
+    *body = toJson(object);
+    return 200;
+  }
+
+  // One path on this machine: whether it is there, and what it is. For a
+  // form to say so while the path is being typed rather than after.
+  if (path == QLatin1String("/api/v1/local/stat")) {
+    const QString asked = request.queryValue(QStringLiteral("path"));
+    const QString real = asked.isEmpty() ? QString() : LocalFiles::Allowed(asked);
+    if (real.isEmpty()) {
+      QJsonObject object;
+      object.insert(
+          QStringLiteral("error"),
+          QStringLiteral("that is not a folder on this machine the API may use"));
+      object.insert(QStringLiteral("code"), QStringLiteral("outside_roots"));
+      *body = toJson(object);
+      return 403;
+    }
+    const QFileInfo info(real);
+    QJsonObject object;
+    object.insert(QStringLiteral("path"), real);
+    object.insert(QStringLiteral("exists"), info.exists());
+    object.insert(QStringLiteral("isDir"), info.isDir());
+    *body = toJson(object);
+    return 200;
+  }
+
+  // The folders of this machine, as far as the API may see them. See
+  // local_files.h for where the line is drawn and why.
+  if (path == QLatin1String("/api/v1/local/ls")) {
+    const QString asked = request.queryValue(QStringLiteral("path"));
+
+    QList<LocalFiles::Entry> entries;
+    QString why;
+    if (!LocalFiles::List(asked, &entries, &why)) {
+      QJsonObject object;
+      object.insert(QStringLiteral("error"), why);
+      object.insert(QStringLiteral("code"), QStringLiteral("outside_roots"));
+      *body = toJson(object);
+      return 403;
+    }
+
+    QJsonArray array;
+    for (const LocalFiles::Entry &entry : entries) {
+      QJsonObject object;
+      object.insert(QStringLiteral("name"), entry.name);
+      object.insert(QStringLiteral("path"), entry.path);
+      object.insert(QStringLiteral("isDir"), entry.isDir);
+      object.insert(QStringLiteral("size"), double(entry.size));
+      object.insert(QStringLiteral("modTime"),
+                    entry.modified.isValid()
+                        ? stamp(entry.modified.toMSecsSinceEpoch())
+                        : QString());
+      array.append(object);
+    }
+
+    QJsonObject object;
+    object.insert(QStringLiteral("path"),
+                  asked.isEmpty() ? QString() : LocalFiles::Allowed(asked));
+    object.insert(QStringLiteral("restricted"), LocalFiles::IsRestricted());
+    object.insert(QStringLiteral("entries"), array);
+    *body = toJson(object);
     return 200;
   }
 

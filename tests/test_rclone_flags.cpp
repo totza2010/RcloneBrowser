@@ -78,12 +78,22 @@ private slots:
                                 << "SizeSuffix";
     QTest::newRow("stringArray") << "--compare-dest"
                                  << "stringArray";
-    QTest::newRow("count") << "--verbose"
-                           << "count";
     // An enumeration, which contains the character used elsewhere as a
     // separator and so is easy to split in the wrong place.
     QTest::newRow("alternatives") << "--cutoff-mode"
                                   << "HARD|SOFT|CAUTIOUS";
+  }
+
+  // The one type word that is not a value: rclone lists -v as "count", which
+  // means "say it again for more", and "--verbose=" would be asking for a
+  // number nobody means to give.
+  void aFlagThatIsCountedTakesNoValue() {
+    const QList<RcloneFlag> flags = fixture();
+    const RcloneFlag *flag = find(flags, QStringLiteral("--verbose"));
+    QVERIFY(flag);
+    QCOMPARE(flag->type, QStringLiteral("count"));
+    QVERIFY(!flag->takesValue());
+    QCOMPARE(flag->insertion(), QStringLiteral("--verbose"));
   }
 
   void readsTheTypeThatFollowsTheName() {

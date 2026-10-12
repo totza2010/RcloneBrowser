@@ -233,4 +233,21 @@ RunningJob *Mount(const QString &remote, const QString &path,
                   const QString &mountPoint, const MountOptions &options,
                   QString *why = nullptr);
 
+// ---- between this machine and a remote --------------------------------------
+//
+// The command is put together by the same code a saved task uses, so an
+// upload from the page carries the default options an upload from the window
+// would. Whether the path on this machine is one the caller may use is not
+// decided here; see local_files.h.
+
+// Copies a file or folder of this machine into a folder of a remote. A folder
+// arrives under its own name, as with CopyInto().
+RunningJob *Upload(const QString &localPath, bool isFolder,
+                   const QString &remote, const QString &remoteFolder,
+                   bool dryRun);
+
+// Copies a file or folder of a remote into a folder of this machine.
+RunningJob *Download(const Item &what, const QString &localFolder,
+                     bool dryRun, QString *why = nullptr);
+
 } // namespace RemoteOps

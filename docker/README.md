@@ -246,6 +246,22 @@ Nothing is written and every remote disappears when the container stops.
 Setting a configuration file path in Preferences overrides all of this, as
 the application then passes `--config` explicitly.
 
+## What the web interface can see of this side
+
+Uploading and downloading from the web interface need the program to say
+what is on its own disk, because a browser's file dialog shows the machine
+the browser is on. How far it may look is `RB_LOCAL_ROOTS`, which the image
+sets to `/media` -- the folder compose mounts from the host. So the boundary
+is what you chose to hand the container:
+
+```ini
+RB_MEDIA=D:\Media
+```
+
+Nothing outside it can be listed, uploaded from or downloaded to, including
+through a link that points out. More than one folder: mount each somewhere
+and list them, separated by semicolons, in `RB_LOCAL_ROOTS`.
+
 ## What each mode costs
 
 The image is the same size whichever mode is chosen, about 635 MB: an image

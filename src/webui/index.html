@@ -97,6 +97,8 @@
           <button id="remote-refresh" class="ghost small">Refresh</button>
           <button id="remote-mkdir" class="ghost small">New folder</button>
           <button id="remote-rename" class="ghost small" disabled>Rename</button>
+          <button id="remote-upload" class="ghost small">Upload</button>
+          <button id="remote-download" class="ghost small" disabled>Download</button>
           <button id="remote-copy" class="ghost small" disabled>Copy</button>
           <button id="remote-move" class="ghost small" disabled>Move</button>
           <button id="remote-delete" class="danger small" disabled>Delete</button>
@@ -132,6 +134,216 @@
       <button id="log-close" class="ghost">Close</button>
     </div>
     <pre id="log-body"></pre>
+  </div>
+
+  <!-- A transfer, with everything the window's dialog has: what a task is
+       made of. It comes before the chooser below so that the chooser, opened
+       from here, is the one on top. -->
+  <div id="taskbox" class="modal hidden">
+    <form id="task-form" class="modal-box wide task-box">
+      <h2 id="task-title"></h2>
+
+      <!-- The end that is on a remote is chosen from the remotes there are,
+           so it cannot be one there is not; the end that is on this machine
+           is looked up as it is typed. -->
+      <div class="task-ends">
+        <label>From
+          <span class="with-button">
+            <select id="task-source-remote" class="hidden"></select>
+            <input id="task-source" type="text" spellcheck="false" autocomplete="off">
+            <button type="button" id="task-source-browse" class="ghost small">Browse…</button>
+          </span>
+          <span id="task-source-note" class="note"></span>
+        </label>
+        <label>To
+          <span class="with-button">
+            <select id="task-dest-remote" class="hidden"></select>
+            <input id="task-dest" type="text" spellcheck="false" autocomplete="off">
+            <button type="button" id="task-dest-browse" class="ghost small">Browse…</button>
+          </span>
+          <span id="task-dest-note" class="note"></span>
+        </label>
+        <p id="task-where" class="muted"></p>
+      </div>
+
+      <nav id="task-tabs" class="subtabs">
+        <button type="button" data-pane="settings" class="on">Settings</button>
+        <button type="button" data-pane="transfer">Transfer</button>
+        <button type="button" data-pane="extra">Extra options</button>
+        <button type="button" data-pane="include">Include</button>
+        <button type="button" data-pane="exclude">Exclude</button>
+        <button type="button" data-pane="filter">Filter</button>
+        <button type="button" data-pane="command">rclone cmd</button>
+      </nav>
+
+      <div class="task-panes">
+        <section data-pane="settings" class="pane on">
+          <fieldset>
+            <legend>Transfer mode</legend>
+            <label class="check"><input type="radio" name="task-operation" value="copy"> Copy <span class="muted">— rclone copy</span></label>
+            <label class="check"><input type="radio" name="task-operation" value="move"> Move <span class="muted">— rclone move: the source is deleted once it has arrived</span></label>
+            <label class="check"><input type="radio" name="task-operation" value="sync"> Sync <span class="muted">— rclone sync: the destination is made the same, deleting what the source does not have</span></label>
+            <select data-field="syncTiming" id="task-timing">
+              <option value="during">Delete during transfer</option>
+              <option value="after">Delete after transfer</option>
+              <option value="before">Delete before transfer</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <legend>Skip files</legend>
+            <label class="check"><input type="checkbox" data-field="skipExisting"> Skip all files that exist <span class="muted">--ignore-existing</span></label>
+            <label class="check"><input type="checkbox" data-field="skipNewer"> Skip files that are newer on the destination <span class="muted">--update</span></label>
+          </fieldset>
+          <fieldset>
+            <legend>Compare</legend>
+            <select data-field="compare">
+              <option value="none">rclone's own way (size and mod-time)</option>
+              <option value="sizeAndModTime">Size and mod-time</option>
+              <option value="checksum">Size and checksum — --checksum</option>
+              <option value="ignoreSize">Only mod-time — --ignore-size</option>
+              <option value="sizeOnly">Only size — --size-only</option>
+              <option value="checksumIgnoreSize">Only checksum — --checksum --ignore-size</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <legend>Other</legend>
+            <label class="check"><input type="checkbox" data-field="createEmptySrcDirs"> Create empty source directories <span class="muted">--create-empty-src-dirs</span></label>
+            <label class="check"><input type="checkbox" data-field="deleteEmptySrcDirs" id="task-delete-empty"> Delete empty source directories <span class="muted">--delete-empty-src-dirs (move)</span></label>
+            <label class="check"><input type="checkbox" data-field="deleteExcluded" id="task-delete-excluded"> Delete excluded files from destination <span class="muted">--delete-excluded (sync) — dangerous, dry run first</span></label>
+            <label class="check"><input type="checkbox" data-field="sameFilesystem"> Don't cross filesystem boundaries <span class="muted">--one-file-system</span></label>
+            <label class="check"><input type="checkbox" data-field="noTraverse"> Don't traverse destination directory <span class="muted">--no-traverse</span></label>
+            <label class="check"><input type="checkbox" data-field="dontUpdateModified"> Don't update mod-time if files are identical <span class="muted">--no-update-modtime</span></label>
+            <label class="check"><input type="checkbox" data-field="verbose"> Verbose output</label>
+          </fieldset>
+          <fieldset>
+            <legend>Task</legend>
+            <label>Task name
+              <input data-field="name" id="task-name" type="text" placeholder="left empty, it is named _tmp_date_time_remote">
+            </label>
+            <label class="check"><input type="checkbox" id="task-queue"> Add to the queue instead of running immediately</label>
+          </fieldset>
+        </section>
+
+        <section data-pane="transfer" class="pane">
+          <div class="task-grid">
+            <label>Transfers <span class="muted">--transfers</span><input data-field="transfers" type="number" min="0" step="1"></label>
+            <label>Checkers <span class="muted">--checkers</span><input data-field="checkers" type="number" min="0" step="1"></label>
+            <label>Bandwidth <span class="muted">--bwlimit · empty is no limit</span>
+              <span class="with-unit">
+                <input type="number" min="0" step="any" data-unit-number="bandwidth" placeholder="not set">
+                <select data-unit-choice="bandwidth"><option value="B">B/s</option><option value="K">KiB/s</option><option value="M">MiB/s</option><option value="G">GiB/s</option></select>
+              </span>
+              <input type="hidden" data-field="bandwidth">
+              <span class="note" data-unit-note="bandwidth"></span>
+            </label>
+            <label>Minimum size <span class="muted">--min-size</span>
+              <span class="with-unit">
+                <input type="number" min="0" step="any" data-unit-number="minSize" placeholder="not set">
+                <select data-unit-choice="minSize"><option value="B">B</option><option value="K">KiB</option><option value="M">MiB</option><option value="G">GiB</option><option value="T">TiB</option></select>
+              </span>
+              <input type="hidden" data-field="minSize">
+              <span class="note" data-unit-note="minSize"></span>
+            </label>
+            <label>Minimum age <span class="muted">--min-age</span>
+              <span class="with-unit">
+                <input type="number" min="0" step="any" data-unit-number="minAge" placeholder="not set">
+                <select data-unit-choice="minAge"><option value="s">seconds</option><option value="m">minutes</option><option value="h">hours</option><option value="d">days</option><option value="w">weeks</option><option value="M">months</option><option value="y">years</option></select>
+              </span>
+              <input type="hidden" data-field="minAge">
+              <span class="note" data-unit-note="minAge"></span>
+            </label>
+            <label>Maximum age <span class="muted">--max-age</span>
+              <span class="with-unit">
+                <input type="number" min="0" step="any" data-unit-number="maxAge" placeholder="not set">
+                <select data-unit-choice="maxAge"><option value="s">seconds</option><option value="m">minutes</option><option value="h">hours</option><option value="d">days</option><option value="w">weeks</option><option value="M">months</option><option value="y">years</option></select>
+              </span>
+              <input type="hidden" data-field="maxAge">
+              <span class="note" data-unit-note="maxAge"></span>
+            </label>
+            <label>Maximum depth <span class="muted">--max-depth · 0 is no limit</span><input data-field="maxDepth" type="number" min="0" step="1"></label>
+            <label>Retries <span class="muted">--retries</span><input data-field="retries" type="number" min="0" step="1"></label>
+            <label>Low level retries <span class="muted">--low-level-retries</span><input data-field="lowLevelRetries" type="number" min="0" step="1"></label>
+            <label>Connect timeout, seconds <span class="muted">--contimeout</span><input data-field="connectTimeout" type="number" min="0" step="1"></label>
+            <label>IO idle timeout, seconds <span class="muted">--timeout</span><input data-field="idleTimeout" type="number" min="0" step="1"></label>
+          </div>
+        </section>
+
+        <section data-pane="extra" class="pane">
+          <p class="muted">Extra rclone flags for this transfer, chosen from
+            the ones the rclone on this machine has. The default options set
+            in the program's preferences are added as well; the rclone cmd
+            tab shows the whole command.</p>
+          <div class="flag-add">
+            <input id="flag-name" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="click to see every flag, or type to narrow: fast-list, chunk…">
+            <input id="flag-value" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="value" disabled>
+            <button type="button" id="flag-add" class="small">Add</button>
+          </div>
+          <label class="check"><input type="checkbox" id="flag-all"> Also offer the flags of other kinds of remote</label>
+          <div id="flag-menu" class="flag-menu hidden"></div>
+          <p id="flag-help" class="muted"></p>
+          <div id="flag-list" class="flag-list"></div>
+          <p id="flag-state" class="muted"></p>
+          <!-- What is saved. Written by the list above, never typed into. -->
+          <textarea data-field="extra" id="task-extra" class="hidden"></textarea>
+        </section>
+
+        <section data-pane="include" class="pane">
+          <p class="muted">Only what matches one of these is transferred. Added one at a time: <code>*.mkv</code>, <code>/films/**</code>.</p>
+          <div class="flag-add">
+            <input type="text" spellcheck="false" autocomplete="off" class="grow"
+                   data-pattern-new="included" placeholder="a pattern, then Add or Enter">
+            <button type="button" class="small" data-pattern-add="included">Add</button>
+          </div>
+          <p class="note" data-pattern-note="included"></p>
+          <div class="flag-list" data-pattern-list="included"></div>
+          <!-- What is saved, one to a line. Written by the list above. -->
+          <textarea data-field="included" class="hidden"></textarea>
+        </section>
+
+        <section data-pane="exclude" class="pane">
+          <p class="muted">What matches one of these is left out. Added one at a time: <code>*.tmp</code>, <code>.git/**</code>.</p>
+          <div class="flag-add">
+            <input type="text" spellcheck="false" autocomplete="off" class="grow"
+                   data-pattern-new="excluded" placeholder="a pattern, then Add or Enter">
+            <button type="button" class="small" data-pattern-add="excluded">Add</button>
+          </div>
+          <p class="note" data-pattern-note="excluded"></p>
+          <div class="flag-list" data-pattern-list="excluded"></div>
+          <!-- What is saved, one to a line. Written by the list above. -->
+          <textarea data-field="excluded" class="hidden"></textarea>
+        </section>
+
+        <section data-pane="filter" class="pane">
+          <p class="muted">Rules that include or exclude, tried from the top; the first that matches decides. To take only the films: <code>+ *.mkv</code> and then <code>- *</code>.</p>
+          <div class="flag-add">
+            <select data-pattern-sign="filtered"><option value="+">+ include</option><option value="-">− exclude</option></select>
+            <input type="text" spellcheck="false" autocomplete="off" class="grow"
+                   data-pattern-new="filtered" placeholder="a pattern, then Add or Enter">
+            <button type="button" class="small" data-pattern-add="filtered">Add</button>
+          </div>
+          <p class="note" data-pattern-note="filtered"></p>
+          <div class="flag-list" data-pattern-list="filtered"></div>
+          <!-- What is saved, one to a line. Written by the list above. -->
+          <textarea data-field="filtered" class="hidden"></textarea>
+        </section>
+
+        <section data-pane="command" class="pane">
+          <p class="muted">What would be run, with everything on the other tabs as it stands now.</p>
+          <pre id="task-command" class="command"></pre>
+        </section>
+      </div>
+
+      <p id="task-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" id="task-cancel" class="ghost">Cancel</button>
+        <span class="grow"></span>
+        <button type="button" data-act="dry" class="ghost">Save and Dry run</button>
+        <button type="button" data-act="run">Save and Run</button>
+        <button type="button" data-act="save" class="ghost">Save task</button>
+      </div>
+    </form>
   </div>
 
   <!-- Choosing a folder on a remote: where a copy or a move should go. -->

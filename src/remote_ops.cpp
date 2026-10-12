@@ -4,6 +4,8 @@
 #include "job_registry.h"
 #include "utils.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTcpServer>
@@ -470,6 +472,65 @@ RunningJob *Mount(const QString &remote, const QString &path,
       JobDescription{QStringLiteral("%1 on %2").arg(task.source, task.dest),
                      task.source, task.dest},
       QString(), QStringLiteral("mount"), QUuid::createUuid().toString());
+}
+
+namespace {
+
+RunningJob *transferByTask(bool download, const QString &source,
+                           const QString &dest, bool isFolder, bool dryRun) {
+  JobOptions task(download);
+  task.operation = JobOptions::Copy;
+  task.source = source;
+  task.dest = dest;
+  task.isFolder = isFolder;
+
+  QStringList command = task.getOptions();
+  if (dryRun) {
+    command << QStringLiteral("--dry-run");
+  }
+  qCDebug(rbRemote) << (download ? "downloading" : "uploading") << source
+                    << "to" << dest;
+
+  return JobRegistry::instance().start(
+      JobKind::Transfer, command,
+      JobDescription{QStringLiteral("%1%2 from %3")
+                         .arg(dryRun ? QStringLiteral("Dry run, ") : QString(),
+                              download ? QStringLiteral("Download")
+                                       : QStringLiteral("Upload"),
+                              source),
+                     source, dest},
+      QString(), download ? QStringLiteral("download")
+                          : QStringLiteral("upload"),
+      QString());
+}
+
+} // namespace
+
+RunningJob *Upload(const QString &localPath, bool isFolder,
+                   const QString &remote, const QString &remoteFolder,
+                   bool dryRun) {
+  const QString into = trimSlashes(remoteFolder);
+  const QString dest = Target(
+      remote, isFolder ? Join(into, QFileInfo(localPath).fileName()) : into);
+  return transferByTask(false, localPath, dest, isFolder, dryRun);
+}
+
+RunningJob *Download(const Item &what, const QString &localFolder, bool dryRun,
+                     QString *why) {
+  const QString from = trimSlashes(what.path);
+  if (from.isEmpty()) {
+    if (why != nullptr) {
+      *why = QStringLiteral(
+          "that is the whole remote; choose something inside it");
+    }
+    return nullptr;
+  }
+
+  const QString dest = what.isFolder
+                           ? QDir(localFolder).filePath(NameOf(from))
+                           : localFolder;
+  return transferByTask(true, Target(what.remote, from), dest, what.isFolder,
+                        dryRun);
 }
 
 } // namespace RemoteOps

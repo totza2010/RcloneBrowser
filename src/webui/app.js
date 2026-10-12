@@ -381,7 +381,7 @@ function handleEvent(block) {
     return;
   }
 
-  if (name === "queue" || name === "schedule" || name === "hello") {
+  if (name === "queue" || name === "schedule" || name === "hello" || name === "tasks") {
     refresh();
   }
 }
@@ -511,24 +511,36 @@ function drawQueue() {
 }
 
 function drawTasks() {
+  // A mount is a task too, and is not a transfer: it is shown, and left to
+  // the window to change.
+  const editable = (task) => ["copy", "move", "sync"].includes(task.operation);
+
   const cards = state.tasks.map((task) => (
     '<div class="card">' +
       '<div class="card-head">' +
         '<span class="name">' + esc(task.name) + "</span>" +
-        '<span class="muted">' + (task.isDownload ? "download" : "upload") + "</span>" +
+        '<span class="muted">' + esc(task.type || (task.isDownload ? "download" : "upload")) +
+          (task.operation ? " · " + esc(task.operation) : "") + "</span>" +
         '<div class="card-actions">' +
           '<button class="small" data-run="' + esc(task.id) + '">Run</button>' +
           '<button class="ghost small" data-enqueue="' + esc(task.id) + '">Queue</button>' +
           '<button class="ghost small" data-dry="' + esc(task.id) + '">Dry run</button>' +
+          (editable(task)
+            ? '<button class="ghost small" data-edit="' + esc(task.id) + '">Edit</button>'
+            : "") +
+          '<button class="danger small" data-forget="' + esc(task.id) + '">Delete</button>' +
         "</div>" +
       "</div>" +
       '<div class="path">' + esc(task.source) + " → " + esc(task.dest) + "</div>" +
     "</div>"
   ));
 
-  $("tab-tasks").innerHTML = cards.length
-    ? cards.join("")
-    : '<p class="empty">No saved tasks. They are made in the desktop window.</p>';
+  $("tab-tasks").innerHTML =
+    '<div class="toolbar">' +
+      '<button class="ghost small" data-new-task="upload">New upload task</button>' +
+      '<button class="ghost small" data-new-task="download">New download task</button>' +
+    "</div>" +
+    (cards.length ? cards.join("") : '<p class="empty">No saved tasks.</p>');
 }
 
 function drawSchedules() {
@@ -720,6 +732,7 @@ function drawChosen() {
   $("remote-delete").disabled = !entry;
   $("remote-link").disabled = !entry;
   $("remote-copy").disabled = !entry;
+  $("remote-download").disabled = !entry;
   $("remote-move").disabled = !entry;
   $("remote-chosen").textContent = entry ? entry.name : "";
   for (const row of document.querySelectorAll("#listing tbody tr")) {
@@ -901,9 +914,68 @@ $("remote-about").addEventListener("click", () => {
 // folders the way the listing does, with the same request, and resolves with
 // the place chosen or with null when it is closed.
 
-const picking = { remote: "", path: "", done: null };
+// `local` is the other kind of place: the machine the program runs on. Then
+// `files` says whether a file may be chosen as well as a folder, and
+// `chosen` is the file that was.
+const picking = { remote: "", path: "", done: null, local: false, files: false, chosen: null };
+
+async function pickLoadLocal() {
+  $("pick-error").textContent = "";
+  $("pick-list").innerHTML = "<p>reading…</p>";
+  picking.chosen = null;
+
+  // The path on this machine, a piece at a time. An empty path is the list
+  // of places to start from.
+  const crumbs = ['<button data-pick="">This machine</button>'];
+  if (picking.path) {
+    crumbs.push("<span>›</span>");
+    crumbs.push("<span>" + esc(picking.path) + "</span>");
+  }
+  $("pick-crumbs").innerHTML = crumbs.join("");
+
+  let answer;
+  try {
+    answer = await api("GET", "/local/ls?path=" + encodeURIComponent(picking.path));
+  } catch (e) {
+    $("pick-list").innerHTML = "<p>could not reach the daemon</p>";
+    return;
+  }
+  if (answer.status !== 200) {
+    $("pick-list").innerHTML = "<p>" + esc(reasonFrom(answer)) + "</p>";
+    return;
+  }
+  if (answer.data.path) picking.path = answer.data.path;
+
+  // A way back up, unless this is already where the looking starts.
+  const up = picking.path
+    ? picking.path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "")
+    : null;
+  const rows = [];
+  if (picking.path) {
+    rows.push('<button data-pick="' + esc(up && up !== picking.path ? up : "") + '">↑ up</button>');
+  }
+  for (const e of answer.data.entries || []) {
+    if (e.isDir) {
+      rows.push('<button data-pick="' + esc(e.path) + '">📁 ' + esc(e.name) + "</button>");
+    } else if (picking.files) {
+      rows.push('<button data-pick-file="' + esc(e.path) + '">📄 ' + esc(e.name) +
+                ' <span class="muted">' + bytes(e.size) + "</span></button>");
+    }
+  }
+  $("pick-list").innerHTML = rows.length
+    ? rows.join("")
+    : "<p>Nothing in here.</p>";
+
+  // In a container this is the line: what was mounted in, and nothing else.
+  $("pick-error").textContent = "";
+  if (!picking.path && answer.data.restricted) {
+    $("pick-error").textContent = "";
+  }
+}
 
 async function pickLoad() {
+  if (picking.local) return pickLoadLocal();
+
   $("pick-error").textContent = "";
   $("pick-list").innerHTML = "<p>reading…</p>";
 
@@ -939,7 +1011,29 @@ async function pickLoad() {
     : "<p>No folders in here. This folder can still be chosen.</p>";
 }
 
+// Choosing a place on the machine the program runs on. With `files` a file
+// may be chosen too, which is what an upload needs.
+function pickLocal(title, action, files) {
+  picking.local = true;
+  picking.files = !!files;
+  picking.chosen = null;
+  picking.path = "";
+
+  $("pick-title").textContent = title;
+  $("pick-ok").textContent = action;
+  $("pick-dry").checked = false;
+  $("pick-remote").parentElement.classList.add("hidden");
+  $("pickbox").classList.remove("hidden");
+  pickLoad();
+
+  return new Promise((resolve) => { picking.done = resolve; });
+}
+
 function pickFolder(title, action, remote, path) {
+  picking.local = false;
+  picking.files = false;
+  picking.chosen = null;
+  $("pick-remote").parentElement.classList.remove("hidden");
   picking.remote = remote;
   picking.path = path || "";
 
@@ -967,6 +1061,18 @@ $("pick-remote").addEventListener("change", () => {
   pickLoad();
 });
 $("pickbox").addEventListener("click", (event) => {
+  const file = event.target.closest("button[data-pick-file]");
+  if (file) {
+    // A file is chosen, not entered: it is marked, and the button below
+    // then means this file rather than the folder it is in.
+    event.stopPropagation();
+    picking.chosen = file.dataset.pickFile;
+    for (const b of $("pick-list").querySelectorAll("button")) {
+      b.classList.toggle("on", b === file);
+    }
+    return;
+  }
+
   const button = event.target.closest("button[data-pick]");
   if (!button) return;
   event.stopPropagation();
@@ -974,8 +1080,804 @@ $("pickbox").addEventListener("click", (event) => {
   pickLoad();
 });
 $("pick-cancel").addEventListener("click", () => pickClose(null));
-$("pick-ok").addEventListener("click", () =>
-  pickClose({ remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked }));
+$("pick-ok").addEventListener("click", () => {
+  if (picking.local) {
+    const path = picking.chosen || picking.path;
+    if (!path) {
+      $("pick-error").textContent = "choose a folder first";
+      return;
+    }
+    pickClose({ path: path, isFile: !!picking.chosen, dryRun: $("pick-dry").checked });
+    return;
+  }
+  pickClose({ remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked });
+});
+
+// ---- the transfer form ------------------------------------------------------
+//
+// One form for a transfer started now and for a saved task, because they are
+// the same thing: the window's dialog is both, and so is this. Every control
+// that stands for a field of a task carries the field's name, so reading the
+// form and filling it are each one loop rather than forty lines.
+
+const form = { type: "upload", id: "", isFolder: null, base: "", leaf: "", watch: null };
+
+const formFields = () => Array.from($("taskbox").querySelectorAll("[data-field]"));
+
+// Which end is on a remote: what a download comes from, where an upload goes.
+const remoteEnd = () => (form.type === "download" ? "source" : "dest");
+const localEnd = () => (form.type === "download" ? "dest" : "source");
+
+// An end, put into its controls. The one on a remote is a remote chosen from
+// the ones there are and a path inside it; the other is a path.
+function setEnd(which, value) {
+  value = value || "";
+  const input = $("task-" + which);
+  if (which !== remoteEnd()) {
+    input.value = value;
+    return;
+  }
+
+  const at = value.indexOf(":");
+  const name = at > 0 ? value.slice(0, at) : "";
+  const names = state.remotes.map((r) => r.name);
+  const options = names.map((n) =>
+    '<option value="' + esc(n) + '">' + esc(n) + ":</option>");
+  // A task can outlive its remote. It is shown as it is, and said to be so.
+  if (name && !names.includes(name)) {
+    options.unshift('<option value="' + esc(name) + '">' + esc(name) + ": — not a remote here</option>");
+  }
+  if (!name) options.unshift('<option value="">choose a remote…</option>');
+
+  const select = $("task-" + which + "-remote");
+  select.innerHTML = options.join("");
+  select.value = name;
+  input.value = at > 0 ? value.slice(at + 1) : value;
+}
+
+function getEnd(which) {
+  const typed = $("task-" + which).value.trim();
+  if (which !== remoteEnd()) return typed;
+  const name = $("task-" + which + "-remote").value;
+  return name ? name + ":" + typed.replace(/^\/+/, "") : "";
+}
+
+function endNote(which, text, bad) {
+  const note = $("task-" + which + "-note");
+  note.textContent = text;
+  note.classList.toggle("bad", !!bad);
+  $("task-" + which).classList.toggle("bad", !!bad && which === localEnd());
+  $("task-" + which + "-remote").classList.toggle("bad", !!bad && which === remoteEnd());
+}
+
+// Says what the two ends are while they are being typed, rather than after
+// the task has been saved with something that is not there in it. The
+// daemon checks again when it saves; this is so nobody has to find out then.
+async function checkEnds() {
+  const far = remoteEnd();
+  const near = localEnd();
+
+  const name = $("task-" + far + "-remote").value;
+  const known = state.remotes.some((r) => r.name === name);
+  endNote(far, !name ? "choose a remote" : known ? "" : name + ": is not a remote here", !known);
+
+  const path = getEnd(near);
+  if (!path) {
+    endNote(near, "", false);
+    return;
+  }
+  let answer;
+  try {
+    answer = await api("GET", "/local/stat?path=" + encodeURIComponent(path));
+  } catch (e) {
+    return;
+  }
+  if (getEnd(near) !== path) return; // typed on since
+
+  if (answer.status !== 200) {
+    endNote(near, reasonFrom(answer), true);
+  } else if (form.type === "upload") {
+    if (!answer.data.exists) {
+      endNote(near, "there is no such file or folder on the machine the program runs on", true);
+    } else {
+      form.isFolder = answer.data.isDir;
+      endNote(near, answer.data.isDir ? "a folder" : "a file", false);
+    }
+  } else if (answer.data.exists && !answer.data.isDir) {
+    endNote(near, "that is a file; a download needs a folder to go into", true);
+  } else {
+    endNote(near, answer.data.exists ? "a folder" : "not there yet — it will be made", false);
+  }
+}
+
+let endsTimer = 0;
+function endsChanged() {
+  clearTimeout(endsTimer);
+  endsTimer = setTimeout(checkEnds, 350);
+}
+
+function formFill(task) {
+  for (const el of formFields()) {
+    const value = task[el.dataset.field];
+    if (el.type === "checkbox") el.checked = !!value;
+    else el.value = value === undefined || value === null ? "" : value;
+  }
+  for (const radio of document.getElementsByName("task-operation")) {
+    radio.checked = radio.value === (task.operation || "copy");
+  }
+  for (const which of ["source", "dest"]) {
+    $("task-" + which + "-remote").classList.toggle("hidden", which !== remoteEnd());
+    $("task-" + which).placeholder = which === remoteEnd()
+      ? "folder/inside/the/remote — empty is its top"
+      : "a path on the machine the program runs on";
+    endNote(which, "", false);
+    setEnd(which, task[which]);
+  }
+  formRules();
+  drawExtra();
+  for (const key of PATTERN_KEYS) drawPatterns(key);
+  unitsFill();
+  checkEnds();
+}
+
+function formRead() {
+  const task = { type: form.type };
+  for (const el of formFields()) {
+    const key = el.dataset.field;
+    if (el.type === "checkbox") task[key] = el.checked;
+    else if (key === "maxDepth") task[key] = Math.max(0, parseInt(el.value, 10) || 0);
+    else task[key] = el.value;
+  }
+  for (const radio of document.getElementsByName("task-operation")) {
+    if (radio.checked) task.operation = radio.value;
+  }
+  task.source = getEnd("source");
+  task.dest = getEnd("dest");
+  if (form.isFolder !== null) task.isFolder = form.isFolder;
+  return task;
+}
+
+// ---- a number and its unit --------------------------------------------------
+//
+// rclone takes "10M" and "3d" as text, and the window has a box to type them
+// into. Here the number is typed and the unit chosen, so "10 MB", "3 days"
+// and every other near miss cannot be written. What is saved is the same
+// text either way.
+
+const UNIT_KEYS = ["bandwidth", "minSize", "minAge", "maxAge"];
+// What a bare number means to rclone, which is what to show for one.
+const UNIT_DEFAULT = { bandwidth: "K", minSize: "K", minAge: "s", maxAge: "s" };
+
+const unitPart = (kind, key) =>
+  $("taskbox").querySelector("[data-unit-" + kind + '="' + key + '"]');
+const unitSaved = (key) =>
+  $("taskbox").querySelector('input[type="hidden"][data-field="' + key + '"]');
+
+function unitsFill() {
+  for (const key of UNIT_KEYS) {
+    const saved = unitSaved(key).value.trim();
+    const number = unitPart("number", key);
+    const choice = unitPart("choice", key);
+    const note = unitPart("note", key);
+    number.value = "";
+    choice.value = UNIT_DEFAULT[key];
+    note.textContent = "";
+    note.classList.remove("bad");
+    if (!saved) continue;
+
+    // Sizes are the same in either case and with or without "i" and "B"
+    // ("1.5Gi", "2mb"); ages are not ("m" is minutes, "M" months).
+    const found = /^([0-9]+(?:\.[0-9]+)?)([a-zA-Z]*)$/.exec(saved);
+    let unit = found ? found[2] : null;
+    if (unit !== null && !key.endsWith("Age")) {
+      unit = unit ? unit[0].toUpperCase() : UNIT_DEFAULT[key];
+    } else if (unit === "") {
+      unit = UNIT_DEFAULT[key];
+    }
+    const known = unit !== null &&
+      Array.from(choice.options).some((o) => o.value === unit);
+    if (known) {
+      number.value = found[1];
+      choice.value = unit;
+    } else {
+      // Something the window let through that is not one number and a unit:
+      // a timetable of rates, "1h30m", a date. Kept as it is until a number
+      // is typed over it, and said to be there.
+      note.textContent = "set to " + saved + " — kept as it is unless a number is typed here";
+    }
+  }
+}
+
+function unitChanged(key) {
+  const number = unitPart("number", key).value.trim();
+  const note = unitPart("note", key);
+  // Emptying the number un-sets it, unless what is there was never a number
+  // in the first place and has not been typed over.
+  if (!number && note.textContent) return;
+  note.textContent = "";
+  unitSaved(key).value = number ? number + unitPart("choice", key).value : "";
+}
+
+// ---- patterns: one at a time ------------------------------------------------
+//
+// Include, exclude and filter are lists, and a list typed into a box one to
+// a line is a list with no way to see where one ends -- a trailing space, a
+// blank line, two patterns on one line. So each is added on its own and
+// shown as a row. What is saved is still one to a line.
+
+const PATTERN_KEYS = ["included", "excluded", "filtered"];
+
+const patternPart = (kind, key) =>
+  $("taskbox").querySelector("[data-pattern-" + kind + '="' + key + '"]');
+const patternSaved = (key) =>
+  $("taskbox").querySelector('textarea[data-field="' + key + '"]');
+const patternLines = (key) =>
+  patternSaved(key).value.split("\n").map((line) => line.trim()).filter(Boolean);
+
+function drawPatterns(key) {
+  const lines = patternLines(key);
+  // The order of filter rules is what they mean, so it is shown and can be
+  // changed; for the other two it makes no difference.
+  const ordered = key === "filtered";
+  patternPart("list", key).innerHTML = lines.length
+    ? lines.map((line, i) =>
+        '<div class="flag-row">' +
+          (ordered ? '<span class="order">' + (i + 1) + "</span>" : "") +
+          "<code>" + esc(line) + "</code>" +
+          '<span class="grow"></span>' +
+          (ordered && i > 0
+            ? '<button type="button" class="ghost small" data-pattern-up="' + key + ":" + i + '">↑</button>'
+            : "") +
+          '<button type="button" class="ghost small" data-pattern-drop="' + key + ":" + i + '">Remove</button>' +
+        "</div>").join("")
+    : '<p class="muted">' + (ordered ? "No rules." : "No patterns.") + "</p>";
+}
+
+function patternWrite(key, lines) {
+  patternSaved(key).value = lines.join("\n");
+  drawPatterns(key);
+}
+
+function patternAdd(key) {
+  const input = patternPart("new", key);
+  const note = patternPart("note", key);
+  const sign = patternPart("sign", key);
+  let typed = input.value.trim();
+  note.textContent = "";
+  note.classList.remove("bad");
+  if (!typed) return;
+
+  if (sign) {
+    // The + or - is the chooser's to say; one typed as well is dropped
+    // rather than doubled.
+    typed = sign.value + " " + typed.replace(/^[+-]\s+/, "");
+  }
+  const lines = patternLines(key);
+  if (lines.includes(typed)) {
+    note.textContent = typed + " is already in the list";
+    note.classList.add("bad");
+    return;
+  }
+  lines.push(typed);
+  input.value = "";
+  patternWrite(key, lines);
+  input.focus();
+}
+
+$("taskbox").addEventListener("keydown", (event) => {
+  const key = event.target.dataset && event.target.dataset.patternNew;
+  if (!key || event.key !== "Enter") return;
+  event.preventDefault();
+  patternAdd(key);
+});
+$("taskbox").addEventListener("input", (event) => {
+  const key = event.target.dataset && event.target.dataset.unitNumber;
+  if (key) unitChanged(key);
+});
+$("taskbox").addEventListener("change", (event) => {
+  const key = event.target.dataset && event.target.dataset.unitChoice;
+  if (key) unitChanged(key);
+});
+
+// ---- extra flags: chosen, not typed ----------------------------------------
+//
+// The window's box is free text with completion. Here a flag is picked from
+// what the rclone on this machine says it has, so one that is misspelt, or
+// belongs to another build, cannot get into a task. What is saved is still
+// the same text the window keeps, one flag to a line, so a task made in
+// either place reads the same in the other.
+
+const flags = { loaded: false, list: [] };
+
+async function loadFlags() {
+  if (flags.loaded) return;
+  try {
+    const answer = await api("GET", "/rclone/flags");
+    if (answer.status === 200) {
+      flags.list = answer.data.flags || [];
+      flags.loaded = !!answer.data.loaded;
+    }
+  } catch (e) { /* said below, in the pane */ }
+  drawExtra();
+}
+
+const flagNamed = (name) =>
+  flags.list.find((f) => f.name === name || (f.short && f.short === name));
+
+// The remote this transfer is to or from, as the list of remotes has it.
+const formRemote = () => {
+  const name = $("task-" + remoteEnd() + "-remote").value;
+  return state.remotes.find((r) => r.name === name) || null;
+};
+
+// Whether a flag means anything to this transfer. Most do to any; a
+// backend's own ("--drive-chunk-size") only where that backend is one of
+// the two ends -- and one end is always the local disk.
+//
+// When the remote is a layer over another (crypt, union, alias) what is
+// underneath cannot be told from here, so nothing is ruled out.
+function flagApplies(flag) {
+  if (!flag.backend || flag.backend === "local") return true;
+  const remote = formRemote();
+  if (!remote || remote.wraps) return true;
+  return flag.backend === remote.flagPrefix;
+}
+
+// One line into arguments, the way the program does it: split at spaces
+// that are not inside quotes, and the quotes dropped.
+function splitArgs(line) {
+  const args = [];
+  let now = "";
+  let quoted = false;
+  let any = false;
+  for (const ch of line) {
+    if (ch === '"') {
+      quoted = !quoted;
+      any = true;
+    } else if (!quoted && /\s/.test(ch)) {
+      if (now || any) args.push(now);
+      now = "";
+      any = false;
+    } else {
+      now += ch;
+    }
+  }
+  if (now || any) args.push(now);
+  return args;
+}
+
+// The saved text as rows: a flag, and its value if it has one.
+function parseExtra(text) {
+  const rows = [];
+  for (const line of (text || "").split("\n")) {
+    for (const arg of splitArgs(line)) {
+      const last = rows[rows.length - 1];
+      if (last && last.value === null) {
+        const flag = flagNamed(last.name);
+        const owed = flags.loaded ? !!(flag && flag.takesValue) : !arg.startsWith("-");
+        if (owed) {
+          last.value = arg;
+          continue;
+        }
+      }
+      const equals = arg.indexOf("=");
+      if (arg.startsWith("-") && equals > 0) {
+        rows.push({ name: arg.slice(0, equals), value: arg.slice(equals + 1) });
+      } else {
+        rows.push({ name: arg, value: null });
+      }
+    }
+  }
+  return rows;
+}
+
+function writeExtra(rows) {
+  $("task-extra").value = rows.map((row) => {
+    if (row.value === null || row.value === "") return row.name;
+    return row.name + " " + (/\s/.test(row.value) ? '"' + row.value + '"' : row.value);
+  }).join("\n");
+  drawExtra();
+}
+
+function drawExtra() {
+  const rows = parseExtra($("task-extra").value);
+  $("flag-list").innerHTML = rows.length
+    ? rows.map((row, i) => {
+        const flag = flagNamed(row.name);
+        const bad = flags.loaded && !flag;
+        return '<div class="flag-row' + (bad ? " bad" : "") + '" title="' +
+                 esc(flag ? flag.description : "") + '">' +
+               "<code>" + esc(row.name) + "</code>" +
+               (row.value !== null ? "<span>" + esc(row.value) + "</span>" : "") +
+               (bad ? '<span class="error">not a flag this rclone has, or not one a task may be given here</span>' : "") +
+               (flag && !flagApplies(flag)
+                 ? '<span class="aside">for ' + esc(flag.backend) + " remotes — this one is " +
+                   esc(formRemote().type) + ", so rclone will take no notice of it</span>"
+                 : "") +
+               '<span class="grow"></span>' +
+               '<button type="button" class="ghost small" data-flag-drop="' + i + '">Remove</button>' +
+               "</div>";
+      }).join("")
+    : '<p class="muted">No extra flags.</p>';
+
+  const remote = formRemote();
+  const fitting = flags.list.filter(flagApplies).length;
+  $("flag-state").textContent = flags.loaded
+    ? (fitting === flags.list.length || !remote
+        ? flags.list.length + " flags to choose from, as this rclone lists them."
+        : fitting + " of this rclone's " + flags.list.length + " flags apply to " +
+          remote.name + ": (" + remote.type + ") — the general ones and its own.")
+    : "The list of flags has not come back from rclone, so a flag can be typed in full; it is checked when the task is saved.";
+}
+
+// The list to choose from. Clicking the box opens all of it, to be scrolled
+// through; typing narrows it. `open` is whether to show it if it is not
+// showing already -- something else changing (the remote, say) redraws a
+// list that is open and leaves a closed one closed.
+function flagMenu(open) {
+  const typed = $("flag-name").value.trim().replace(/^-+/, "").toLowerCase();
+  const menu = $("flag-menu");
+  if (!flags.loaded || (!open && menu.classList.contains("hidden"))) {
+    if (!flags.loaded) menu.classList.add("hidden");
+    return;
+  }
+  const every = $("flag-all").checked;
+  const offered = flags.list.filter((flag) => every || flagApplies(flag));
+
+  let found;
+  if (!typed) {
+    // Everything, with this remote's own first: they are the ones nobody
+    // knows by heart, and the reason for looking.
+    const remote = formRemote();
+    const own = remote ? remote.flagPrefix : "";
+    found = offered.filter((f) => own && f.backend === own)
+      .concat(offered.filter((f) => !(own && f.backend === own)));
+  } else {
+    // Names that begin with it first, then anything that mentions it.
+    const begins = [];
+    const mentions = [];
+    for (const flag of offered) {
+      const name = flag.name.slice(2);
+      if (name.startsWith(typed)) begins.push(flag);
+      else if (name.includes(typed) || (flag.description || "").toLowerCase().includes(typed)) {
+        mentions.push(flag);
+      }
+    }
+    found = begins.concat(mentions);
+  }
+  menu.innerHTML = found.length
+    ? found.map((flag) =>
+        '<button type="button" data-flag="' + esc(flag.name) + '"><b>' + esc(flag.name) + "</b>" +
+        (flag.type ? ' <span class="muted">' + esc(flag.type) + "</span>" : "") +
+        (flag.backend ? ' <span class="muted">· ' + esc(flag.backend) + "</span>" : "") +
+        "<small>" + esc(flag.description) + "</small></button>").join("")
+    : '<p class="muted">' + (every || !formRemote()
+        ? "No flag of this rclone matches."
+        : "No flag that applies to this remote matches.") + "</p>";
+  menu.classList.remove("hidden");
+  menu.scrollTop = 0;
+}
+
+function flagChoose(name) {
+  const flag = flagNamed(name);
+  $("flag-name").value = name;
+  $("flag-menu").classList.add("hidden");
+  $("flag-value").disabled = !!flag && !flag.takesValue;
+  $("flag-value").value = "";
+  $("flag-value").placeholder = flag && flag.takesValue ? flag.type : "takes no value";
+  $("flag-help").textContent = flag ? flag.description : "";
+  if (flag && flag.takesValue) $("flag-value").focus();
+  else $("flag-add").focus();
+}
+
+function flagAdd() {
+  const name = $("flag-name").value.trim();
+  if (!name) return;
+  const flag = flagNamed(name);
+  if (flags.loaded && !flag) {
+    $("flag-help").textContent = name + " is not a flag this rclone has — choose one from the list.";
+    flagMenu(true);
+    return;
+  }
+  if (!flag && !name.startsWith("-")) {
+    $("flag-help").textContent = "A flag begins with --";
+    return;
+  }
+  const value = $("flag-value").value.trim();
+  if (flag && flag.takesValue && !value) {
+    $("flag-help").textContent = flag.name + " needs a value: " + flag.type;
+    $("flag-value").focus();
+    return;
+  }
+
+  const rows = parseExtra($("task-extra").value);
+  rows.push({
+    name: flag ? flag.name : name,
+    value: flag && !flag.takesValue ? null : (value || null),
+  });
+  $("flag-name").value = "";
+  $("flag-value").value = "";
+  $("flag-value").disabled = true;
+  $("flag-value").placeholder = "value";
+  $("flag-help").textContent = "";
+  writeExtra(rows);
+  $("flag-menu").classList.add("hidden");
+}
+
+$("flag-name").addEventListener("input", () => {
+  // Typing again un-chooses: the value box waits for a flag that takes one.
+  const flag = flagNamed($("flag-name").value.trim());
+  $("flag-value").disabled = flags.loaded && !(flag && flag.takesValue);
+  flagMenu(true);
+});
+$("flag-name").addEventListener("focus", () => flagMenu(true));
+$("flag-name").addEventListener("click", () => flagMenu(true));
+$("flag-name").addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("flag-menu").classList.contains("hidden")) {
+    // Closes the list, not the form.
+    event.stopPropagation();
+    $("flag-menu").classList.add("hidden");
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const flag = flagNamed($("flag-name").value.trim());
+  if (flag && flag.takesValue && !$("flag-value").value) flagChoose(flag.name);
+  else flagAdd();
+});
+$("flag-value").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  flagAdd();
+});
+$("flag-add").addEventListener("click", flagAdd);
+$("flag-all").addEventListener("change", () => flagMenu(true));
+// A click anywhere else in the form puts the list away.
+$("taskbox").addEventListener("mousedown", (event) => {
+  if (!event.target.closest("#flag-menu, #flag-name, label:has(#flag-all)")) {
+    $("flag-menu").classList.add("hidden");
+  }
+});
+
+// What only means something for one kind of transfer is greyed for the
+// others, as the window does it.
+function formRules() {
+  const operation = formRead().operation;
+  const rule = (id, on) => {
+    $(id).disabled = !on;
+    const label = $(id).closest("label");
+    if (label) label.classList.toggle("off", !on);
+  };
+  rule("task-timing", operation === "sync");
+  rule("task-delete-excluded", operation === "sync");
+  rule("task-delete-empty", operation === "move");
+}
+
+function formPane(name) {
+  for (const b of $("task-tabs").querySelectorAll("button")) {
+    b.classList.toggle("on", b.dataset.pane === name);
+  }
+  for (const pane of $("taskbox").querySelectorAll("section.pane")) {
+    pane.classList.toggle("on", pane.dataset.pane === name);
+  }
+  if (name === "command") formCommand();
+}
+
+// The command, asked of the daemon rather than put together here: it is the
+// one that will run it, and it adds the options set in the preferences.
+async function formCommand() {
+  $("task-command").textContent = "…";
+  try {
+    const answer = await api("POST", "/tasks/preview", formRead());
+    $("task-command").textContent =
+      answer.status === 200 ? answer.data.command : reasonFrom(answer);
+  } catch (e) {
+    $("task-command").textContent = "could not reach the daemon";
+  }
+}
+
+// `preset` is what is already known -- where an upload is going, what a
+// download is of. `how` is what the form is told about itself: a title, and
+// for one opened from a folder, the folder.
+async function openTransfer(type, preset, how) {
+  how = how || {};
+  form.type = type;
+  form.id = how.id || "";
+  form.base = how.base || "";
+  form.leaf = how.leaf || "";
+  form.watch = how.watch || null;
+  form.isFolder = preset.isFolder === undefined ? null : !!preset.isFolder;
+
+  let task = preset;
+  if (!form.id) {
+    // A new one begins where the window's dialog does.
+    let defaults = {};
+    try {
+      const answer = await api("GET", "/tasks/defaults?type=" + type);
+      if (answer.status === 200) defaults = answer.data;
+    } catch (e) { /* the form still opens, only emptier */ }
+    task = Object.assign({}, defaults, preset);
+  }
+
+  $("task-title").textContent = how.title ||
+    (form.id ? "Edit task" : type === "download" ? "New download task" : "New upload task");
+  $("task-where").textContent = type === "download"
+    ? "From is a remote, written remote:path. To is a folder on the machine the program runs on — not the one this browser is on, unless they are the same."
+    : "From is a file or a folder on the machine the program runs on — not the one this browser is on, unless they are the same. To is a remote, written remote:path.";
+  $("task-error").textContent = "";
+  $("task-queue").checked = false;
+
+  formFill(task);
+  formPane("settings");
+  $("taskbox").classList.remove("hidden");
+  $("task-" + localEnd()).focus();
+  loadFlags();
+}
+
+function closeTransfer() {
+  $("taskbox").classList.add("hidden");
+}
+
+// The chooser, without its dry-run box: here that is one of the buttons.
+async function formPick(open) {
+  const dry = $("pick-dry").closest("label");
+  dry.classList.add("hidden");
+  const chosen = await open();
+  dry.classList.remove("hidden");
+  return chosen;
+}
+
+const underName = (folder, name) =>
+  name ? folder.replace(/[\\/]+$/, "") + "/" + name : folder;
+
+// The end that is on the machine the program runs on.
+async function formBrowseLocal() {
+  const upload = form.type === "upload";
+  const chosen = await formPick(() => pickLocal(
+    upload ? "Upload — choose a file or a folder on the machine the program runs on"
+           : "Download — choose a folder on the machine the program runs on",
+    "Choose this", upload));
+  if (!chosen) return;
+
+  if (!upload) {
+    // A folder arrives under its own name, as it does from the window.
+    setEnd("dest", underName(chosen.path, form.leaf));
+    checkEnds();
+    return;
+  }
+  setEnd("source", chosen.path);
+  form.isFolder = !chosen.isFile;
+  if (form.base) {
+    // And a folder sent lands under its own name too.
+    const name = chosen.isFile ? "" : chosen.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+    setEnd("dest", name && !form.base.endsWith(":")
+      ? form.base + "/" + name
+      : form.base + name);
+  }
+  checkEnds();
+}
+
+// The end that is on a remote.
+async function formBrowseRemote() {
+  const which = remoteEnd();
+  const name = $("task-" + which + "-remote").value;
+  const known = state.remotes.some((r) => r.name === name);
+  const remote = known ? name : (browsing.remote || (state.remotes[0] || {}).name);
+  if (!remote) {
+    $("task-error").textContent = "there are no remotes to choose from";
+    return;
+  }
+  const chosen = await formPick(() => pickFolder(
+    "Choose a folder on a remote", "Choose this", remote,
+    known ? $("task-" + which).value.trim() : ""));
+  if (!chosen) return;
+  setEnd(which, chosen.remote + ":" + chosen.path);
+  // Chosen by hand now, so it no longer follows what is being sent.
+  if (form.type === "upload") form.base = "";
+  checkEnds();
+}
+
+$("task-source-browse").addEventListener("click", () =>
+  form.type === "upload" ? formBrowseLocal() : formBrowseRemote());
+$("task-dest-browse").addEventListener("click", () =>
+  form.type === "upload" ? formBrowseRemote() : formBrowseLocal());
+
+for (const id of ["task-source", "task-dest"]) {
+  $(id).addEventListener("input", endsChanged);
+  $(id + "-remote").addEventListener("change", () => {
+    checkEnds();
+    drawExtra();
+    flagMenu();
+  });
+}
+
+$("task-tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-pane]");
+  if (button) formPane(button.dataset.pane);
+});
+$("taskbox").addEventListener("change", (event) => {
+  if (event.target.name === "task-operation") formRules();
+});
+$("task-cancel").addEventListener("click", closeTransfer);
+$("task-form").addEventListener("submit", (event) => event.preventDefault());
+
+// Saved first, whichever button it was: the window's are "Save and Run" and
+// "Save and Dry run", and a run with no task behind it would have nothing to
+// be run again from.
+async function formSubmit(act) {
+  $("task-error").textContent = "";
+  const target = form.id ? "/tasks/" + encodeURIComponent(form.id) : "/tasks";
+
+  let saved;
+  try {
+    saved = await api(form.id ? "PUT" : "POST", target, formRead());
+  } catch (e) {
+    $("task-error").textContent = "could not reach the daemon";
+    return;
+  }
+  if (saved.status >= 400) {
+    $("task-error").textContent = reasonFrom(saved);
+    return;
+  }
+  // From here it exists. If starting it is refused, pressing again changes
+  // this one rather than making a second.
+  form.id = saved.data.id;
+  $("task-name").value = saved.data.name;
+
+  if (act === "save") {
+    closeTransfer();
+    toast("Task saved: " + saved.data.name);
+    refresh();
+    return;
+  }
+
+  const queue = act === "run" && $("task-queue").checked;
+  let started;
+  try {
+    started = await api("POST",
+      "/tasks/" + encodeURIComponent(form.id) + (queue ? "/enqueue" : "/run"),
+      act === "dry" ? { dryRun: true } : undefined);
+  } catch (e) {
+    $("task-error").textContent = "saved, but could not reach the daemon to start it";
+    return;
+  }
+  if (started.status >= 400) {
+    $("task-error").textContent = "saved, but not started: " + reasonFrom(started);
+    refresh();
+    return;
+  }
+
+  // The folder on screen is read again when a real upload into it ends.
+  if (form.watch && act === "run" && started.data && started.data.requestId) {
+    watching.set(started.data.requestId, form.watch);
+  }
+  closeTransfer();
+  toast(queue ? "Saved and added to the queue"
+              : act === "dry" ? "Dry run started — see Jobs" : "Started — see Jobs");
+  refresh();
+}
+
+$("taskbox").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.dataset.act) return formSubmit(button.dataset.act);
+  if (button.dataset.flag) return flagChoose(button.dataset.flag);
+  if (button.dataset.flagDrop !== undefined) {
+    const rows = parseExtra($("task-extra").value);
+    rows.splice(Number(button.dataset.flagDrop), 1);
+    return writeExtra(rows);
+  }
+  if (button.dataset.patternAdd) return patternAdd(button.dataset.patternAdd);
+  const at = button.dataset.patternDrop || button.dataset.patternUp;
+  if (at) {
+    const key = at.split(":")[0];
+    const index = Number(at.split(":")[1]);
+    const lines = patternLines(key);
+    const moved = lines.splice(index, 1)[0];
+    if (button.dataset.patternUp) lines.splice(index - 1, 0, moved);
+    patternWrite(key, lines);
+  }
+});
 
 // ---- copying and moving ---------------------------------------------------
 
@@ -1011,6 +1913,49 @@ async function copyOrMove(move) {
   toast(verb + (where.dryRun ? " (dry run)" : "") + " started — see Jobs");
   refresh();
 }
+
+// ---- between this machine and the remote ---------------------------------
+
+// Started and reported the way a copy is. The folder on screen is read again
+// when an upload into it ends.
+async function startTransfer(operation, body, verb) {
+  const from = { remote: browsing.remote, path: browsing.path };
+  let answer;
+  try {
+    answer = await api("POST", remoteUrl(operation), body);
+  } catch (e) {
+    toast("could not reach the daemon");
+    return;
+  }
+  if (answer.status !== 202) {
+    toast(reasonFrom(answer));
+    return;
+  }
+  watching.set(answer.data.requestId, from);
+  toast(verb + (body.dryRun ? " (dry run)" : "") + " started — see Jobs");
+  refresh();
+}
+
+// Both open the form the window opens: everything a transfer can be told,
+// and whether to keep it as a task.
+$("remote-upload").addEventListener("click", () => {
+  const into = browsing.remote + ":" + browsing.path;
+  openTransfer("upload", { dest: into }, {
+    title: "Upload to " + into,
+    base: into,
+    watch: { remote: browsing.remote, path: browsing.path },
+  });
+});
+
+$("remote-download").addEventListener("click", () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (!entry) return;
+  openTransfer("download",
+    { source: browsing.remote + ":" + entry.path, isFolder: entry.isDir }, {
+      title: "Download " + entry.name,
+      leaf: entry.isDir ? entry.name : "",
+    });
+});
 
 $("remote-copy").addEventListener("click", () => copyOrMove(false));
 $("remote-move").addEventListener("click", () => copyOrMove(true));
@@ -1277,6 +2222,20 @@ document.addEventListener("click", async (event) => {
   if (d.run && (await command("POST", task(d.run, "/run")))) return refresh();
   if (d.dry && (await command("POST", task(d.dry, "/run?dryRun=1")))) return refresh();
   if (d.enqueue && (await command("POST", task(d.enqueue, "/enqueue")))) return refresh();
+
+  if (d.newTask) return openTransfer(d.newTask, {});
+  if (d.edit) {
+    const found = state.tasks.find((t) => t.id === d.edit);
+    if (found) openTransfer(found.type, found, { id: found.id, title: "Edit task — " + found.name });
+    return;
+  }
+  if (d.forget) {
+    const found = state.tasks.find((t) => t.id === d.forget);
+    if (!confirm("Delete the task " + (found ? found.name : d.forget) + "?\n\n" +
+                 "Schedules that run it will have nothing to run.")) return;
+    if (await command("DELETE", task(d.forget, ""))) refresh();
+    return;
+  }
 
   if (d.stop) {
     const job = state.jobs.find((j) => j.requestId === d.stop);

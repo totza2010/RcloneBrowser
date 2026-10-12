@@ -1583,6 +1583,84 @@ marker: `RemoteOps::Mount` · `MainWindow::addMountCard` · `docs/WEB-API-PLAN.m
 
 ---
 
+### V-37 · หน้า Remote: Upload · Download และโฟลเดอร์ของเครื่อง
+
+marker: `src/local_files.*` · `RemoteOps::Upload` `Download` · `docs/WEB-API-PLAN.md`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | หน้าต่าง · Upload / Download | ทำงานเหมือนเดิม (ไม่ได้แตะ) | ⬜ | |
+| 2 | หน้าเว็บ · **Upload** (รันบนเครื่อง ไม่ใช่ Docker) | ตัวเลือกเริ่มที่รายการไดรฟ์ · เดินเข้าได้ · ปุ่ม ↑ up ถอยได้ | 🟨 API ตอบ `C:/ Z:/` | AI / 2026-10-12 |
+| 3 | เลือก**ไฟล์** ในตัวเลือก | ไฟล์ถูกทำเครื่องหมาย · ปุ่มหมายถึงไฟล์นั้น | ⬜ | |
+| 4 | ติ๊ก Dry run · Upload | งานขึ้นใน Jobs มีป้าย dry run · ไม่มีอะไรถูกส่ง | 🟨 API ผ่าน | AI / 2026-10-12 · ไฟล์ทดสอบ → `gdrive:test` |
+| 5 | Upload ไฟล์จริง | ไฟล์ไปอยู่ในโฟลเดอร์ที่กำลังดู · รายการ refresh เองเมื่อจบ · **บรรทัด "อัปโหลดครั้งล่าสุด" ของรีโหมดเปลี่ยน** พร้อมขนาด | ⬜ | |
+| 6 | Upload โฟลเดอร์จริง | ไปอยู่ใต้ชื่อของตัวเอง | ⬜ | |
+| 7 | เลือกแถว · **Download** · เลือกโฟลเดอร์ | ของมาอยู่ในโฟลเดอร์นั้น · Last download ของรีโหมดเปลี่ยน | ⬜ | |
+| 8 | ใน Docker · เปิดตัวเลือก | **เห็นแค่ `/media`** | ✅ **PASS** | AI / 2026-10-12 · คอนเทนเนอร์ dev |
+| 9 | ใน Docker · ขอดู `/etc` · `/config` · `/media/../etc` · ลิงก์ใน `/media` ที่ชี้ออกไป | 403 ทั้งหมด | ✅ **PASS** | AI / 2026-10-12 |
+| 10 | Upload จาก path นอกที่อนุญาต ผ่าน API | 403 `outside_roots` ไม่มีงานเริ่ม | ✅ **PASS** | AI / 2026-10-12 · `test_api_server` |
+| 11 | ใน Docker · mount โฟลเดอร์ของโฮสต์เข้า `/media` แล้ว Upload | ไฟล์ของโฮสต์ขึ้นรีโหมดได้ | ⬜ | |
+
+---
+
+### V-38 · ฟอร์ม Transfer บนหน้าเว็บ และการสร้าง/แก้/ลบ task
+
+marker: `src/task_json.*` · `POST/PUT/DELETE /api/v1/tasks` · `#taskbox` ใน `src/webui/index.html`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | หน้าเว็บ · Remotes · **Upload** | ฟอร์มเปิด · To = โฟลเดอร์ที่กำลังดู · 7 แท็บ · ค่าเริ่มต้น transfers 4 / checkers 8 | ⬜ | |
+| 2 | Browse ที่ From · เลือก**โฟลเดอร์** | From = path · To ต่อท้ายด้วยชื่อโฟลเดอร์นั้น | ⬜ | |
+| 3 | Browse ที่ From · เลือก**ไฟล์** | To กลับเป็นโฟลเดอร์ที่กำลังดู | ⬜ | |
+| 4 | เลือก Sync | Delete during/after/before และ Delete excluded กดได้ · เลือก Copy แล้วเป็นสีเทา | ⬜ | |
+| 5 | แท็บ **rclone cmd** | เห็นคำสั่งเต็ม ตรงกับที่ตั้งในแท็บอื่น รวมตัวเลือกเริ่มต้นจาก Preferences | 🟨 API ตอบ `rclone sync … --bwlimit 2M --exclude *.tmp --dry-run` | AI / 2026-10-12 |
+| 6 | **Save and Dry run** | task ถูกบันทึก · งานขึ้นใน Jobs มีป้าย dry run | ⬜ | |
+| 7 | **Save and Run** | task ถูกบันทึก · ไฟล์ขึ้นจริง · รายการ refresh เมื่อจบ | ⬜ | |
+| 8 | ติ๊ก Add to the queue · Save and Run | task ไปอยู่ใน Queue ไม่ได้เริ่มทันที | ⬜ | |
+| 9 | **Save task** โดยไม่ใส่ชื่อ | ได้ชื่อ `_tmp_วัน_เวลา_รีโหมด` · **โผล่ในแท็บ Tasks ของหน้าต่างทันที** | 🟨 API สร้างได้ ชื่อ/isFolder ถูก | AI / 2026-10-12 |
+| 10 | เลือกแถว · **Download** | From = `remote:path` ของแถวนั้น · Browse ที่ To · โฟลเดอร์ลงใต้ชื่อของตัวเอง | ⬜ | |
+| 11 | แท็บ Tasks · **Edit** | ฟอร์มเปิดพร้อมค่าของ task ทุกแท็บ · Save task แล้วค่าเปลี่ยน ไม่มี task ใหม่ | 🟨 API `PUT` ผ่าน | AI / 2026-10-12 |
+| 12 | แก้ task ในหน้าต่าง ขณะหน้าเว็บเปิดอยู่ | หน้าเว็บเปลี่ยนตามเอง (เหตุการณ์ `tasks`) | ⬜ | |
+| 13 | แท็บ Tasks · **Delete** | ถามยืนยัน · task หาย ทั้งหน้าเว็บและหน้าต่าง | 🟨 API `DELETE` ผ่าน | AI / 2026-10-12 |
+| 14 | แท็บ Tasks · New upload task / New download task | ฟอร์มว่าง · Browse ได้ทั้งสองช่อง | ⬜ | |
+| 15 | task ชนิด mount ในแท็บ Tasks | ไม่มีปุ่ม Edit | ⬜ | |
+| 16 | ค่าที่ไม่ใช่ตัวเลือก (`compare: "vibes"`) ผ่าน API | 400 บอกชื่อช่อง · task เดิมไม่เปลี่ยน | ✅ **PASS** | AI / 2026-10-12 · `test_task_json` + โปรแกรมจริง |
+| 17 | สร้าง/ย้าย task ไป path นอก `RB_LOCAL_ROOTS` ผ่าน API | 403 `outside_roots` | ✅ **PASS** | AI / 2026-10-12 · `test_api_server` |
+| 18 | หน้าต่าง · Upload / Download / แก้ task | ทำงานเหมือนเดิม (ไม่ได้แตะ) | ⬜ | |
+
+---
+
+### V-39 · ฟอร์ม Transfer: ใส่ได้เฉพาะสิ่งที่มีอยู่และที่รองรับ
+
+marker: `src/extra_flags.*` · `endsProblem` ใน `src/api_server.cpp` · `GET /rclone/flags` · `GET /local/stat`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | หน้าเว็บ · Upload · ดูช่อง To | เป็น**ตัวเลือกรีโหมด** + ช่อง path — พิมพ์ชื่อรีโหมดเองไม่ได้ | ⬜ | |
+| 2 | พิมพ์ path มั่วๆ ในช่อง From | ใต้ช่องขึ้นสีแดงว่าไม่มีอยู่ · พิมพ์ path จริง ขึ้น a folder / a file | 🟨 `/local/stat` ตอบถูก | AI / 2026-10-12 |
+| 3 | กด Save task ทั้งที่ From ไม่มีอยู่ | ไม่ถูกบันทึก · บอกเหตุผลในฟอร์ม | ✅ **PASS** (API) | AI / 2026-10-12 · โปรแกรมจริง |
+| 4 | แท็บ Extra options · พิมพ์ `fast` | รายการ flag ที่ตรงขึ้นมา พร้อมคำอธิบาย | ⬜ | |
+| 5 | เลือก `--fast-list` · Add | ขึ้นเป็นแถว · ช่อง value ถูกปิด (ไม่มีค่า) | ⬜ | |
+| 6 | เลือก flag ที่มีค่า เช่น `--max-transfer` · ไม่ใส่ค่า · Add | ไม่ถูกเพิ่ม · บอกว่าต้องมีค่า | ⬜ | |
+| 7 | พิมพ์ชื่อที่ไม่มี เช่น `--fast_list` · Add | ไม่ถูกเพิ่ม | ✅ **PASS** (API 400 `bad_flag`) | AI / 2026-10-12 · rclone จริง 1043 flag |
+| 8 | ค้นหา `password-command` · `config` | **ไม่อยู่ในรายการ** | ✅ **PASS** (API ไม่ส่งมา และปฏิเสธเมื่อส่งตรง) | AI / 2026-10-12 |
+| 9 | แท็บ rclone cmd หลังเพิ่ม flag | flag ที่เพิ่มอยู่ในคำสั่ง | ✅ **PASS** (API) | AI / 2026-10-12 |
+| 10 | Edit task จากหน้าต่างที่มี flag พิมพ์เอง | แถวของ flag ที่ไม่รองรับเป็นสีแดง · Remove ได้ | ⬜ | |
+| 11 | แท็บ Transfer · ช่อง Transfers | รับเฉพาะตัวเลข · Bandwidth `abc;` → บันทึกไม่ได้ บอกชื่อช่อง | 🟨 `test_task_json` ผ่าน | AI / 2026-10-12 |
+| 12 | ย่อหน้าต่าง browser ให้เตี้ย | ปุ่ม Cancel / Save ยังเห็นครบ ส่วนแท็บเลื่อนได้ | ⬜ | |
+| 13 | หน้าต่าง · พิมพ์ `--ver` ในช่อง extra options | completion เติม `--verbose` ไม่มี `=` ต่อท้าย | ⬜ | |
+| 20 | Upload ไป teldrive · Extra options · ค้น `chunk` | เห็น `--teldrive-chunk-size` ไม่เห็น `--drive-chunk-size` · บรรทัดล่างบอกจำนวน flag ที่ใช้กับรีโหมดนี้ | 🟨 API แยกกลุ่มถูก (teldrive 13 · drive 51 · onedrive 28 · sftp 36) | AI / 2026-10-12 |
+| 21 | ติ๊ก "Also offer the flags of other kinds of remote" | `--drive-chunk-size` ขึ้นมา · เพิ่มแล้วแถวมีหมายเหตุว่า rclone จะไม่สนใจ | ⬜ | |
+| 22 | เปลี่ยนรีโหมดในช่อง To เป็น gdrive | รายการและหมายเหตุของแถวเปลี่ยนตาม | ⬜ | |
+| 14 | แท็บ Transfer · Bandwidth / Minimum size / Minimum age / Maximum age | ช่องตัวเลข + **ตัวเลือกหน่วย** · ใส่ 10 เลือก MiB/s → rclone cmd มี `--bwlimit 10M` | ⬜ | |
+| 15 | ลบตัวเลขออก | flag นั้นหายจาก rclone cmd | ⬜ | |
+| 16 | Edit task ที่ตั้ง bandwidth เป็นตารางเวลาจากหน้าต่าง (`08:00,512k 18:00,off`) | ใต้ช่องบอกว่า "set to … kept as it is" · Save แล้วค่าเดิมยังอยู่ | ⬜ | |
+| 17 | แท็บ Include / Exclude · พิมพ์ pattern · Add หรือ Enter | ขึ้นเป็นแถว ทีละค่า · Remove ได้ · ซ้ำไม่ได้ | ⬜ | |
+| 18 | แท็บ Filter · เลือก + include / − exclude · Add | แถวขึ้นเป็น `+ *.mkv` มีเลขลำดับ · ปุ่ม ↑ ย้ายขึ้นได้ | ⬜ | |
+| 19 | rclone cmd หลังเพิ่ม pattern | มี `--include` / `--exclude` / `--filter` ครบตามแถว | ⬜ | |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

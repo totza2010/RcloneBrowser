@@ -345,6 +345,7 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
   width: 100%;
 }
 
+.pick-list button.on { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
 .pick-list button:hover { background: var(--panel-2); filter: none; }
 .pick-list p { color: var(--muted); margin: 0; padding: 10px; }
 
@@ -364,3 +365,119 @@ select {
 .modal-box h2 { margin: 0; font-size: 17px; }
 .modal-box p { margin: 0; font-size: 13px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ---- the transfer form ------------------------------------------------- */
+
+.task-box { width: min(820px, 96vw); max-height: 92vh; box-sizing: border-box; }
+/* Only the panes give way when the window is short; the buttons stay. */
+.task-box > * { flex: none; }
+.task-ends { display: flex; flex-direction: column; gap: 8px; }
+.with-button { display: flex; gap: 6px; margin-top: 4px; }
+.with-button input { flex: 1; min-width: 0; }
+
+.subtabs { background: transparent; padding: 0; flex: none; }
+.task-box > .task-panes { flex: 1 1 320px; min-height: 90px; overflow: auto; padding-right: 4px; }
+.pane { display: none; flex-direction: column; gap: 10px; }
+.pane.on { display: flex; }
+
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+}
+legend { color: var(--muted); font-size: 12px; padding: 0 4px; text-transform: uppercase; }
+fieldset select { align-self: flex-start; width: auto; }
+fieldset label.check span.muted { font-size: 12px; }
+
+.task-grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.task-grid input { display: block; margin-top: 4px; width: 100%; box-sizing: border-box; }
+.task-grid .muted { font-size: 11px; }
+
+textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-sizing: border-box;
+  color: var(--text);
+  font: 12px/1.45 Consolas, "Courier New", monospace;
+  padding: 9px 10px;
+  resize: vertical;
+  width: 100%;
+}
+textarea:focus { outline: 1px solid var(--accent); }
+input:disabled, select:disabled { opacity: .45; }
+label.check.off { opacity: .45; }
+
+pre.command {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px;
+  user-select: all;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+code { background: var(--panel-2); border-radius: 3px; padding: 1px 4px; }
+
+.with-button select { flex: 0 0 auto; max-width: 40%; width: auto; }
+.with-button input { margin-top: 0; }
+.note { display: block; font-size: 12px; margin-top: 3px; min-height: 1.2em; }
+.note.bad { color: var(--bad); }
+input.bad, select.bad { border-color: var(--bad); }
+
+.flag-add { display: flex; gap: 6px; }
+.flag-add input { min-width: 0; }
+#flag-name { flex: 2; }
+#flag-value { flex: 1; }
+.flag-menu {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow: auto;
+}
+/* Each row keeps its height: with a thousand of them a column that may
+   shrink its children would squash them all into the box. */
+.flag-menu button { flex: none; }
+.flag-menu button {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--text);
+  font-weight: 400;
+  padding: 6px 10px;
+  text-align: left;
+}
+.flag-menu button:hover { background: var(--panel-2); filter: none; }
+.flag-menu small { color: var(--muted); display: block; }
+.flag-menu p { padding: 8px 10px; }
+.flag-list { display: flex; flex-direction: column; gap: 4px; }
+.flag-row {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: flex;
+  gap: 8px;
+  padding: 5px 8px;
+}
+.flag-row.bad { border-color: var(--bad); }
+.flag-row .error { min-height: 0; font-size: 12px; }
+
+.with-unit { display: flex; gap: 6px; margin-top: 4px; }
+.task-grid .with-unit input { display: block; flex: 1 1 0; margin-top: 0; min-width: 0; width: auto; }
+/* Every select is as wide as its box unless told otherwise, and one that
+   shares a row must be told: left alone it takes the row and leaves the
+   number beside it a sliver. */
+.with-unit select { flex: 0 0 auto; width: auto; }
+.task-grid label { min-width: 0; }
+.flag-add .grow { flex: 1; }
+.flag-add select { flex: 0 0 auto; width: auto; }
+.flag-add input { margin-top: 0; }
+.flag-row .order { color: var(--muted); font-size: 12px; min-width: 1.4em; text-align: right; }
+.flag-row .aside { color: var(--muted); font-size: 12px; }

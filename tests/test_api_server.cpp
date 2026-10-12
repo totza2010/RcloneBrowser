@@ -191,6 +191,28 @@ private:
                   : QJsonDocument::fromJson(response.mid(at + 4));
   }
 
+  static QByteArray taskBody(const QString &name, const QString &source,
+                             const QString &dest) {
+    QJsonObject object;
+    object.insert(QStringLiteral("type"), QStringLiteral("upload"));
+    object.insert(QStringLiteral("name"), name);
+    object.insert(QStringLiteral("source"), source);
+    object.insert(QStringLiteral("dest"), dest);
+    return QJsonDocument(object).toJson(QJsonDocument::Compact);
+  }
+
+  // A folder of this machine the API has been given, with one file in it.
+  // Returns its resolved path.
+  QString givenFolder(QTemporaryDir *dir) {
+    QDir(dir->path()).mkpath(QStringLiteral("films"));
+    QFile file(QDir(dir->path()).filePath(QStringLiteral("films/a.mkv")));
+    if (file.open(QIODevice::WriteOnly)) {
+      file.write("x");
+    }
+    qputenv("RB_LOCAL_ROOTS", dir->path().toUtf8());
+    return QFileInfo(dir->path()).canonicalFilePath();
+  }
+
   std::unique_ptr<QTemporaryDir> mScratch;
   QByteArray mToken;
 
@@ -295,17 +317,327 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/api/v1/tasks/{no-such-task}", mToken)), 404);
   }
 
-  // Commands exist now, but making and deleting tasks is not one of them: a
-  // task carries its own rclone flags, so writing one is writing a command
-  // line, and that would turn a stolen token into "run any program here".
-  // Refused in as many words rather than quietly ignored.
-  void writingATaskIsRefusedRatherThanIgnored() {
-    QCOMPARE(statusOf(ask("POST", "/api/v1/tasks", mToken)), 405);
-    QCOMPARE(statusOf(ask("DELETE", "/api/v1/tasks/x", mToken)), 405);
+  // ---- writing tasks ---------------------------------------------------------
 
-    // And the 405 says which of the two the caller got wrong -- the endpoint
-    // or the method -- rather than leaving them to guess.
-    QVERIFY(ask("POST", "/api/v1/tasks", mToken).contains("read"));
+  // A task made through the API is the one the window would have saved: it
+  // is in the list, it has an id, and it reads back with every field.
+  void aTaskCanBeMadeChangedAndTakenAway() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    QJsonObject asked =
+        QJsonDocument::fromJson(
+            taskBody(QStringLiteral("made by the page"), root + "/films",
+                     QStringLiteral("fake:backup")))
+            .object();
+    asked.insert(QStringLiteral("operation"), QStringLiteral("sync"));
+    asked.insert(QStringLiteral("transfers"), 2);
+    asked.insert(QStringLiteral("excluded"), QStringLiteral("*.tmp"));
+
+    const QByteArray made =
+        send("POST", "/api/v1/tasks", mToken,
+             QJsonDocument(asked).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(made), 201);
+    const QJsonObject task = bodyOf(made).object();
+    const QByteArray id = task.value(QStringLiteral("id")).toString().toUtf8();
+    QVERIFY(!id.isEmpty());
+    QCOMPARE(task.value(QStringLiteral("operation")).toString(),
+             QStringLiteral("sync"));
+    QCOMPARE(task.value(QStringLiteral("transfers")).toString(),
+             QStringLiteral("2"));
+    // Read off the disk, since nobody said.
+    QCOMPARE(task.value(QStringLiteral("isFolder")).toBool(), true);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before + 1);
+
+    const QByteArray target = "/api/v1/tasks/" + QUrl::toPercentEncoding(id);
+    QCOMPARE(bodyOf(ask("GET", target, mToken))
+                 .object().value(QStringLiteral("excluded")).toString(),
+             QStringLiteral("*.tmp"));
+
+    // Changing says only what changes.
+    const QByteArray changed =
+        send("PUT", target, mToken, "{\"bandwidth\":\"1M\",\"name\":\"renamed\"}");
+    QCOMPARE(statusOf(changed), 200);
+    const QJsonObject after = bodyOf(changed).object();
+    QCOMPARE(after.value(QStringLiteral("bandwidth")).toString(),
+             QStringLiteral("1M"));
+    QCOMPARE(after.value(QStringLiteral("name")).toString(),
+             QStringLiteral("renamed"));
+    QCOMPARE(after.value(QStringLiteral("operation")).toString(),
+             QStringLiteral("sync"));
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before + 1);
+
+    // A change that is wrong changes nothing.
+    QCOMPARE(statusOf(send("PUT", target, mToken,
+                           "{\"name\":\"half\",\"operation\":\"mount\"}")),
+             400);
+    QCOMPARE(bodyOf(ask("GET", target, mToken))
+                 .object().value(QStringLiteral("name")).toString(),
+             QStringLiteral("renamed"));
+    // Nor may a task be edited down to nothing.
+    QCOMPARE(statusOf(send("PUT", target, mToken, "{\"source\":\"\"}")), 400);
+
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    QCOMPARE(statusOf(ask("GET", target, mToken)), 404);
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 404);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // A task nobody named gets the name the window would have given it.
+  void aTaskNobodyNamedIsNamed() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    const QByteArray made =
+        send("POST", "/api/v1/tasks", mToken,
+             taskBody(QString(), root + "/films", QStringLiteral("fake:b")));
+    QCOMPARE(statusOf(made), 201);
+    const QJsonObject task = bodyOf(made).object();
+    QVERIFY(task.value(QStringLiteral("name")).toString().startsWith(
+        QStringLiteral("_tmp_")));
+    QCOMPARE(statusOf(ask("DELETE",
+                          "/api/v1/tasks/" +
+                              QUrl::toPercentEncoding(
+                                  task.value(QStringLiteral("id")).toString()),
+                          mToken)),
+             200);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // A saved task is a transfer waiting to happen, so it is held to the line
+  // a transfer started now is held to. Otherwise saving one and running it
+  // would be the way round.
+  void aTaskIsHeldToTheSameFoldersAsATransfer() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    QTemporaryDir other;
+    const QString root = givenFolder(&given);
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    const QByteArray outside =
+        send("POST", "/api/v1/tasks", mToken,
+             taskBody(QStringLiteral("out"), other.path(),
+                      QStringLiteral("fake:b")));
+    QCOMPARE(statusOf(outside), 403);
+    QCOMPARE(bodyOf(outside).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("outside_roots"));
+
+    // Nor by making one inside and moving it out.
+    const QByteArray made =
+        send("POST", "/api/v1/tasks", mToken,
+             taskBody(QStringLiteral("in"), root + "/films",
+                      QStringLiteral("fake:b")));
+    QCOMPARE(statusOf(made), 201);
+    const QByteArray target =
+        "/api/v1/tasks/" +
+        QUrl::toPercentEncoding(
+            bodyOf(made).object().value(QStringLiteral("id")).toString());
+    QJsonObject move;
+    move.insert(QStringLiteral("source"), other.path());
+    QCOMPARE(statusOf(send("PUT", target, mToken,
+                           QJsonDocument(move).toJson(QJsonDocument::Compact))),
+             403);
+    QCOMPARE(bodyOf(ask("GET", target, mToken))
+                 .object().value(QStringLiteral("source")).toString(),
+             root + "/films");
+
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  void aTaskThatCannotBeOneIsRefusedAndSaysWhy() {
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    // Nothing said at all.
+    QCOMPARE(statusOf(ask("POST", "/api/v1/tasks", mToken)), 400);
+    // An upload of nothing.
+    const QByteArray empty =
+        send("POST", "/api/v1/tasks", mToken,
+             taskBody(QStringLiteral("x"), QString(), QStringLiteral("fake:b")));
+    QCOMPARE(statusOf(empty), 400);
+    QCOMPARE(bodyOf(empty).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("incomplete"));
+    // A choice that is not one.
+    const QByteArray bad = send("POST", "/api/v1/tasks", mToken,
+                                "{\"type\":\"upload\",\"compare\":\"vibes\"}");
+    QCOMPARE(statusOf(bad), 400);
+    QVERIFY(bodyOf(bad).object().value(QStringLiteral("error")).toString()
+                .contains(QStringLiteral("compare")));
+
+    QCOMPARE(statusOf(send("PUT", "/api/v1/tasks/{no-such-task}", mToken, "{}")),
+             404);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+
+    // And none of it without a secret.
+    QCOMPARE(statusOf(send("POST", "/api/v1/tasks", QByteArray(), "{}")), 401);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/tasks/x", QByteArray(), "{}")), 401);
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/tasks/x", QByteArray())), 401);
+  }
+
+  // A path field is somewhere anything can be typed. What is saved has to
+  // be about things that are there.
+  void aTaskIsNotSavedWithEndsThatAreNotThere() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    for (const char *dest : {"nonsense:", "no colon at all", ":x", "fa ke:x"}) {
+      const QByteArray reply =
+          send("POST", "/api/v1/tasks", mToken,
+               taskBody(QStringLiteral("x"), root + "/films",
+                        QString::fromLatin1(dest)));
+      QVERIFY2(statusOf(reply) == 400, dest);
+      QCOMPARE(bodyOf(reply).object().value(QStringLiteral("code")).toString(),
+               QStringLiteral("no_such_remote"));
+    }
+
+    const QByteArray missing =
+        send("POST", "/api/v1/tasks", mToken,
+             taskBody(QStringLiteral("x"), root + "/films/no-such-file",
+                      QStringLiteral("fake:b")));
+    QCOMPARE(statusOf(missing), 400);
+    QCOMPARE(bodyOf(missing).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("no_such_path"));
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+
+    // A task whose remote has since gone can still be renamed -- the end
+    // that was not touched is not judged again -- but not pointed at
+    // another remote that is not there.
+    JobOptions *old = makeTask(QStringLiteral("older than its remote"));
+    old->source = root + "/films";
+    const QByteArray target =
+        "/api/v1/tasks/" + QUrl::toPercentEncoding(old->uniqueId.toString());
+    QCOMPARE(statusOf(send("PUT", target, mToken, "{\"name\":\"renamed\"}")),
+             200);
+    QCOMPARE(statusOf(send("PUT", target, mToken, "{\"dest\":\"gone:too\"}")),
+             400);
+    QCOMPARE(statusOf(send("PUT", target, mToken, "{\"dest\":\"fake:b\"}")),
+             200);
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+
+    // What a form asks while a path is being typed.
+    const QByteArray there =
+        ask("GET",
+            QByteArray("/api/v1/local/stat?path=") +
+                QUrl::toPercentEncoding(root + "/films"),
+            mToken);
+    QCOMPARE(statusOf(there), 200);
+    QCOMPARE(bodyOf(there).object().value(QStringLiteral("exists")).toBool(),
+             true);
+    QCOMPARE(bodyOf(there).object().value(QStringLiteral("isDir")).toBool(),
+             true);
+    QCOMPARE(bodyOf(ask("GET",
+                        QByteArray("/api/v1/local/stat?path=") +
+                            QUrl::toPercentEncoding(root + "/films/nope"),
+                        mToken))
+                 .object().value(QStringLiteral("exists")).toBool(),
+             false);
+    QTemporaryDir other;
+    QCOMPARE(statusOf(ask("GET",
+                          QByteArray("/api/v1/local/stat?path=") +
+                              QUrl::toPercentEncoding(other.path()),
+                          mToken)),
+             403);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // A task's own flags are a command line, so not every flag may be in it.
+  void aTaskMayNotCarryAFlagThatRunsAProgram() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    const auto withExtra = [&](const QString &extra) {
+      QJsonObject asked =
+          QJsonDocument::fromJson(taskBody(QStringLiteral("x"), root + "/films",
+                                           QStringLiteral("fake:b")))
+              .object();
+      asked.insert(QStringLiteral("extra"), extra);
+      return QJsonDocument(asked).toJson(QJsonDocument::Compact);
+    };
+
+    for (const char *extra :
+         {"--config /tmp/x.conf", "--password-command \"sh -c id\"",
+          "--rc-addr=:5572", "--fast-list\n--log-file /tmp/x",
+          // and, because this API is held to a folder here:
+          "--copy-links", "--files-from /etc/passwd"}) {
+      const QByteArray reply = send("POST", "/api/v1/tasks", mToken,
+                                    withExtra(QString::fromLatin1(extra)));
+      QVERIFY2(statusOf(reply) == 400, extra);
+      QCOMPARE(bodyOf(reply).object().value(QStringLiteral("code")).toString(),
+               QStringLiteral("bad_flag"));
+      // Nor is its command shown, as though it could be run.
+      QVERIFY2(statusOf(send("POST", "/api/v1/tasks/preview", mToken,
+                             withExtra(QString::fromLatin1(extra)))) == 400,
+               extra);
+    }
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+
+    // Nor by making a task without one and adding it after.
+    const QByteArray made = send("POST", "/api/v1/tasks", mToken,
+                                 withExtra(QStringLiteral("--fast-list")));
+    QCOMPARE(statusOf(made), 201);
+    const QByteArray target =
+        "/api/v1/tasks/" +
+        QUrl::toPercentEncoding(
+            bodyOf(made).object().value(QStringLiteral("id")).toString());
+    QCOMPARE(statusOf(send("PUT", target, mToken,
+                           "{\"extra\":\"--config /tmp/x.conf\"}")),
+             400);
+    QCOMPARE(bodyOf(ask("GET", target, mToken))
+                 .object().value(QStringLiteral("extra")).toString(),
+             QStringLiteral("--fast-list"));
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+
+    // What a form chooses from. The stand-in rclone has no list to give, and
+    // that is said rather than passed off as "there are no flags".
+    const QByteArray list = ask("GET", "/api/v1/rclone/flags", mToken);
+    QCOMPARE(statusOf(list), 200);
+    QVERIFY(bodyOf(list).object().value(QStringLiteral("flags")).isArray());
+    QCOMPARE(bodyOf(list).object().value(QStringLiteral("loaded")).toBool(),
+             false);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/rclone/flags", QByteArray())), 401);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // What the window shows on its "rclone cmd" tab: the command, and nothing
+  // saved by asking.
+  void theCommandATaskWouldRunCanBeSeenFirst() {
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    QJsonObject asked =
+        QJsonDocument::fromJson(taskBody(QString(), QStringLiteral("C:/films"),
+                                         QStringLiteral("fake:backup")))
+            .object();
+    asked.insert(QStringLiteral("operation"), QStringLiteral("sync"));
+    asked.insert(QStringLiteral("bandwidth"), QStringLiteral("2M"));
+    asked.insert(QStringLiteral("dryRun"), true);
+
+    const QByteArray reply =
+        send("POST", "/api/v1/tasks/preview", mToken,
+             QJsonDocument(asked).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(reply), 200);
+    const QString command =
+        bodyOf(reply).object().value(QStringLiteral("command")).toString();
+    QVERIFY2(command.contains(QStringLiteral("sync")), qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("fake:backup")),
+             qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("2M")), qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("--dry-run")),
+             qPrintable(command));
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+
+    const QByteArray defaults =
+        ask("GET", "/api/v1/tasks/defaults?type=download", mToken);
+    QCOMPARE(statusOf(defaults), 200);
+    QCOMPARE(bodyOf(defaults).object().value(QStringLiteral("type")).toString(),
+             QStringLiteral("download"));
   }
 
   // Commands are behind the same door as everything else. Worth its own
@@ -1241,6 +1573,129 @@ private slots:
       QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mount", mToken, body)),
                400);
     }
+  }
+
+  // ---- between this machine and a remote -------------------------------------
+
+  // What the page's chooser asks: what is on this machine, as far as the API
+  // may look.
+  void theMachinesFoldersAreListedAsFarAsItWasGiven() {
+    QTemporaryDir given;
+    QTemporaryDir other;
+    const QString root = givenFolder(&given);
+
+    // Where a chooser starts: the roots.
+    const QByteArray top = ask("GET", "/api/v1/local/ls", mToken);
+    QCOMPARE(statusOf(top), 200);
+    const QJsonObject start = bodyOf(top).object();
+    QCOMPARE(start.value(QStringLiteral("restricted")).toBool(), true);
+    QCOMPARE(start.value(QStringLiteral("entries")).toArray().size(), 1);
+
+    const QByteArray inside = ask(
+        "GET",
+        QByteArray("/api/v1/local/ls?path=") + QUrl::toPercentEncoding(root),
+        mToken);
+    QCOMPARE(statusOf(inside), 200);
+    QCOMPARE(bodyOf(inside).object().value(QStringLiteral("entries"))
+                 .toArray().at(0).toObject().value(QStringLiteral("name"))
+                 .toString(),
+             QStringLiteral("films"));
+
+    // And no further.
+    QCOMPARE(statusOf(ask("GET",
+                          QByteArray("/api/v1/local/ls?path=") +
+                              QUrl::toPercentEncoding(other.path()),
+                          mToken)),
+             403);
+    QCOMPARE(statusOf(ask("GET",
+                          QByteArray("/api/v1/local/ls?path=") +
+                              QUrl::toPercentEncoding(root + "/films/../.."),
+                          mToken)),
+             403);
+
+    // Like everything else, not without a secret.
+    QCOMPARE(statusOf(ask("GET", "/api/v1/local/ls", QByteArray())), 401);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // An upload is a transfer from then on, and a folder lands under its own
+  // name -- which is read off the disk, not taken on the caller's word.
+  void anUploadStartsFromWhereItWasAllowedTo() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QTemporaryDir given;
+    QTemporaryDir other;
+    const QString root = givenFolder(&given);
+
+    const auto body = [](const QString &from) {
+      QJsonObject object;
+      object.insert(QStringLiteral("from"), from);
+      object.insert(QStringLiteral("to"), QStringLiteral("backup"));
+      return QJsonDocument(object).toJson(QJsonDocument::Compact);
+    };
+
+    const QByteArray folder = send("POST", "/api/v1/remotes/fake/upload",
+                                   mToken, body(root + "/films"));
+    QCOMPARE(statusOf(folder), 202);
+    QCOMPARE(bodyOf(folder).object().value(QStringLiteral("dest")).toString(),
+             QStringLiteral("fake:backup/films"));
+
+    const QByteArray file = send("POST", "/api/v1/remotes/fake/upload", mToken,
+                                 body(root + "/films/a.mkv"));
+    QCOMPARE(statusOf(file), 202);
+    QCOMPARE(bodyOf(file).object().value(QStringLiteral("dest")).toString(),
+             QStringLiteral("fake:backup"));
+
+    // From somewhere it was not given: refused, and nothing started.
+    const int before = RunHistory::count();
+    const QByteArray outside = send("POST", "/api/v1/remotes/fake/upload",
+                                    mToken, body(other.path()));
+    QCOMPARE(statusOf(outside), 403);
+    QCOMPARE(bodyOf(outside).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("outside_roots"));
+
+    // And something that is not there is not an upload of nothing.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/upload", mToken,
+                           body(root + "/films/no-such-file"))),
+             400);
+    QCOMPARE(RunHistory::count(), before);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  void aDownloadGoesOnlyWhereItWasAllowedTo() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QTemporaryDir given;
+    QTemporaryDir other;
+    const QString root = givenFolder(&given);
+
+    const auto body = [](const QString &to, bool isDir) {
+      QJsonObject object;
+      object.insert(QStringLiteral("path"), QStringLiteral("films/2026"));
+      object.insert(QStringLiteral("isDir"), isDir);
+      object.insert(QStringLiteral("to"), to);
+      return QJsonDocument(object).toJson(QJsonDocument::Compact);
+    };
+
+    const QByteArray reply = send("POST", "/api/v1/remotes/fake/download",
+                                  mToken, body(root + "/films", true));
+    QCOMPARE(statusOf(reply), 202);
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("source")).toString(),
+             QStringLiteral("fake:films/2026"));
+    // The folder arrives under its own name inside the place chosen.
+    QVERIFY2(object.value(QStringLiteral("dest")).toString().endsWith(
+                 QStringLiteral("/films/2026")),
+             qPrintable(object.value(QStringLiteral("dest")).toString()));
+
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/download", mToken,
+                           body(other.path(), true))),
+             403);
+    // A place to download to has to be a folder that is there.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/download", mToken,
+                           body(root + "/films/a.mkv", false))),
+             400);
+    qunsetenv("RB_LOCAL_ROOTS");
   }
 
   void makingAFolderNeedsASecretAndARealRemote() {

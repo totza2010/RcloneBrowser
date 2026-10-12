@@ -58,6 +58,9 @@ set(CORE_SOURCE
   shutdown_signal.cpp
   remote_registry.cpp
   remote_ops.cpp
+  local_files.cpp
+  task_json.cpp
+  extra_flags.cpp
   rclone_version.cpp
   task_builder.cpp
   schedule.cpp
@@ -95,6 +98,9 @@ set(CORE_HEADER
   shutdown_signal.h
   remote_registry.h
   remote_ops.h
+  local_files.h
+  task_json.h
+  extra_flags.h
   rclone_version.h
   task_builder.h
   schedule.h

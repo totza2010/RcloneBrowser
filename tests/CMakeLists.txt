@@ -46,6 +46,9 @@ rb_add_test(test_api_server)
 rb_add_test(test_api_auth)
 rb_add_test(test_shutdown)
 rb_add_test(test_remote_ops)
+rb_add_test(test_local_files)
+rb_add_test(test_task_json)
+rb_add_test(test_extra_flags)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.
