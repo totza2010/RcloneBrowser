@@ -153,6 +153,23 @@ private slots:
     QCOMPARE(JobQueue::instance().runningRequestId(), mFirstRequest);
   }
 
+  // Asked of rclone by the core itself. Only the window used to ask, so a
+  // daemon reported an empty version -- and what a remote is allowed to do
+  // is decided from it.
+  void theCoreFindsOutWhichRcloneItHas() {
+    QVERIFY2(waitUntil([]() {
+               return !GetSettings()
+                           ->value(QStringLiteral("Settings/rcloneVersion"))
+                           .toString()
+                           .isEmpty();
+             }),
+             "the core never asked rclone for its version");
+    QCOMPARE(GetSettings()
+                 ->value(QStringLiteral("Settings/rcloneVersion"))
+                 .toString(),
+             QStringLiteral("1.99.0"));
+  }
+
   // The one that matters. Everything "docker stop" needs to be true ten
   // seconds after it asks.
   void stoppingEndsWhatIsRunningAndLeavesTheQueueAsItWas() {

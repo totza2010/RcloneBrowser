@@ -92,6 +92,7 @@ private:
 
   void tick();
   void scheduleNextTick();
+  void readRcloneVersion();
 
   // Starts the run a schedule is asking for. Returns the request id, or an
   // empty string with the reason reported through scheduleHeld() and, when

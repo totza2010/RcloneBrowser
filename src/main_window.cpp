@@ -724,13 +724,10 @@ MainWindow::MainWindow() {
       return;
     }
 
-    const QString url =
-        QStringLiteral("http://%1:%2/")
-            .arg(GetSettings()
-                     ->value("Settings/apiAddress",
-                             QStringLiteral("127.0.0.1"))
-                     .toString())
-            .arg(ApiServer::instance().port());
+    // Always the loopback address: whoever is looking at this window is on
+    // the machine it runs on, whatever the server is also listening to.
+    const QString url = QStringLiteral("http://127.0.0.1:%1/")
+                            .arg(ApiServer::instance().port());
 
     QMessageBox box(this);
     box.setWindowTitle("Rclone Browser");

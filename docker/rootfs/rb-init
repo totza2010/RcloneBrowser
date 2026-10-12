@@ -1,0 +1,41 @@
+#!/bin/sh
+# Decides, before anything else runs, which services this container has.
+#
+# The base image's supervisor compiles its list of services when the
+# container starts, before any init script runs -- so a script run *by* it
+# cannot take a service out. This runs first, takes them out, and then hands
+# over to the base image's own /init.
+#
+# In web mode there is no window, so there is nothing to draw one on and
+# nothing to stream: the X server, the desktop, Selkies, its web server and
+# the audio daemon are removed from the list, and the application runs as a
+# plain service (svc-rclonebrowser). In the other two modes the list is left
+# as the base image made it and the application is started by the desktop's
+# autostart, as any application on this base is.
+set -eu
+
+mode="${RB_MODE:-both}"
+
+case "$mode" in
+web | both | desktop) ;;
+*)
+    echo "[rb-init] RB_MODE is '$mode'; it has to be web, both or desktop" >&2
+    exit 64
+    ;;
+esac
+
+bundle=/etc/s6-overlay/s6-rc.d/user/contents.d
+
+if [ "$mode" = "web" ]; then
+    # svc-dbus and svc-xsettingsd go too: both depend on the X server, and
+    # leaving either in would pull it straight back.
+    for service in svc-xorg svc-de svc-selkies svc-nginx svc-pulseaudio \
+        svc-xsettingsd svc-dbus svc-watchdog svc-docker; do
+        rm -f "$bundle/$service"
+    done
+    echo "[rb-init] mode: web -- no window, no streaming"
+else
+    echo "[rb-init] mode: $mode"
+fi
+
+exec /init "$@"

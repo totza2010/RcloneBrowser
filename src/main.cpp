@@ -186,9 +186,30 @@ QString InstanceLockPath() {
 //
 // Returns the address to open, or an empty string with *error saying why.
 QString StartApi(QString *error) {
-  if (!GetSettings()->value("Settings/apiEnabled", true).toBool()) {
+  // The environment wins over the stored settings, for one reason: a
+  // container is configured by what it is started with, and "edit a file
+  // inside the volume and restart" is not a way to say which of three modes
+  // an image should run in. See docs/DOCKER-MODES.md.
+  //
+  //   RB_API_ENABLED   0 / false / off switches the page and the API off
+  //   RB_API_ADDRESS   where to listen, 0.0.0.0 to be reachable from outside
+  //   RB_API_PORT      the port
+  const auto fromEnv = [](const char *name) {
+    return qEnvironmentVariable(name).trimmed();
+  };
+
+  bool enabled = GetSettings()->value("Settings/apiEnabled", true).toBool();
+  const QString wanted = fromEnv("RB_API_ENABLED").toLower();
+  if (!wanted.isEmpty()) {
+    enabled = !(wanted == QLatin1String("0") ||
+                wanted == QLatin1String("false") ||
+                wanted == QLatin1String("off") || wanted == QLatin1String("no"));
+  }
+
+  if (!enabled) {
     if (error != nullptr) {
-      *error = QStringLiteral("it is switched off (Settings/apiEnabled)");
+      *error = QStringLiteral(
+          "it is switched off (Settings/apiEnabled or RB_API_ENABLED)");
     }
     return QString();
   }
@@ -196,12 +217,21 @@ QString StartApi(QString *error) {
   // 127.0.0.1 unless somebody deliberately says otherwise, because opening
   // this to the network is a decision and not a default. See
   // docs/API.md section 13.
-  const QString address =
+  QString address =
       GetSettings()
           ->value("Settings/apiAddress", QStringLiteral("127.0.0.1"))
           .toString();
-  const quint16 port =
+  if (!fromEnv("RB_API_ADDRESS").isEmpty()) {
+    address = fromEnv("RB_API_ADDRESS");
+  }
+
+  quint16 port =
       quint16(GetSettings()->value("Settings/apiPort", 19999).toUInt());
+  bool readable = false;
+  const uint asked = fromEnv("RB_API_PORT").toUInt(&readable);
+  if (readable && asked > 0 && asked < 65536) {
+    port = quint16(asked);
+  }
 
   if (!ApiServer::instance().start(address, port, error)) {
     return QString();
@@ -716,6 +746,21 @@ int main(int argc, char *argv[]) {
 
   MainWindow w;
   w.show();
+
+  // A window in a container is stopped the way a daemon is: by a signal,
+  // with nobody there to answer "are you sure?". So this does not go through
+  // the window's own closing, which asks -- it stops the core and leaves.
+  // exit() rather than quit(), because quit() offers every window the chance
+  // to refuse.
+  ShutdownSignal::instance().install();
+  QObject::connect(&ShutdownSignal::instance(), &ShutdownSignal::requested,
+                   &app, [](const QString &by) {
+                     qCDebug(rbApp) << "stopping the window, asked by" << by;
+                     AppCore::instance().shutdown(8000);
+                     ApiServer::instance().stop();
+                     ShutdownSignal::instance().finished();
+                     QCoreApplication::exit(0);
+                   });
 
   const int code = app.exec();
   Database::closeForThread();

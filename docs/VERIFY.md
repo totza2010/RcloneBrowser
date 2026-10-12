@@ -1382,6 +1382,41 @@ marker: `docs/DOCKER-MODES.md` ขั้น 1 · `AppCore::shutdown()` · `Shutd
 
 ---
 
+### V-28 · Docker สามโหมด
+
+marker: `docs/DOCKER-MODES.md` · `docker/README.md`
+
+```bash
+docker compose -f docker/compose.yaml build
+docker compose -f docker/compose.yaml up -d      # RB_MODE ใน docker/.env
+```
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | `RB_MODE=web` | หน้าเว็บที่ `:19999` ขึ้น · ในคอนเทนเนอร์มีแต่ `rclone-browser --daemon` | ✅ **PASS** | AI / 2026-10-12 |
+| 2 | `RB_MODE=both` | หน้าเว็บ `:19999` **และ** หน้าต่างที่ `https://…:3001` | 🟨 ตอบ 200 ทั้งคู่ | AI / 2026-10-12 · ยังไม่มีใครดูภาพ |
+| 3 | `RB_MODE=desktop` | `:3001` ขึ้น · `:19999` **ไม่ตอบ** | ✅ **PASS** | AI / 2026-10-12 |
+| 4 | `docker stop` ทุกโหมด | ออกรหัส 0 ภายใน 20 วิ · log มี `stopping … stopped` | ✅ **PASS** | AI / 2026-10-12 · web 3.9 วิ · both 5.6 วิ |
+| 5 | `RB_MODE=อะไรก็ไม่รู้` | คอนเทนเนอร์ไม่ยอมเริ่ม บอกว่าค่าที่ใช้ได้มีอะไร | ⬜ | |
+| 6 | เปิด `https://localhost:3001` ในโหมด `both` | **เห็นหน้าต่างโปรแกรม** คลิกได้ พิมพ์ไทยได้ ชื่อรีโหมดไทยไม่เป็นกล่อง | ⬜ | |
+| 7 | โหมด `both` · กด Run ในหน้าเว็บ `:19999` | การ์ดงานขึ้นในหน้าต่างที่สตรีม | ⬜ | |
+| 8 | ใช้ volume จากอิมเมจ noVNC ตัวเดิม | task · ตารางเวลา · ประวัติ · รีโหมด **อยู่ครบ** | ⬜ | |
+| 9 | ตั้ง `RB_STREAM_USER` / `RB_STREAM_PASSWORD` | `:3001` ถามรหัสก่อนให้เข้า | ⬜ | |
+| 10 | `docker logs rclonebrowser` ในโหมด `web` | เห็น token ของหน้าเว็บ | ✅ **PASS** | AI / 2026-10-12 |
+| 12 | `compose.dev.yaml` · volume ใหม่ · โหมด `web` | API เห็นรีโหมดจาก `rclone.conf` ของเครื่อง **ครบ** และบอกเวอร์ชัน rclone | ✅ **PASS** | AI / 2026-10-12 · 7 ตัว · 1.75.3 |
+| 13 | `RB_DEV_RCLONE_DIR` ชี้ไปโฟลเดอร์ที่มี rclone ของ Linux | log ขึ้น `using the mounted rclone` · `/usr/bin/rclone` ชี้ไป `/opt/rclone/rclone` | ✅ **PASS** | AI / 2026-10-12 |
+| 21 | โหมด `both` กับ `PUID=1000` (ค่าของ compose) | ตัวสตรีมขึ้น · `/api/websockets` ตอบ 101 · ไม่ใช่จอดำ | 🟨 handshake ผ่าน | AI / 2026-10-12 · รอผู้ใช้เปิดดูภาพ |
+| 16 | `RB_RCLONE_REPO=rclone/rclone` `RB_RCLONE_VERSION=1.75.0` แล้ว restart | log ขึ้น `fetching` แล้ว `using rclone rclone/rclone v1.75.0` · หน้าเว็บบอกเวอร์ชัน 1.75.0 | ✅ **PASS** | AI / 2026-10-12 |
+| 17 | restart อีกรอบด้วยค่าเดิม | **ไม่มี** `fetching` — ใช้ตัวที่เก็บไว้ | ✅ **PASS** | AI / 2026-10-12 |
+| 18 | ตั้งเวอร์ชันที่ไม่มีจริง | เตือน แล้วใช้ตัวในอิมเมจ · คอนเทนเนอร์ยังเริ่มได้ | ✅ **PASS** | AI / 2026-10-12 |
+| 19 | เอาตัวแปรออกแล้ว restart | กลับไปใช้ตัวในอิมเมจ | ✅ **PASS** | AI / 2026-10-12 |
+| 20 | ตัดเน็ตคอนเทนเนอร์ แล้วเริ่มด้วย `RB_RCLONE_VERSION=latest` | ใช้ตัวใหม่สุดที่เก็บไว้ · ไม่ค้าง | ⬜ | |
+| 14 | `RB_DEV_RCLONE_DIR` ชี้ไปโฟลเดอร์ที่มี `rclone.exe` ของ Windows เปลี่ยนชื่อเป็น `rclone` | log เตือนว่ารันไม่ได้ และใช้ตัวในอิมเมจต่อ | ⬜ | |
+| 15 | เปิด dev พร้อมกับตัวจริงและโปรแกรมบนเครื่อง | ทั้งสามรันได้ ไม่แย่งพอร์ต ไม่เห็นข้อมูลของกัน | ⬜ | |
+| 11 | `PIXELFLUX_WAYLAND=true` | หน้าต่างยังขึ้น | 🟨 process อยู่และโหลด plugin Wayland | AI / 2026-10-12 · ยังไม่มีใครดูภาพ |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

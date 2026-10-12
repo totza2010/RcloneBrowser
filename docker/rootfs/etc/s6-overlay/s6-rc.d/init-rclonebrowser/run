@@ -1,0 +1,235 @@
+#!/usr/bin/with-contenv sh
+set -eu
+
+log() {
+    echo "[init-rclonebrowser] $*"
+}
+
+# HOME and the XDG directories point at /config (see the Dockerfile), so the
+# remotes, the saved tasks and the per-job logs all land in the volume. The
+# application creates its own subdirectories.
+mkdir -p /config
+
+# The base image's user, whose ids are PUID and PGID. "chown -R /config/*"
+# fails on a fresh, empty volume because the glob does not expand, so the
+# directory itself is what is named.
+#
+# This has to run after the base image has given that user the ids it was
+# asked for, which is why this is a service depending on init-config and not
+# a script in /etc/cont-init.d. Those run first of all -- while "abc" is still
+# its default 911 -- so the volume was handed to a user that, a moment later,
+# no longer existed under that number. With PUID left at its default nothing
+# showed; with PUID=1000 the audio daemon could not open its own directory,
+# the streamer waited for it for ever, and the page showed a black screen and
+# "WebSocket disconnected".
+chown -R abc:abc /config
+
+# Use the rclone.conf this machine already has, if there is one.
+#
+# compose mounts the platform's usual rclone directory at /rclone-config --
+# the rclone folder under %APPDATA% on Windows, $HOME/.config/rclone
+# elsewhere -- so remotes set up outside the container are simply there.
+#
+# Done by pointing /config/rclone at it rather than by setting RCLONE_CONFIG,
+# so that "docker exec <container> rclone listremotes" agrees with what the
+# application is using. An environment variable exported around the
+# application would not be visible to exec, and the two would disagree about
+# which remotes exist.
+#
+# A directory symlink, not a file one: rclone saves by writing a temporary
+# file beside the config and renaming it over the top. Through a symlinked
+# file that rename replaces the link itself and silently detaches from the
+# host copy; through a symlinked directory it happens inside the mount, where
+# it works.
+#
+# With no /rclone-config, or one without an rclone.conf, nothing is linked and
+# rclone falls back to its own default, which HOME puts at
+# /config/rclone/rclone.conf inside the volume. rclone creates the file there
+# when the first remote is added.
+if [ -f /rclone-config/rclone.conf ]; then
+    if [ -L /config/rclone ]; then
+        rm -f /config/rclone
+    elif [ -d /config/rclone ] && [ -n "$(ls -A /config/rclone 2>/dev/null)" ]; then
+        log "WARNING: /config/rclone already holds a configuration"
+        log "WARNING: leaving it alone and ignoring /rclone-config"
+    elif [ -d /config/rclone ]; then
+        rmdir /config/rclone
+    fi
+
+    if [ ! -e /config/rclone ]; then
+        ln -s /rclone-config /config/rclone
+        log "using the rclone.conf from /rclone-config"
+    fi
+elif [ -d /rclone-config ]; then
+    log "/rclone-config holds no rclone.conf; using the one in /config"
+else
+    log "no /rclone-config mounted; using the one in /config"
+fi
+
+# Which rclone this container uses. In order:
+#
+#   1. one mounted at /opt/rclone/rclone
+#   2. the one RB_RCLONE_REPO / RB_RCLONE_VERSION ask for, fetched once and
+#      kept in the volume
+#   3. the one the image was built with
+#
+# /usr/bin/rclone is only ever a link to whichever of those it is, and the
+# third is never touched -- so every way this can go wrong ends with the
+# container running the rclone it shipped with and a line here saying why,
+# rather than with no rclone at all.
+BUNDLED=/usr/lib/rclone-bundled/rclone
+STORE=/config/.rclone-bin
+
+use_rclone() {
+    ln -sf "$1" /usr/bin/rclone
+}
+
+# Starts from the bundled one every time, so that removing a setting and
+# restarting actually goes back.
+use_rclone "$BUNDLED"
+
+# The variables are RB_RCLONE_*, not RCLONE_*, and that is not a matter of
+# taste: rclone reads RCLONE_<FLAG> from its environment as that flag, so
+# RCLONE_VERSION=1.75.0 in a container makes every rclone command in it fail
+# with 'invalid argument "1.75.0" for "--version"'.
+fetch_rclone() {
+    repo="$1"
+    version="$2"
+
+    case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64) arch=arm64 ;;
+    *)
+        log "WARNING: no rclone build is published for $(uname -m)"
+        return 1
+        ;;
+    esac
+
+    side="$STORE/$(echo "$repo" | tr '/' '_')"
+
+    if [ "$version" = "latest" ]; then
+        found="$(wget -q -T 20 -O- "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null |
+            sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)"
+        if [ -z "$found" ]; then
+            # Asking failed -- no network, or GitHub's limit on anonymous
+            # requests. The newest one already fetched is the next best
+            # answer, and a container that cannot reach GitHub still starts.
+            found="$(ls -1 "$side" 2>/dev/null | sort -V | tail -1)"
+            if [ -z "$found" ]; then
+                log "WARNING: could not find out what the latest ${repo} is, and none is kept"
+                return 1
+            fi
+            log "could not ask what the latest ${repo} is; using v${found}, the newest kept"
+        fi
+        version="$found"
+    fi
+    version="${version#v}"
+
+    # Already what the image has: nothing to fetch.
+    if [ "$(cat /etc/rclone-source 2>/dev/null)" = "${repo} v${version}" ]; then
+        log "rclone ${repo} v${version} is the one in the image"
+        return 0
+    fi
+
+    bin="$side/$version/rclone"
+    if [ ! -x "$bin" ]; then
+        name="rclone-v${version}-linux-${arch}.zip"
+        base="https://github.com/${repo}/releases/download/v${version}"
+        work="$(mktemp -d)"
+
+        log "fetching rclone ${repo} v${version}"
+        if ! wget -q -T 60 -O "$work/$name" "$base/$name"; then
+            log "WARNING: could not download $base/$name"
+            rm -rf "$work"
+            return 1
+        fi
+
+        # Checked against what the release publishes, when it publishes
+        # anything. The two repositories do it differently: mainline has one
+        # SHA256SUMS for everything, the fork a .sha256 beside each file.
+        want=""
+        if wget -q -T 20 -O "$work/sums" "$base/SHA256SUMS" 2>/dev/null; then
+            want="$(grep " $name\$" "$work/sums" | awk '{print $1}' | head -1)"
+        elif wget -q -T 20 -O "$work/sums" "$base/$name.sha256" 2>/dev/null; then
+            want="$(awk '{print $1}' "$work/sums" | head -1)"
+        fi
+
+        if [ -n "$want" ]; then
+            got="$(sha256sum "$work/$name" | awk '{print $1}')"
+            if [ "$got" != "$want" ]; then
+                log "WARNING: $name does not match its published checksum and was thrown away"
+                rm -rf "$work"
+                return 1
+            fi
+        else
+            log "WARNING: ${repo} v${version} publishes no checksum; using it unverified"
+        fi
+
+        if ! unzip -q "$work/$name" -d "$work" ||
+            ! [ -f "$work/rclone-v${version}-linux-${arch}/rclone" ]; then
+            log "WARNING: $name did not contain an rclone"
+            rm -rf "$work"
+            return 1
+        fi
+
+        mkdir -p "$side/$version"
+        mv "$work/rclone-v${version}-linux-${arch}/rclone" "$bin"
+        chmod 755 "$bin"
+        rm -rf "$work"
+    fi
+
+    # Run before it is trusted, the same as a mounted one.
+    if ! "$bin" version >/dev/null 2>&1; then
+        log "WARNING: the fetched rclone ${repo} v${version} will not run and was ignored"
+        return 1
+    fi
+
+    use_rclone "$bin"
+    log "using rclone ${repo} v${version} (kept in the volume)"
+    return 0
+}
+
+if [ -n "${RB_RCLONE_REPO:-}${RB_RCLONE_VERSION:-}" ]; then
+    # Either may be left out: the repository defaults to the one the image
+    # was built from, the version to the latest.
+    built_from="$(cut -d' ' -f1 /etc/rclone-source 2>/dev/null)"
+    if ! fetch_rclone "${RB_RCLONE_REPO:-${built_from:-tgdrive/rclone}}" \
+        "${RB_RCLONE_VERSION:-latest}"; then
+        log "WARNING: continuing with the bundled $("$BUNDLED" version | head -1)"
+    fi
+fi
+
+# An rclone supplied from outside takes precedence over all of that, for
+# anyone who wants to stay on the exact build they already run:
+#
+#   docker run -v /path/to/dir-holding-rclone:/opt/rclone:ro ...
+#
+# It has to be a Linux binary for the container's architecture. A Windows
+# rclone.exe cannot run here whatever it is mounted as, so on Windows this
+# means supplying a Linux build rather than the installed one.
+#
+# Checked by running it, so a binary for the wrong platform says so here
+# instead of leaving the application reporting that it cannot determine the
+# rclone version.
+if [ -e /opt/rclone/rclone ]; then
+    if /opt/rclone/rclone version >/dev/null 2>&1; then
+        use_rclone /opt/rclone/rclone
+        log "using the mounted rclone: $(/opt/rclone/rclone version | head -1)"
+    else
+        log "WARNING: /opt/rclone/rclone will not run here and was ignored"
+        log "WARNING: it has to be a Linux $(uname -m) binary"
+        log "WARNING: continuing with $(rclone version | head -1)"
+    fi
+fi
+
+# "docker exec <container> rclone listremotes" runs with HOME=/config and so
+# looks in /config/.config/rclone, while the application is told to keep its
+# files directly under /config. Pointed at the same place, so the two cannot
+# disagree about which remotes exist.
+mkdir -p /config/.config
+if [ ! -e /config/.config/rclone ]; then
+    ln -s ../rclone /config/.config/rclone
+fi
+chown -h abc:abc /config/.config /config/.config/rclone 2>/dev/null || true
+
+log "ready, mode: ${RB_MODE:-both}"

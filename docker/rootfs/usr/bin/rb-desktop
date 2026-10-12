@@ -1,0 +1,27 @@
+#!/bin/sh
+# Starts the window. Called from the desktop's autostart, in the two modes
+# that have a desktop.
+#
+# A script of its own rather than a line in the autostart file, because the
+# base image copies that file into the volume the first time and never looks
+# at the image's copy again -- anything written there is frozen at whatever
+# it said on the day the volume was made.
+
+# The application's files directly under /config. See the Dockerfile.
+export XDG_CONFIG_HOME=/config
+export XDG_DATA_HOME=/config
+export TERMINAL=xterm
+
+if [ "${RB_MODE:-both}" = "desktop" ]; then
+    # The window only. Said through the environment, which wins over whatever
+    # the stored settings say.
+    export RB_API_ENABLED=0
+else
+    # Reachable from outside the container, which is the point of running it
+    # in one. The token is still required, and the Help menu shows it.
+    export RB_API_ADDRESS="${RB_API_ADDRESS:-0.0.0.0}"
+fi
+
+# Whatever the process says outside of a job. The per-job logs are written by
+# the application itself.
+exec /usr/bin/rclone-browser >> /config/rclone-browser.out 2>&1

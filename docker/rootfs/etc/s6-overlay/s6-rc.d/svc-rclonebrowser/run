@@ -1,0 +1,20 @@
+#!/usr/bin/with-contenv bash
+# The application as a service, for the mode that has no window.
+#
+# In the other two modes the desktop's autostart starts it, and this sleeps:
+# the application takes a lock, so a second copy here would only be refused,
+# but there is no reason to start one in order to have it say so.
+if [[ "${RB_MODE:-both}" != "web" ]]; then
+    exec sleep infinity
+fi
+
+export XDG_CONFIG_HOME=/config
+export XDG_DATA_HOME=/config
+export RB_API_ADDRESS="${RB_API_ADDRESS:-0.0.0.0}"
+
+cd /config
+
+# Not put in the background and not wrapped: the supervisor's SIGTERM has to
+# reach the application itself, which is what makes it stop its transfers and
+# write down what became of them before it goes.
+exec s6-setuidgid abc /usr/bin/rclone-browser --daemon

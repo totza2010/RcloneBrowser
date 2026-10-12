@@ -1,19 +1,22 @@
-# Rclone Browser in a container, reachable through a browser over noVNC.
+# Rclone Browser in a container: one image, three ways to run it.
+#
+#   RB_MODE=web       the core and its own web interface, and nothing else
+#   RB_MODE=both      the window as well, streamed to a browser (the default)
+#   RB_MODE=desktop   the window only; the web interface and API are off
 #
 # Moved here from totza2010/rclonebrowser-docker so that the image is built
 # from the commit it ships, rather than from whatever master happened to be
-# when the image was built. The old file ran "git clone ... /tmp" inside its
-# own WORKDIR, which pinned nothing and overwrote the working directory.
+# when the image was built.
 #
-# The base image draws the desktop and serves it over noVNC. That is pixel
-# streaming, not a web interface: heavy on the host, awkward on a phone, and
-# it offers no way to script anything. The plan is to replace it with a real
-# HTTP interface served by the application, at which point this image loses
-# X11, openbox and noVNC entirely. Until then it is kept current rather than
-# improved.
+# The window is streamed by Selkies rather than noVNC. Both are pixels down a
+# socket, but Selkies encodes them as video, serves them over HTTPS and works
+# from a phone. Because an image that offers the window at all has to carry
+# something to show it with, the streaming stack is always in the image; in
+# web mode it is simply never started. See docs/DOCKER-MODES.md.
 
 ARG ALPINE_VERSION=3.24
-ARG BASEIMAGE_VERSION=v4.12.6
+# The Selkies base names its tags after the Alpine release without the dot.
+ARG SELKIES_TAG=alpine324
 
 # The builder must match the runtime's Alpine release, or the Qt libraries it
 # links against will not be the ones present at run time.
@@ -36,7 +39,7 @@ RUN cmake -S /src -B /build -G Ninja \
         -DRB_BUILD_TESTS=OFF \
     && cmake --build /build --parallel
 
-FROM jlesage/baseimage-gui:alpine-${ALPINE_VERSION}-${BASEIMAGE_VERSION}
+FROM ghcr.io/linuxserver/baseimage-selkies:${SELKIES_TAG}
 
 # Which rclone goes in the image.
 #
@@ -60,15 +63,13 @@ ARG RCLONE_REPO=tgdrive/rclone
 ARG RCLONE_VERSION=latest
 ARG TARGETARCH=amd64
 
-# Fonts are not optional here: without one the base image has no glyphs at
-# all and every label in the application renders as an empty box, menus
-# included. The previous compose file pulled them at container start
-# through INSTALL_PACKAGES, which re-downloaded them on every start and
-# left the first run looking broken.
-#
 # font-noto-thai is here because the remote and folder names in use are
-# Thai. font-noto-cjk is left out at roughly 100 MB; add it through
-# INSTALL_PACKAGES if you need it.
+# Thai. font-noto-cjk is left out at roughly 100 MB.
+#
+# qt6-qtbase-wayland is 2.4 MB and is what lets the window run when the base
+# is switched to Wayland (PIXELFLUX_WAYLAND=true). The base starts on X11, so
+# qt6-qtbase-x11 is what is used by default. The compositor half of Qt's
+# Wayland support (qt6-qtwayland) is not needed.
 #
 # qt6-qtbase-sqlite is a separate package on Alpine and is not pulled in by
 # qt6-qtbase. Without it the driver is missing and the run history silently
@@ -83,6 +84,7 @@ RUN apk add --no-cache \
         fuse3 \
         qt6-qtbase \
         qt6-qtbase-sqlite \
+        qt6-qtbase-wayland \
         qt6-qtbase-x11 \
         qt6-qtmultimedia \
         xterm \
@@ -97,8 +99,14 @@ RUN apk add --no-cache \
     && wget -q -O /tmp/rclone.zip \
         "https://github.com/${RCLONE_REPO}/releases/download/v${version}/rclone-v${version}-linux-${TARGETARCH}.zip" \
     && unzip -q /tmp/rclone.zip -d /tmp \
-    && mv /tmp/rclone-*-linux-${TARGETARCH}/rclone /usr/bin/rclone \
-    && chmod +x /usr/bin/rclone \
+    # Kept out of /usr/bin, which holds only a link to whichever rclone is in
+    # use. The container may be told at start to use a different one
+    # (RB_RCLONE_REPO, RB_RCLONE_VERSION, or one mounted at /opt/rclone), and
+    # whatever happens to that choice, this one is still here to fall back on.
+    && mkdir -p /usr/lib/rclone-bundled \
+    && mv /tmp/rclone-*-linux-${TARGETARCH}/rclone /usr/lib/rclone-bundled/rclone \
+    && chmod +x /usr/lib/rclone-bundled/rclone \
+    && ln -s /usr/lib/rclone-bundled/rclone /usr/bin/rclone \
     && rm -rf /tmp/rclone* \
     # Recorded so a running container can say where its rclone came from
     # without anyone having to remember how it was built.
@@ -106,44 +114,47 @@ RUN apk add --no-cache \
 
 COPY --from=build /build/build/rclone-browser /usr/bin/rclone-browser
 
-# Only the initial window is maximised.
-RUN sed-patch 's/<application type="normal">/<application type="normal" title="Rclone Browser">/' \
-        /etc/xdg/openbox/rc.xml
-
-RUN APP_ICON_URL=https://github.com/rclone/rclone/raw/master/graphics/logo/logo_symbol/logo_symbol_color_512px.png \
-    && install_app_icon.sh "$APP_ICON_URL"
-
 COPY docker/rootfs/ /
 COPY VERSION /
-RUN chmod +x /startapp.sh
+RUN chmod +x /rb-init /usr/bin/rb-desktop \
+        /etc/s6-overlay/s6-rc.d/init-rclonebrowser/run \
+        /etc/s6-overlay/s6-rc.d/svc-rclonebrowser/run
 
-ENV APP_NAME="RcloneBrowser" \
-    S6_KILL_GRACETIME=8000
-
-# The base image leaves HOME at /, which puts rclone.conf in /.config and the
-# application's own data in /.local/share -- both inside the container's
-# writable layer, so every recreate loses the remotes, the saved tasks and the
-# job logs. Mounting a volume at /config did nothing about that, because
-# nothing was ever written there.
+# TITLE is what the streamed page calls itself.
 #
-# Pointing HOME and the XDG directories at /config puts all of it inside the
-# declared volume:
+# S6_SERVICES_GRACETIME is how long the supervisor waits for services to stop
+# before it starts killing. The application takes up to eight seconds to stop
+# its transfers and write down what became of them, so the default of three
+# would cut that short -- which is the whole thing stopping politely was
+# written to avoid. "docker stop" needs to be given at least as long:
+# compose.yaml sets stop_grace_period.
+ENV TITLE="Rclone Browser" \
+    RB_MODE=both \
+    S6_SERVICES_GRACETIME=10000
+
+# The base image sets HOME to /config, which is the volume. The application's
+# own files are put directly in it rather than under /config/.config, by
+# pointing XDG at /config for the application alone (see rb-desktop and the
+# service's run file) -- the same layout the previous image used, so a volume
+# made by that one is picked up as it is:
 #
 #   /config/rclone/rclone.conf                     the remotes
 #   /config/rclone-browser/rclone-browser/         tasks, scheduler, settings
 #   /config/rclone-browser/rclone-browser/logs/    per-job logs
-ENV HOME=/config \
-    XDG_CONFIG_HOME=/config \
-    XDG_DATA_HOME=/config
+#
+# XDG is not set for the whole container, because the base image keeps its
+# own desktop configuration under $HOME/.config and looks for it there.
+
+# 3001  the streamed window, HTTPS with a self-signed certificate
+# 3000  the same over plain HTTP
+# 19999 the application's own web interface and API
+EXPOSE 3000 3001 19999
 
 # Declared so a plain "docker run" persists them without compose. Name them to
 # be able to find them again:
 #   docker run -v rclonebrowser-config:/config -v rclonebrowser-media:/media ...
 VOLUME ["/config"]
-VOLUME ["/media"]
 
-LABEL \
-      org.opencontainers.image.title="rclonebrowser" \
-      org.opencontainers.image.description="Rclone Browser" \
-      org.opencontainers.image.source="https://github.com/totza2010/RcloneBrowser" \
-      org.rclonebrowser.rclone-repo="${RCLONE_REPO}"
+# Wrapped so the mode can decide which services exist before the supervisor
+# reads the list. See /rb-init.
+ENTRYPOINT ["/rb-init"]

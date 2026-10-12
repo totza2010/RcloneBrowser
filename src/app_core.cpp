@@ -4,6 +4,7 @@
 #include "job_queue.h"
 #include "job_registry.h"
 #include "list_of_job_options.h"
+#include "rclone_version.h"
 #include "remote_registry.h"
 #include "schedule.h"
 #include "scheduler_store.h"
@@ -12,6 +13,8 @@
 
 #include <QDateTime>
 #include <QEventLoop>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QSettings>
 #include <QTimer>
 #include <QUuid>
@@ -42,8 +45,27 @@ void AppCore::start() {
   // path meant rclone failed in a few milliseconds and the entry was consumed
   // and gone. The queue did not come back, and nothing said why except one
   // line in the job log reading: running "" with 25 arguments.
-  SetRclone(GetSettings()->value("Settings/rclone").toString());
+  QString rclone = GetSettings()->value("Settings/rclone").toString();
+  if (rclone.trimmed().isEmpty()) {
+    // Nobody has said where rclone is, which is every first start. The
+    // window used to be what went looking, so a daemon on a fresh
+    // installation had no rclone at all: it listed no remotes, reported no
+    // version, and would have failed every job with an empty program name.
+    // In a container that is the normal case, not an unusual one.
+    rclone = QStandardPaths::findExecutable(QStringLiteral("rclone"));
+    if (rclone.isEmpty()) {
+      qCDebug(rbApp) << "no rclone is configured and none is on PATH; nothing "
+                        "can run until Settings/rclone says where it is";
+    } else {
+      qCDebug(rbApp) << "no rclone was configured; using the one on PATH:"
+                     << rclone;
+      GetSettings()->setValue("Settings/rclone", rclone);
+    }
+  }
+  SetRclone(rclone);
   SetRcloneConf(GetSettings()->value("Settings/rcloneConf").toString());
+
+  readRcloneVersion();
 
   // Which remotes exist. Only the window ever asked before, so a daemon knew
   // of none: the API answered "no remotes" to anything that asked, and a Web
@@ -78,6 +100,39 @@ void AppCore::start() {
 }
 
 void AppCore::checkSchedules() { tick(); }
+
+void AppCore::readRcloneVersion() {
+  if (GetRclone().isEmpty()) {
+    return;
+  }
+
+  // Asked of rclone itself and written where everything that wants it already
+  // looks. Only the window used to ask, so without one the API reported an
+  // empty version -- and whatever a remote is allowed to do is decided from
+  // that version.
+  auto *process = new QProcess(this);
+  QObject::connect(
+      process, &QProcess::finished, this,
+      [process](int code, QProcess::ExitStatus) {
+        const RcloneVersion version =
+            ParseRcloneVersion(process->readAllStandardOutput());
+        if (code == 0 && !version.number.isEmpty()) {
+          GetSettings()->setValue("Settings/rcloneVersion", version.number);
+          qCDebug(rbApp) << "rclone version" << version.number;
+        } else {
+          qCDebug(rbApp) << "could not read the rclone version, exit" << code;
+        }
+        process->deleteLater();
+      });
+  QObject::connect(process, &QProcess::errorOccurred, this,
+                   [process](QProcess::ProcessError) {
+                     qCDebug(rbApp) << "rclone would not run:"
+                                    << process->errorString();
+                     process->deleteLater();
+                   });
+  process->start(GetRclone(), QStringList{QStringLiteral("version")},
+                 QIODevice::ReadOnly);
+}
 
 int AppCore::shutdown(int waitMs) {
   if (mStopping) {

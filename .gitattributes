@@ -16,3 +16,7 @@ VERSION text eol=lf
 *.ico binary
 *.icns binary
 *.wav binary
+
+# Everything copied into the image is run or read by Linux, whatever it is
+# called: the service files and the entrypoint have no extension to match on.
+docker/rootfs/** text eol=lf

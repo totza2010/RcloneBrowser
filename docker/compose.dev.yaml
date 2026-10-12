@@ -1,0 +1,106 @@
+# For working on the image: built from this checkout, kept apart from a real
+# installation, and able to use an rclone and an rclone.conf from outside.
+#
+#   docker compose -f docker/compose.dev.yaml up -d --build
+#   docker compose -f docker/compose.dev.yaml logs -f
+#   docker compose -f docker/compose.dev.yaml down          # keeps the data
+#   docker compose -f docker/compose.dev.yaml down -v       # and forgets it
+#
+#   web interface     http://localhost:19991
+#   streamed window   https://localhost:3011
+#
+# What makes it a development file rather than a second copy of compose.yaml:
+#
+#   * It always builds. There is no image to pull, so what runs is what is in
+#     the working tree, and "--build" is all it takes to try a change.
+#   * It has its own name, its own ports and its own volumes. It can be up at
+#     the same time as the real container, or as the program running outside
+#     Docker on port 19999, without either noticing the other -- and nothing
+#     done here can reach the tasks and history of a real installation.
+#   * Its settings in docker/.env are named RB_DEV_*, for the same reason:
+#     RB_PORT belongs to the real one.
+
+name: rclonebrowser-dev
+
+services:
+  rclonebrowser-dev:
+    image: rclonebrowser:dev
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: rclonebrowser-dev
+    ports:
+      - "127.0.0.1:${RB_DEV_WEB_PORT:-19991}:19999"
+      - "127.0.0.1:${RB_DEV_PORT:-3011}:3001"
+    environment:
+      # web, both or desktop. Falls back to whatever the real one is set to.
+      - RB_MODE=${RB_DEV_MODE:-${RB_MODE:-both}}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Bangkok}
+      # Which rclone to run, decided at start: change these and restart, no
+      # rebuild. Empty means the one the image was built with.
+      #
+      #   RB_DEV_RCLONE_REPO      tgdrive/rclone (teldrive) or rclone/rclone
+      #   RB_DEV_RCLONE_VERSION   1.75.0, or "latest"
+      - RB_RCLONE_REPO=${RB_DEV_RCLONE_REPO:-}
+      - RB_RCLONE_VERSION=${RB_DEV_RCLONE_VERSION:-}
+      # No password on the streamed window: it is bound to loopback above and
+      # this is a development container. Set these to try the sign-in.
+      - CUSTOM_USER=${RB_STREAM_USER:-}
+      - PASSWORD=${RB_STREAM_PASSWORD:-}
+      # - PIXELFLUX_WAYLAND=true
+    shm_size: 1gb
+    stop_grace_period: 20s
+    volumes:
+      # The application's own data: tasks, schedules, history, logs. A volume
+      # of its own, so trying something destructive costs nothing real.
+      - "rclonebrowser-dev-config:/config"
+
+      # What the container can see to transfer. A directory on the host if
+      # RB_DEV_MEDIA says so, an empty volume otherwise.
+      - "${RB_DEV_MEDIA:-rclonebrowser-dev-media}:/media"
+
+      # The rclone.conf already on this machine, so the remotes set up
+      # outside the container are simply there:
+      #
+      #   Windows            the rclone folder under %APPDATA%
+      #   Linux and macOS    $HOME/.config/rclone
+      #
+      # This is the real file, mounted read-write, because rclone has to be
+      # able to save a refreshed token back to it. Anything that changes a
+      # remote from inside this container changes it outside as well. Point
+      # RB_DEV_RCLONE_CONF at a copy to keep the two apart.
+      #
+      # The directory is mounted rather than the file: rclone saves by writing
+      # a new file and renaming it over the old one, which a single-file bind
+      # mount cannot do.
+      - "${RB_DEV_RCLONE_CONF:-${RB_RCLONE_CONF:-${APPDATA:-$HOME/.config}/rclone}}:/rclone-config"
+
+      # An rclone from outside the image. Put a file called "rclone" in a
+      # directory and point RB_DEV_RCLONE_DIR at it; the container uses that
+      # one instead of the one it was built with, and says so in its log.
+      #
+      # It must be a Linux binary for the container's architecture. The
+      # rclone.exe installed on Windows cannot run in a Linux container
+      # whatever it is mounted as -- download the Linux build of the same
+      # version instead. If the file will not run, the log says so and the
+      # bundled rclone is used.
+      #
+      # A directory rather than the file, so that leaving it unset mounts an
+      # empty volume and nothing is found, instead of compose refusing to
+      # start over a path that does not exist.
+      - "${RB_DEV_RCLONE_DIR:-rclonebrowser-dev-rclone}:/opt/rclone:ro"
+
+    # rclone mount needs FUSE. Uncomment to try mounting:
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
+
+volumes:
+  rclonebrowser-dev-config:
+  rclonebrowser-dev-media:
+  rclonebrowser-dev-rclone:

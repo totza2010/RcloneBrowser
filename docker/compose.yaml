@@ -1,6 +1,10 @@
-# Reachable at http://localhost:5800 once up.
+# One image, three ways to run it. Set RB_MODE in docker/.env:
 #
-#   cp docker/.env.example docker/.env   # then edit VNC_PASSWORD
+#   web       the application's own web interface      http://localhost:19999
+#   both      that, and the window streamed as well    https://localhost:3001
+#   desktop   the streamed window only
+#
+#   cp docker/.env.example docker/.env   # then edit
 #   docker compose -f docker/compose.yaml up -d
 #
 # Build from this checkout instead of pulling:
@@ -14,27 +18,57 @@ services:
       dockerfile: docker/Dockerfile
     container_name: rclonebrowser
     ports:
-      # The interface is an unencrypted desktop session. Bound to loopback so
-      # it is not on the network by accident; put it behind a reverse proxy
-      # with TLS before exposing it.
+      # Both bound to loopback so neither is on the network by accident. Put
+      # a reverse proxy with TLS in front before exposing either.
       #
       # Windows reserves scattered port ranges for Hyper-V and refuses to bind
       # inside them, with a message about socket access permissions rather
-      # than about the port being reserved. Set RB_PORT if the default is in
-      # one of them; "netsh interface ipv4 show excludedportrange protocol=tcp"
-      # lists them.
-      - "127.0.0.1:${RB_PORT:-5800}:5800"
+      # than about the port being reserved. Set RB_WEB_PORT or RB_PORT if a
+      # default is in one of them; "netsh interface ipv4 show
+      # excludedportrange protocol=tcp" lists them.
+      #
+      # The application's own web interface and API. Nothing listens here in
+      # desktop mode.
+      - "127.0.0.1:${RB_WEB_PORT:-19999}:19999"
+      # The streamed window, over HTTPS with a self-signed certificate.
+      # Nothing listens here in web mode.
+      - "127.0.0.1:${RB_PORT:-3001}:3001"
     environment:
+      - RB_MODE=${RB_MODE:-both}
       # Match the owner of any host directory mounted below. Running as root
-      # was the previous default and left everything the container wrote owned
-      # by root on the host.
-      - USER_ID=${USER_ID:-1000}
-      - GROUP_ID=${GROUP_ID:-1000}
+      # was the default once and left everything the container wrote owned by
+      # root on the host.
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - TZ=${TZ:-Asia/Bangkok}
-      # No default: an empty password leaves the session open to anyone who
-      # can reach the port.
-      - VNC_PASSWORD=${VNC_PASSWORD:?set VNC_PASSWORD in docker/.env}
-      - KEEP_APP_RUNNING=true
+      # A user name and password for the streamed window. Without them the
+      # stream is open to anyone who can reach its port, which with the
+      # loopback binding above means anyone on this machine. They do nothing
+      # in web mode: the web interface has its own sign-in.
+      - CUSTOM_USER=${RB_STREAM_USER:-}
+      - PASSWORD=${RB_STREAM_PASSWORD:-}
+      # Which rclone to run, chosen when the container starts rather than
+      # when the image is built. Either may be left empty: with both empty
+      # the rclone in the image is used and nothing is fetched.
+      #
+      #   RB_RCLONE_REPO      tgdrive/rclone (teldrive) or rclone/rclone
+      #   RB_RCLONE_VERSION   a version such as 1.75.0, or "latest"
+      #
+      # It is fetched once and kept in the /config volume, so changing these
+      # and restarting is all a change of version takes, and a version
+      # already fetched needs no network. "latest" asks GitHub at each start.
+      - RB_RCLONE_REPO=${RB_RCLONE_REPO:-}
+      - RB_RCLONE_VERSION=${RB_RCLONE_VERSION:-}
+      # Wayland instead of X11 for the streamed window. X11 is the default
+      # and the better-trodden path.
+      # - PIXELFLUX_WAYLAND=true
+    # The streaming stack shares frames through /dev/shm and the default of
+    # 64 MB is not enough for it. Unused in web mode.
+    shm_size: 1gb
+    # "docker stop" waits ten seconds by default before killing. The
+    # application takes up to eight to stop its transfers and record what
+    # became of them, and the supervisor around it needs a little as well.
+    stop_grace_period: 20s
     volumes:
       # rclone.conf, saved tasks, the scheduler, and the per-job logs.
       #

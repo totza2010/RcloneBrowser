@@ -1,13 +1,31 @@
 # Rclone Browser in a container
 
-Runs the desktop application inside the container and serves its window to a
-browser over noVNC, on port 5800.
+One image, three ways to run it. `RB_MODE` chooses:
+
+| `RB_MODE` | what runs | where to look |
+|---|---|---|
+| `web` | the application and its own web interface, no window | `http://localhost:19999` |
+| `both` (default) | that, and the window streamed to a browser | `https://localhost:3001` as well |
+| `desktop` | the streamed window only; web interface and API off | `https://localhost:3001` |
 
 ```bash
-cp docker/.env.example docker/.env    # then set VNC_PASSWORD
+cp docker/.env.example docker/.env    # then set RB_MODE and the passwords
 docker compose -f docker/compose.yaml up -d
-# http://localhost:5800
 ```
+
+The **web interface** is the application's own: queue, tasks, schedules,
+history, remotes. It asks for the token the container prints when it starts
+(`docker logs rclonebrowser`), and for the administrator password once one
+has been set. It cannot yet create or edit a task or a remote, which is what
+the window is still needed for.
+
+The **streamed window** is the desktop application itself, drawn inside the
+container and sent as video by [Selkies](https://docs.linuxserver.io/selkies).
+It is served over HTTPS with a self-signed certificate, so the browser warns
+the first time.
+
+In `both`, the window and the web interface are two views of one running
+program: start a transfer in one and it appears in the other.
 
 Published to `ghcr.io/totza2010/rclonebrowser`. Nothing is pushed except
 from a `v*` tag.
@@ -77,6 +95,39 @@ fixed version knows they need one:
 docker build -f docker/Dockerfile   --build-arg RCLONE_REPO=rclone/rclone   --build-arg RCLONE_VERSION=1.75.0   -t rclonebrowser:mainline .
 ```
 
+## Choosing rclone without rebuilding
+
+The tags above fix which rclone is *in* the image. Which one the container
+*runs* can be changed at any start:
+
+```ini
+RB_RCLONE_REPO=rclone/rclone
+RB_RCLONE_VERSION=1.75.0
+```
+
+Either may be left out: the repository defaults to the one the image was
+built from, the version to `latest`. With both empty nothing is fetched and
+the rclone in the image is used.
+
+What is asked for is downloaded once into `/config/.rclone-bin` and kept, so
+going back to a version already fetched needs no network, and `latest` falls
+back to the newest kept when GitHub cannot be reached. The download is
+checked against the checksum the release publishes; a release that publishes
+none is used with a warning in the log saying so.
+
+Every way this can fail -- no network, a version that does not exist, a
+checksum that does not match -- ends with the container running the rclone
+it shipped with and a line in `docker logs` saying why. It never ends with
+no rclone.
+
+The order, when more than one is given: an rclone mounted at `/opt/rclone`,
+then these variables, then the image's own.
+
+> The names are `RB_RCLONE_*` on purpose. rclone reads `RCLONE_<FLAG>` from
+> its environment as that flag, so `RCLONE_VERSION=1.75.0` in a container
+> makes every rclone command in it fail with *invalid argument "1.75.0" for
+> "--version"*.
+
 ## Where the data goes
 
 Everything lives under `/config`, which the image declares as a volume, so a
@@ -99,7 +150,12 @@ previously achieved nothing, because nothing was being written to it.
 Name the volumes to be able to find them again:
 
 ```bash
-docker run -d   -e VNC_PASSWORD='something long'   -v rclonebrowser-config:/config   -v rclonebrowser-media:/media   -p 127.0.0.1:5800:5800   ghcr.io/totza2010/rclonebrowser:latest
+docker run -d --name rclonebrowser \
+  -e RB_MODE=web \
+  -v rclonebrowser-config:/config -v rclonebrowser-media:/media \
+  -p 127.0.0.1:19999:19999 \
+  --stop-timeout 20 \
+  ghcr.io/totza2010/rclonebrowser:latest
 ```
 
 Both default to Docker-managed volumes, which behave the same on Windows and
@@ -121,7 +177,7 @@ RB_MEDIA=D:\Media
 ```
 
 Compose reads anything that is not a path as a volume name, which is what
-makes one setting cover both cases. `USER_ID`/`GROUP_ID` only matter when
+makes one setting cover both cases. `PUID`/`PGID` only matter when
 pointing at a host directory; set them to the owner of that directory.
 
 `RB_CONFIG` replaces the whole directory, so it wants an empty one to fill.
@@ -190,37 +246,66 @@ Nothing is written and every remote disappears when the container stops.
 Setting a configuration file path in Preferences overrides all of this, as
 the application then passes `--config` explicitly.
 
-## What this is, and is not
+## What each mode costs
 
-This streams the desktop as pixels. It is not a web interface: it costs the
-host a rendering session, it is awkward on a phone, and nothing about it can
-be scripted.
+The image is the same size whichever mode is chosen, about 635 MB: an image
+that can show the window has to carry something to show it with. What
+differs is what is running.
 
-A real HTTP interface served by the application is planned, and it will
-replace this: the image then loses X11, openbox and noVNC and becomes the
-binary plus rclone. Until that lands this image is kept current rather than
-improved, so it is not worth putting effort into the noVNC side.
+- **`web`** runs one process, the application. No X server, no desktop, no
+  streaming, no audio daemon -- they are taken out of the service list before
+  the supervisor reads it.
+- **`both`** and **`desktop`** run the whole streaming stack as well, and
+  want `--shm-size=1gb`.
+
+## Stopping
+
+`docker stop` is honoured in every mode. The application stops its
+transfers, records in the history what became of them, and leaves the queue
+exactly as it was, so the next start carries on. It takes up to eight
+seconds, and Docker's default is to kill after ten -- `compose.yaml` sets
+`stop_grace_period: 20s`, and with plain `docker run` it is `--stop-timeout
+20`.
+
+## Coming from the noVNC image
+
+Earlier images streamed the window with noVNC on port 5800. The volume is
+picked up as it is -- tasks, schedules, history and `rclone.conf` are where
+they were. What changes is around it:
+
+| before | now |
+|---|---|
+| port `5800`, plain HTTP | `3001` HTTPS for the window, `19999` for the web interface |
+| `VNC_PASSWORD` | `CUSTOM_USER` + `PASSWORD` for the window (`RB_STREAM_USER` / `RB_STREAM_PASSWORD` in `.env`) |
+| `USER_ID` / `GROUP_ID` | `PUID` / `PGID` |
+| `KEEP_APP_RUNNING` | not needed |
+| `INSTALL_PACKAGES` | not available; build with the package added |
 
 ## Notes on running it
 
-- The port is bound to loopback in `compose.yaml`. The session is
-  unencrypted; put a reverse proxy with TLS in front before exposing it.
-- `VNC_PASSWORD` has no default and the compose file refuses to start
-  without it. `docker/.env` is git-ignored and kept out of the build context.
-- `USER_ID`/`GROUP_ID` default to 1000. They used to default to 0, which
-  meant everything the container wrote landed on the host owned by root.
+- Both ports are bound to loopback in `compose.yaml`. Put a reverse proxy
+  with TLS in front before exposing either.
+- **The streamed window has no password unless one is set.** With the
+  loopback binding that means anyone on the machine. Set `RB_STREAM_USER`
+  and `RB_STREAM_PASSWORD`. `docker/.env` is git-ignored and kept out of the
+  build context.
+- The web interface listens on every address *inside* the container, which
+  is what makes the published port work. It is the port mapping that decides
+  who can reach it.
+- `PUID`/`PGID` default to 1000.
 - `rclone mount` needs `/dev/fuse` and `SYS_ADMIN`. Those are commented out
   because they widen what a compromised container can reach, and transfers
   do not need them.
-- On Windows the default port may fail to bind with a message about socket
-  access permissions. Windows reserves scattered ranges for Hyper-V, and
-  5800 can fall inside one. Set `RB_PORT` in `docker/.env` to something
-  outside them; `netsh interface ipv4 show excludedportrange protocol=tcp`
-  lists the reserved ranges.
-- The image carries DejaVu and Noto, including Thai. Without a font every
-  label renders as an empty box, menus included. CJK is left out at roughly
-  100 MB; add `INSTALL_PACKAGES=font-noto-cjk` to pull it at container
-  start.
+- On Windows a default port may fail to bind with a message about socket
+  access permissions. Windows reserves scattered ranges for Hyper-V. Set
+  `RB_WEB_PORT` or `RB_PORT` in `docker/.env` to something outside them;
+  `netsh interface ipv4 show excludedportrange protocol=tcp` lists the
+  reserved ranges.
+- The image carries DejaVu and Noto, including Thai. CJK is left out at
+  roughly 100 MB.
+- X11 is the default for the streamed window. `PIXELFLUX_WAYLAND=true`
+  switches to Wayland, and the window then runs on Qt's own Wayland plugin.
+  The tray icon has not been tried there.
 
 ## Using your own rclone build
 
@@ -244,6 +329,33 @@ WARNING: it has to be a Linux x86_64 binary
 WARNING: continuing with the bundled rclone v1.73.1
 ```
 
+## Working on the image
+
+`docker/compose.dev.yaml` is for trying a change. It always builds from the
+working tree, and it has its own name, ports and volumes, so it can be up
+beside the real container -- or beside the program running outside Docker --
+without either noticing the other.
+
+```bash
+docker compose -f docker/compose.dev.yaml up -d --build
+# web interface     http://localhost:19991
+# streamed window   https://localhost:3011
+```
+
+It mounts two things from outside:
+
+- **This machine's `rclone.conf`**, so the remotes already set up are there.
+  It is the real file, read-write, because rclone has to save refreshed
+  tokens back to it. Set `RB_DEV_RCLONE_CONF` to a directory holding a copy
+  to keep the two apart.
+- **An rclone of your choosing**, two ways: `RB_DEV_RCLONE_REPO` and
+  `RB_DEV_RCLONE_VERSION` fetch a published one at start, or
+  `RB_DEV_RCLONE_DIR` names a directory with a file called `rclone` in it. The container uses that one and says so
+  in its log. It has to be a Linux build; see the next section.
+
+Its settings in `docker/.env` are `RB_DEV_*`, listed at the bottom of
+`.env.example`.
+
 ## Building
 
 The Dockerfile compiles from the build context, so the binary always matches
@@ -253,7 +365,7 @@ the checkout it was built from:
 docker build -f docker/Dockerfile -t rclonebrowser:dev .
 ```
 
-Build arguments: `ALPINE_VERSION`, `BASEIMAGE_VERSION`, `RCLONE_REPO`,
+Build arguments: `ALPINE_VERSION`, `SELKIES_TAG`, `RCLONE_REPO`,
 `RCLONE_VERSION`, `TARGETARCH`. The builder stage has to stay on the same Alpine release as the
 base image, or the Qt libraries it links against will not be the ones present
 at run time.
