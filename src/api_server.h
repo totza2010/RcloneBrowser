@@ -57,9 +57,20 @@ public:
   // rather than a check per route, for the reason given in answer().
   static bool mayAsk(const HttpRequest &request);
 
+  // Whether POST /shutdown is honoured. Off unless something says so: a
+  // window is closed by whoever is sitting at it, and a page being able to
+  // close it from somewhere else would be a surprise. The daemon switches it
+  // on, because for a daemon there is nobody sitting anywhere.
+  void setShutdownAllowed(bool allowed) { mShutdownAllowed = allowed; }
+
 signals:
   void started(quint16 port);
   void stopped();
+
+  // Somebody signed in asked for the program to stop. What that means is not
+  // this class's business; main() connects it to the same road a signal from
+  // the operating system takes.
+  void shutdownRequested();
 
 private:
   explicit ApiServer(QObject *parent = nullptr);
@@ -125,4 +136,6 @@ private:
   QList<QTcpSocket *> mListeners;
   QTimer *mHeartbeat = nullptr;
   bool mWatching = false;
+  bool mShutdownAllowed = false;
+  bool mShutdownPending = false;
 };

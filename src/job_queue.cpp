@@ -146,11 +146,22 @@ void JobQueue::setDrivesItself(bool on) {
   advance();
 }
 
+void JobQueue::setHeld(bool held) {
+  if (mHeld == held) {
+    return;
+  }
+  mHeld = held;
+  qCDebug(rbQueue) << (held ? "held" : "released") << "count=" << mEntries.size();
+  if (!held) {
+    advance();
+  }
+}
+
 bool JobQueue::advance() {
   // While the window is the one driving, this must start nothing at all --
   // not on a job ending, and not when the queue is switched on either. Both
   // would be a second start of the same entry. See docs/QUEUE-MOVE.md step 0.
-  if (!mDrivesItself) {
+  if (!mDrivesItself || mHeld) {
     return false;
   }
 
@@ -211,7 +222,9 @@ void JobQueue::jobFinished(const QString &requestId) {
     // Stopping the queue and then the job is how somebody puts a task back in
     // the queue rather than out of it -- taking it out would mean pressing
     // Stop lost the entry.
-    if (!mRunning) {
+    // And so does one held for shutting down: the job was stopped because
+    // the program is, not because anybody wanted it out of the queue.
+    if (!mRunning || mHeld) {
       emit changed();
       return;
     }

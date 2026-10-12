@@ -93,6 +93,17 @@ public:
   void setDrivesItself(bool on);
   bool drivesItself() const { return mDrivesItself; }
 
+  // Stops the queue moving without pausing it.
+  //
+  // For shutting down. Pausing is remembered across restarts, so a queue
+  // paused in order to stop would still be paused when the program came back
+  // -- and stopping the running job with the queue left going drops its entry
+  // and starts the next one. Held, the queue keeps every entry including the
+  // one that was running, starts nothing, and is exactly as it was when it is
+  // read again.
+  void setHeld(bool held);
+  bool isHeld() const { return mHeld; }
+
 signals:
   // The list or the running state changed and anything showing it should look
   // again. One signal rather than a set of finer ones: the queue is short and
@@ -120,4 +131,5 @@ private:
   bool mRunning = false;
   QString mRunningRequestId;
   bool mDrivesItself = false;
+  bool mHeld = false;
 };

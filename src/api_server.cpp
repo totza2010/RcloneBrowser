@@ -753,6 +753,18 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   QByteArray contentType = "application/json";
   const int status = route(asked, &body, &contentType);
   reply(FormatHttpResponse(status, body, contentType));
+
+  if (mShutdownPending) {
+    mShutdownPending = false;
+
+    // Pushed out before anything is stopped. The first version started
+    // stopping on the next turn of the event loop, which with nothing running
+    // was sixty milliseconds from "accepted" to a process that no longer
+    // existed -- and the answer was still sitting in a buffer when it went.
+    // The caller got an empty reply to a request that had worked.
+    socket->flush();
+    QTimer::singleShot(0, this, [this]() { emit shutdownRequested(); });
+  }
 }
 
 int ApiServer::route(const HttpRequest &request, QByteArray *body,
@@ -878,6 +890,40 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
     if (status != 0) {
       return status;
     }
+  }
+
+  // shutdown -- the polite way to stop a daemon from somewhere that cannot
+  // send it a signal.
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("shutdown")) {
+    if (!mShutdownAllowed) {
+      *body = problem(QStringLiteral(
+          "this is running as a window; close it from there"));
+      return 409;
+    }
+    if (AppCore::instance().isStopping()) {
+      *body = problem(QStringLiteral("it is already stopping"));
+      return 409;
+    }
+
+    qCDebug(rbApp) << "API asked the program to stop";
+
+    // Only noted here. answer() acts on it once this reply has actually been
+    // handed to the socket -- see there for why "after" has to mean that.
+    mShutdownPending = true;
+
+    QJsonObject object;
+    object.insert(QStringLiteral("stopping"), true);
+    object.insert(QStringLiteral("runningJobs"),
+                  JobRegistry::instance().runningCount());
+    *body = toJson(object);
+    return 202;
+  }
+
+  // Nothing new is started once stopping has begun. Refused with the reason
+  // rather than started and immediately killed.
+  if (post && AppCore::instance().isStopping()) {
+    *body = problem(QStringLiteral("the program is shutting down"));
+    return 503;
   }
 
   // tasks/{id}/run and tasks/{id}/enqueue

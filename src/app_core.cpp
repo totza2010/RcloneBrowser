@@ -11,6 +11,7 @@
 #include "utils.h"
 
 #include <QDateTime>
+#include <QEventLoop>
 #include <QSettings>
 #include <QTimer>
 #include <QUuid>
@@ -78,7 +79,61 @@ void AppCore::start() {
 
 void AppCore::checkSchedules() { tick(); }
 
+int AppCore::shutdown(int waitMs) {
+  if (mStopping) {
+    return JobRegistry::instance().runningCount();
+  }
+  mStopping = true;
+  emit stopping();
+
+  JobQueue::instance().setHeld(true);
+
+  int asked = 0;
+  for (RunningJob *job : JobRegistry::instance().jobs()) {
+    if (job->isRunning()) {
+      job->stop();
+      ++asked;
+    }
+  }
+  qCDebug(rbApp) << "stopping: asked" << asked << "job(s) to stop, waiting up to"
+                 << waitMs << "ms";
+
+  // Waited for rather than assumed. A job told to stop writes its last line,
+  // closes its log and has its row in the history marked "stopped" only when
+  // rclone has actually gone; leaving before that is how a history ends up
+  // saying "running" about something that is not.
+  if (JobRegistry::instance().runningCount() > 0 && waitMs > 0) {
+    QEventLoop loop;
+    QTimer deadline;
+    deadline.setSingleShot(true);
+    QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished,
+                     &loop, [&loop]() {
+                       if (JobRegistry::instance().runningCount() == 0) {
+                         loop.quit();
+                       }
+                     });
+    deadline.start(waitMs);
+    loop.exec();
+  }
+
+  const int left = JobRegistry::instance().runningCount();
+  if (left > 0) {
+    // Said, because this is the case that leaves something behind: an
+    // unmount refused because a file on it is open, or an rclone that would
+    // not die in time.
+    qCDebug(rbApp) << "stopping:" << left << "job(s) had not stopped in time";
+  } else {
+    qCDebug(rbApp) << "stopping: everything has stopped";
+  }
+  return left;
+}
+
 void AppCore::tick() {
+  if (mStopping) {
+    return; // and no next tick is scheduled: the clock has stopped
+  }
+
   const QDateTime now = QDateTime::currentDateTime();
 
   // Every schedule says where it stands, every minute, due or not.
@@ -144,6 +199,10 @@ QString AppCore::fire(const Schedule &schedule, QString *reason) {
     emit scheduleHeld(schedule.id, why);
     return QString();
   };
+
+  if (mStopping) {
+    return hold(QStringLiteral("the program is shutting down"));
+  }
 
   JobOptions *task = ListOfJobOptions::getInstance()->find(schedule.taskId);
   if (task == nullptr) {

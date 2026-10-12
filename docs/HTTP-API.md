@@ -37,6 +37,7 @@ token: 0be7e386-a839-426d-a7d7-c6370d15983c
 | `GET /api/v1/auth` | **ไม่ต้องใช้ token** — บอกแค่ว่าตั้งรหัสผ่านไว้หรือยัง |
 | `POST /api/v1/login` | **ไม่ต้องใช้ token** — `{user,password}` → `{session}` |
 | `POST /api/v1/logout` · `POST /api/v1/password` | ออกจากระบบ · ตั้ง/เปลี่ยนรหัสผ่าน |
+| `POST /api/v1/shutdown` | **daemon เท่านั้น** — หยุดงาน เก็บคิวไว้ แล้วออก · หน้าต่างตอบ `409` · ดู [`DOCKER-MODES.md`](DOCKER-MODES.md) |
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19999/api/v1/system
@@ -157,5 +158,4 @@ token คือ endpoint ที่คนเขียนลืม และวิ
 
 - **สร้าง/แก้ task ผ่าน API** — ตั้งใจไม่ทำ ดูเหตุผลข้างบน
 - **Web UI (S12)**
-- **วิธีสั่งให้ daemon หยุดอย่างสุภาพ** — ตอนนี้ Ctrl+C อย่างเดียว
   ใน Docker ที่ถูกคือรับ SIGTERM ไม่ใช่ endpoint

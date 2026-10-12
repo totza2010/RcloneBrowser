@@ -55,6 +55,7 @@ set(CORE_SOURCE
   http_message.cpp
   api_server.cpp
   api_auth.cpp
+  shutdown_signal.cpp
   remote_registry.cpp
   rclone_version.cpp
   task_builder.cpp
@@ -90,6 +91,7 @@ set(CORE_HEADER
   http_message.h
   api_server.h
   api_auth.h
+  shutdown_signal.h
   remote_registry.h
   rclone_version.h
   task_builder.h

@@ -3,6 +3,7 @@
 #include "api_server.h"
 #include "app_core.h"
 #include "main_window.h"
+#include "shutdown_signal.h"
 #include "task_runner.h"
 #include "utils.h"
 
@@ -283,6 +284,36 @@ int RunHeadless(int argc, char *argv[], const CommandLine &cmd) {
       err.flush();
     }
     out.flush();
+
+    // Stopping, by whichever road the request arrives: a signal from the
+    // operating system ("docker stop" sends SIGTERM and kills ten seconds
+    // later), Ctrl+C, or POST /shutdown from somewhere that can send neither.
+    // One function, so that all three leave the same things behind.
+    const auto stop = [&app, &out](const QString &by) {
+      out << "stopping (" << by << ")...\n";
+      out.flush();
+
+      const int left = AppCore::instance().shutdown(8000);
+      ApiServer::instance().stop();
+
+      if (left > 0) {
+        out << left << " job(s) had not stopped in time\n";
+      } else {
+        out << "stopped\n";
+      }
+      out.flush();
+
+      ShutdownSignal::instance().finished();
+      app.quit();
+    };
+
+    ShutdownSignal::instance().install();
+    QObject::connect(&ShutdownSignal::instance(), &ShutdownSignal::requested,
+                     &app, stop);
+
+    ApiServer::instance().setShutdownAllowed(true);
+    QObject::connect(&ApiServer::instance(), &ApiServer::shutdownRequested,
+                     &app, [stop]() { stop(QStringLiteral("asked over the API")); });
 
     return app.exec();
   }

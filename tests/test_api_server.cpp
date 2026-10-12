@@ -697,6 +697,42 @@ private slots:
              "it failed without saying why");
   }
 
+  // A window is closed by whoever is sitting at it. A page being able to
+  // close it from somewhere else would be a surprise, so stopping over the
+  // API is something only a daemon agrees to.
+  void aWindowCannotBeClosedFromThePage() {
+    ApiServer::instance().setShutdownAllowed(false);
+    QSignalSpy asked(&ApiServer::instance(), &ApiServer::shutdownRequested);
+
+    const QByteArray reply = ask("POST", "/api/v1/shutdown", mToken);
+    QCOMPARE(statusOf(reply), 409);
+    QTest::qWait(50);
+    QCOMPARE(asked.count(), 0);
+  }
+
+  // And a daemon does, but only for somebody signed in -- and it answers
+  // before it stops, so the caller hears "accepted" rather than a connection
+  // that went quiet.
+  void aDaemonCanBeAskedToStop() {
+    ApiServer::instance().setShutdownAllowed(true);
+    QSignalSpy asked(&ApiServer::instance(), &ApiServer::shutdownRequested);
+
+    QCOMPARE(statusOf(ask("POST", "/api/v1/shutdown", QByteArray())), 401);
+    QCOMPARE(asked.count(), 0);
+
+    const QByteArray reply = ask("POST", "/api/v1/shutdown", mToken);
+    QCOMPARE(statusOf(reply), 202);
+    QCOMPARE(bodyOf(reply).object().value(QStringLiteral("stopping")).toBool(),
+             true);
+
+    if (asked.isEmpty()) {
+      QVERIFY2(asked.wait(2000), "the request to stop went nowhere");
+    }
+    QCOMPARE(asked.count(), 1);
+
+    ApiServer::instance().setShutdownAllowed(false);
+  }
+
   // HEAD is GET with the body cut off, because health checks and proxies
   // send it. A front page that answers "method not allowed" to a monitor
   // looks exactly like a front page that is broken.

@@ -49,6 +49,25 @@ public:
   // them is right today.
   QString runNow(const QString &scheduleId, QString *reason = nullptr);
 
+  // Stops everything, the way it would want to be stopped, and returns how
+  // many jobs were still going when the time ran out (zero is the answer to
+  // hope for).
+  //
+  // In order: the clock starts nothing more, the queue is held so that
+  // stopping its job neither drops the entry nor starts the next, and every
+  // running job is asked to stop -- a transfer is ended, a mount is
+  // unmounted. Then it waits, because a job that has been told to stop has
+  // not stopped yet and the history is only written when it has.
+  //
+  // What is left alone matters as much: the queue is not paused and nothing
+  // is removed from it, so the next start picks up where this left off.
+  //
+  // The wait is bounded because whoever is asking usually is too: "docker
+  // stop" gives ten seconds before it kills.
+  int shutdown(int waitMs = 8000);
+
+  bool isStopping() const { return mStopping; }
+
 signals:
   // A schedule came due and its run was started, with the id that run will
   // be known by everywhere else -- in the queue, in the job registry and in
@@ -64,6 +83,10 @@ signals:
   // countdown off.
   void ticked();
 
+  // Stopping has begun. A view that offers a Run button has a moment to stop
+  // offering it.
+  void stopping();
+
 private:
   explicit AppCore(QObject *parent = nullptr);
 
@@ -76,4 +99,5 @@ private:
   QString fire(const Schedule &schedule, QString *reason = nullptr);
 
   bool mStarted = false;
+  bool mStopping = false;
 };

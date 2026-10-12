@@ -9,15 +9,19 @@
 //                "listremotes --long" produces
 //   lsjson       a directory of FAKE_RCLONE_ENTRIES entries (default 5),
 //                every other one a folder
+//   copy, sync,  does nothing for FAKE_RCLONE_SLEEP_MS (default 0) and then
+//   move         exits 0 -- a transfer that is still going when asked about
 //
 // Added when a listing of 7,103 real files showed that the API answered from
 // one path only and left the other -- more entries than were asked for --
 // hanging forever. The bug needed a folder bigger than the limit to appear,
 // and this is how a test gets one.
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 int main(int argc, char *argv[]) {
   const char *command = argc > 1 ? argv[1] : "";
@@ -47,6 +51,16 @@ int main(int argc, char *argv[]) {
       std::fflush(stdout);
     }
     std::printf("\n]\n");
+    return 0;
+  }
+
+  if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
+      std::strcmp(command, "move") == 0) {
+    int ms = 0;
+    if (const char *asked = std::getenv("FAKE_RCLONE_SLEEP_MS")) {
+      ms = std::atoi(asked);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     return 0;
   }
 
