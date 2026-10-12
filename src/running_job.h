@@ -103,6 +103,7 @@ public:
   // login, and the mount point -- which is why it lives with the job rather
   // than with the card: a headless mount needs it too.
   void setMountScript(const QString &script) { mMountScript = script; }
+  QString mountScript() const { return mMountScript; }
 
   // The remote-control port rclone settled on, read from its output. Zero
   // until it is announced, and zero forever when the task set no port.

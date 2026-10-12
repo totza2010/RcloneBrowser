@@ -1,9 +1,13 @@
 #include "remote_ops.h"
 #include "debug_log.h"
+#include "job_options.h"
 #include "job_registry.h"
 #include "utils.h"
 
 #include <QRegularExpression>
+#include <QSettings>
+#include <QTcpServer>
+#include <QUuid>
 
 namespace {
 
@@ -417,6 +421,55 @@ QString ExportRow(const QString &name, const QString &modified, qint64 size,
     return QStringLiteral("\"%1\"").arg(quoted);
   }
   return QStringLiteral("\"%1\",\"%2\",%3").arg(quoted, modified).arg(size);
+}
+
+RunningJob *Mount(const QString &remote, const QString &path,
+                  const QString &mountPoint, const MountOptions &options,
+                  QString *why) {
+  if (mountPoint.trimmed().isEmpty()) {
+    if (why != nullptr) {
+      *why = QStringLiteral("say where to mount it");
+    }
+    return nullptr;
+  }
+
+  // A port nothing else is using, found by asking for one and letting it go.
+  // Somebody else could take it in between; rclone then says so, which is
+  // better than choosing a fixed port and colliding with the last mount.
+  quint16 port = 0;
+  {
+    QTcpServer probe;
+    if (probe.listen(QHostAddress::LocalHost, 0)) {
+      port = probe.serverPort();
+    }
+  }
+
+  // Put together by the same code a saved mount task uses, so a mount made
+  // here and one made from a task are the same command.
+  JobOptions task(false);
+  task.operation = JobOptions::Mount;
+  task.source = Target(remote, path);
+  task.dest = mountPoint.trimmed();
+  task.mountReadOnly = options.readOnly;
+  task.mountRcPort = port != 0 ? QString::number(port) : QString();
+  task.mountCacheLevel =
+      options.cache == QLatin1String("minimal")  ? JobOptions::Minimal
+      : options.cache == QLatin1String("writes") ? JobOptions::Writes
+      : options.cache == QLatin1String("full")   ? JobOptions::Full
+                                                 : JobOptions::Off;
+
+  QStringList command = task.getMountOptions();
+  // The mount options from the settings, which the window has always added.
+  command << SplitRcloneOptions(
+      GetSettings()->value("Settings/mount").toString());
+
+  qCDebug(rbRemote) << "mounting" << task.source << "on" << task.dest;
+
+  return JobRegistry::instance().start(
+      JobKind::Mount, command,
+      JobDescription{QStringLiteral("%1 on %2").arg(task.source, task.dest),
+                     task.source, task.dest},
+      QString(), QStringLiteral("mount"), QUuid::createUuid().toString());
 }
 
 } // namespace RemoteOps

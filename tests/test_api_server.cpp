@@ -23,6 +23,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUrl>
 #include <QUuid>
 
 #include <memory>
@@ -1185,6 +1186,61 @@ private slots:
     QCOMPARE(statusOf(names), 200);
     QVERIFY(names.contains("export.txt"));
     QVERIFY(names.endsWith("\"empty\"\n"));
+  }
+
+  // ---- mounting ---------------------------------------------------------------
+
+  // A mount started from outside the window. It is a job like any other from
+  // then on, and stopping that job is what unmounts it.
+  void aMountIsStartedAsAJobAndStoppedLikeOne() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000"); // stays up for a moment
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/mount", mToken,
+             "{\"path\":\"films\",\"mountPoint\":\"X:\",\"readOnly\":true,"
+             "\"cache\":\"writes\"}");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QCOMPARE(statusOf(reply), 202);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("source")).toString(),
+             QStringLiteral("fake:films"));
+    QCOMPARE(object.value(QStringLiteral("mountPoint")).toString(),
+             QStringLiteral("X:"));
+
+    const QString request = object.value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(request);
+    QVERIFY(job != nullptr);
+    QCOMPARE(JobKindToString(job->kind()), QStringLiteral("mount"));
+
+    // What was asked for is in the command, and the login for its remote
+    // control is not: that goes through the environment.
+    const QString command = job->displayCommand().join(QLatin1Char(' '));
+    QVERIFY2(command.contains(QStringLiteral("--read-only")), qPrintable(command));
+    QVERIFY(command.contains(QStringLiteral("--vfs-cache-mode writes")));
+    QVERIFY(command.contains(QStringLiteral("--rc-addr localhost:")));
+    QVERIFY2(!command.contains(QStringLiteral("--rc-pass")) &&
+                 !command.contains(QStringLiteral("--rc-user")),
+             "the mount's remote-control login is among its arguments");
+
+    // Taken down the way any job is stopped. (The stand-in has no remote
+    // control to ask politely, so this only checks the request is accepted.)
+    QCOMPARE(statusOf(ask("POST",
+                          QByteArray("/api/v1/jobs/") +
+                              QUrl::toPercentEncoding(request) + "/stop",
+                          mToken)),
+             202);
+    job->stop();
+  }
+
+  void aMountNeedsSomewhereToGo() {
+    QVERIFY(useFakeRclone(1));
+    for (const char *body :
+         {"{\"path\":\"films\"}", "{\"path\":\"films\",\"mountPoint\":\"  \"}"}) {
+      QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mount", mToken, body)),
+               400);
+    }
   }
 
   void makingAFolderNeedsASecretAndARealRemote() {

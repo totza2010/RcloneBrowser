@@ -870,6 +870,32 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     return;
   }
 
+  if (operation == QLatin1String("mount")) {
+    RemoteOps::MountOptions options;
+    options.readOnly = given.value(QStringLiteral("readOnly")).toBool(false);
+    options.cache = given.value(QStringLiteral("cache")).toString();
+
+    QString why;
+    RunningJob *job = RemoteOps::Mount(
+        remote, path, given.value(QStringLiteral("mountPoint")).toString(),
+        options, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API mounting" << remote << path;
+
+    // Answered now. A mount runs for as long as it is wanted; whether it
+    // came up is told by the job, and POST /jobs/{id}/stop takes it down.
+    QJsonObject started;
+    started.insert(QStringLiteral("requestId"), job->requestId());
+    started.insert(QStringLiteral("started"), QStringLiteral("mount"));
+    started.insert(QStringLiteral("source"), job->description().source);
+    started.insert(QStringLiteral("mountPoint"), job->description().dest);
+    socket->write(FormatHttpResponse(202, toJson(started)));
+    return;
+  }
+
   if (operation == QLatin1String("link")) {
     QString why;
     RunningJob *job = RemoteOps::Link(remote, path, &why);
@@ -1251,7 +1277,8 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         QStringLiteral("mkdir"),   QStringLiteral("rename"),
         QStringLiteral("delete"),  QStringLiteral("link"),
         QStringLiteral("cleanup"), QStringLiteral("dedupe"),
-        QStringLiteral("copy"),    QStringLiteral("move")};
+        QStringLiteral("copy"),    QStringLiteral("move"),
+        QStringLiteral("mount")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {

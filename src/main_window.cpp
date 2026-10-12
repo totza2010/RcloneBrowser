@@ -34,6 +34,7 @@
 #endif
 #include "file_dialog.h"
 #include <QClipboard>
+#include <QPointer>
 #include <QStyleFactory>
 #include <QInputDialog>
 #if defined(Q_OS_WIN)
@@ -1908,6 +1909,20 @@ MainWindow::MainWindow() {
                    [this](RunningJob *job) {
                      if (job->kind() == JobKind::Transfer) {
                        addJobCard(job);
+                     }
+                     // A mount this window is not in the middle of starting
+                     // itself. On the next turn of the event loop, because
+                     // whoever started it sets its script just after
+                     // starting it, and the card shows whether there is one.
+                     if (job->kind() == JobKind::Mount && !mStartingMount) {
+                       QPointer<RunningJob> guarded(job);
+                       QTimer::singleShot(0, this, [this, guarded]() {
+                         if (guarded) {
+                           addMountCard(guarded, guarded->description().source,
+                                        guarded->description().dest,
+                                        guarded->mountScript());
+                         }
+                       });
                      }
                    });
 
@@ -4192,12 +4207,6 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
 
   QStringList argsFinal = args;
 
-  if (ui.jobs->count() == 2) {
-    ui.noJobsAvailable->hide();
-  }
-
-  ui.tabs->setTabText(1, QString("Jobs (%1)").arg(++mJobCount));
-
   // get default mount options
   auto settings = GetSettings();
   QString opt = settings->value("Settings/mount").toString();
@@ -4212,10 +4221,31 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
   const QString screenInfo =
       info.isEmpty() ? QString("%1 on %2").arg(remote, folder) : info;
 
+  // Said while the job is being started, so the handler that makes a card
+  // for mounts started elsewhere leaves this one to the lines below -- which
+  // know the script, as that handler would not yet.
+  mStartingMount = true;
   RunningJob *job = JobRegistry::instance().start(
       JobKind::Mount, argsFinal, JobDescription{screenInfo, remote, folder},
       uniqueId, QStringLiteral("mount"), QUuid::createUuid().toString());
+  mStartingMount = false;
   job->setMountScript(script);
+
+  addMountCard(job, remote, folder, script);
+}
+
+// The card for a mount. Split from addNewMount() so that a mount started by
+// something other than this window -- a saved task run from the web page, the
+// API, a schedule -- gets one too. It used to be made only here, so such a
+// mount was up and running with nothing in the window to show it or take it
+// down.
+void MainWindow::addMountCard(RunningJob *job, const QString &remote,
+                              const QString &folder, const QString &script) {
+  if (ui.jobs->count() == 2) {
+    ui.noJobsAvailable->hide();
+  }
+
+  ui.tabs->setTabText(1, QString("Jobs (%1)").arg(++mJobCount));
 
   auto widget = new MountWidget(job, remote, folder, script);
 

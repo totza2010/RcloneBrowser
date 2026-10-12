@@ -209,4 +209,28 @@ bool ParseLslLine(const QString &line, qint64 *size, QString *modified,
 QString ExportRow(const QString &name, const QString &modified, qint64 size,
                   bool namesOnly);
 
+// ---- mounting ----------------------------------------------------------------
+
+struct MountOptions {
+  bool readOnly = false;
+  // "off", "minimal", "writes" or "full": how much rclone keeps on disk so
+  // that programs which seek and rewrite can work. Anything else is "off".
+  QString cache;
+};
+
+// Makes a folder of a remote appear as a folder (or a drive) on this
+// machine, at `mountPoint`. The job runs for as long as the mount is up, and
+// stopping the job is unmounting.
+//
+// It is given a remote-control port of its own, because on Windows that is
+// the only way to ask a mount to come down. The login for it never appears
+// among the arguments.
+//
+// Refused when no mount point is named. Whether the place can actually be
+// mounted on is rclone's to say: it differs by platform and by what is
+// installed, and its own message is better than a guess made here.
+RunningJob *Mount(const QString &remote, const QString &path,
+                  const QString &mountPoint, const MountOptions &options,
+                  QString *why = nullptr);
+
 } // namespace RemoteOps

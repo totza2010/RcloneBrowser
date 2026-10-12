@@ -459,7 +459,8 @@ function jobCard(job) {
         '<div class="card-actions">' +
           '<button class="ghost small" data-log="' + esc(job.requestId) + '">Log</button>' +
           (job.running
-            ? '<button class="danger small" data-stop="' + esc(job.requestId) + '">Stop</button>'
+            ? '<button class="danger small" data-stop="' + esc(job.requestId) + '">' +
+              (job.kind === "mount" ? "Unmount" : "Stop") + "</button>"
             : "") +
         "</div>" +
       "</div>" +
@@ -1014,6 +1015,53 @@ async function copyOrMove(move) {
 $("remote-copy").addEventListener("click", () => copyOrMove(false));
 $("remote-move").addEventListener("click", () => copyOrMove(true));
 
+// ---- mounting --------------------------------------------------------------
+
+$("remote-mount").addEventListener("click", () => {
+  const path = subject();
+  const what = browsing.remote + ":" + path;
+
+  showResult("Mount " + what,
+    '<p class="muted">Makes this folder appear as a folder or a drive on the ' +
+    "machine the program is running on — not on the one this browser is on, " +
+    "unless they are the same.</p>" +
+    '<p><label>Where: a drive letter such as <b>X:</b> on Windows, or an empty folder' +
+      '<input id="mount-point" type="text" placeholder="X:  or  /mnt/films"></label></p>' +
+    '<p><label>Cache<select id="mount-cache">' +
+      '<option value="off">off — reading only, the least disk used</option>' +
+      '<option value="minimal">minimal</option>' +
+      '<option value="writes" selected>writes — what most programs need to save files</option>' +
+      '<option value="full">full — everything read is kept on disk</option>' +
+    "</select></label></p>" +
+    '<p><label class="check"><input type="checkbox" id="mount-ro"> Read only</label></p>' +
+    '<p><button id="mount-go" class="small">Mount</button> ' +
+    '<span id="mount-state" class="error"></span></p>');
+
+  $("mount-go").addEventListener("click", async () => {
+    let answer;
+    try {
+      answer = await api("POST", remoteUrl("mount"), {
+        path: path,
+        mountPoint: $("mount-point").value,
+        cache: $("mount-cache").value,
+        readOnly: $("mount-ro").checked,
+      });
+    } catch (e) {
+      $("mount-state").textContent = "could not reach the daemon";
+      return;
+    }
+    if (answer.status !== 202) {
+      $("mount-state").textContent = reasonFrom(answer);
+      return;
+    }
+    $("resultbox").classList.add("hidden");
+    // Whether it came up is the job's to say: a mount that fails does so a
+    // moment after it starts, and the card in Jobs is where that shows.
+    toast("mount started — see Jobs; Stop there unmounts it");
+    refresh();
+  });
+});
+
 // ---- comparing two folders, and saving a listing --------------------------
 
 $("remote-check").addEventListener("click", async () => {
@@ -1232,7 +1280,8 @@ document.addEventListener("click", async (event) => {
 
   if (d.stop) {
     const job = state.jobs.find((j) => j.requestId === d.stop);
-    if (!confirm("Stop " + (job ? job.info : d.stop) + "?")) return;
+    const verb = job && job.kind === "mount" ? "Unmount " : "Stop ";
+    if (!confirm(verb + (job ? job.info : d.stop) + "?")) return;
     if (await command("POST", "/jobs/" + encodeURIComponent(d.stop) + "/stop")) refresh();
     return;
   }

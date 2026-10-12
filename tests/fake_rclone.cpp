@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
-      std::strcmp(command, "move") == 0) {
+      std::strcmp(command, "move") == 0 || std::strcmp(command, "mount") == 0) {
     int ms = 0;
     if (const char *asked = std::getenv("FAKE_RCLONE_SLEEP_MS")) {
       ms = std::atoi(asked);

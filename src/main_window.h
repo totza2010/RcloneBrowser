@@ -38,6 +38,10 @@ private slots:
   void addStream(const QString &remote, const QString &stream,
                  const QString &remoteType);
 
+  // The card for a mount, whoever started it. See addNewMount().
+  void addMountCard(class RunningJob *job, const QString &remote,
+                    const QString &folder, const QString &script);
+
   void addNewMount(const QString &remote, const QString &folder,
                    const QString &remoteType, const QStringList &args,
                    const QString &script, const QString &uniqueId,
@@ -79,6 +83,10 @@ private:
 
   bool mFirstTime = true;
   int mJobCount = 0;
+
+  // Set while addNewMount() is starting a mount, so the handler that gives a
+  // card to mounts started elsewhere leaves that one to addNewMount().
+  bool mStartingMount = false;
 
   // keep track of number of active transfers
   int mTransferJobCount = 0;
