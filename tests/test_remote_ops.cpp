@@ -133,6 +133,64 @@ private slots:
     QVERIFY(!why.isEmpty());
   }
 
+  // A line of "rclone lsl", taken apart -- and a line that is not one, left
+  // out, which is how the notices rclone prints among them stay out of the
+  // exported file.
+  void aLineOfAListingIsTakenApart() {
+    qint64 size = -1;
+    QString modified;
+    QString name;
+
+    QVERIFY(RemoteOps::ParseLslLine(
+        QStringLiteral("   300000 2026-10-12 14:16:41.398206300 films/a b.mkv"),
+        &size, &modified, &name));
+    QCOMPARE(size, Q_INT64_C(300000));
+    QCOMPARE(modified, QStringLiteral("2026-10-12 14:16:41"));
+    QCOMPARE(name, QStringLiteral("films/a b.mkv"));
+
+    QVERIFY(!RemoteOps::ParseLslLine(
+        QStringLiteral("2026/10/12 12:00:00 NOTICE: something else"), &size,
+        &modified, &name));
+    QVERIFY(!RemoteOps::ParseLslLine(QString(), nullptr, nullptr, nullptr));
+  }
+
+  // The exported row, the same wherever it is written. A quote in a name is
+  // doubled; written as it stood, it ended the field early and broke the row.
+  void anExportedRowSurvivesAQuoteInAName() {
+    QCOMPARE(RemoteOps::ExportRow(QStringLiteral("a.mkv"),
+                                  QStringLiteral("2026-10-12 14:16:41"), 300000,
+                                  false),
+             QStringLiteral("\"a.mkv\",\"2026-10-12 14:16:41\",300000"));
+    QCOMPARE(RemoteOps::ExportRow(QStringLiteral("a.mkv"), QString(), 0, true),
+             QStringLiteral("\"a.mkv\""));
+    QCOMPARE(RemoteOps::ExportRow(QStringLiteral("b \"quoted\".txt"), QString(),
+                                  0, true),
+             QStringLiteral("\"b \"\"quoted\"\".txt\""));
+  }
+
+  // rclone ends a check with an error when the two sides differ. Whether it
+  // got as far as counting is what tells a difference from a failure.
+  void aDifferenceIsToldFromAFailure() {
+    const RemoteOps::CheckResult same = RemoteOps::ReadCheckOutput(
+        {QStringLiteral("NOTICE: x: 0 differences found"),
+         QStringLiteral("NOTICE: x: 3 matching files")});
+    QVERIFY(same.completed());
+    QVERIFY(same.matched());
+    QCOMPARE(same.matching, 3);
+
+    const RemoteOps::CheckResult differs = RemoteOps::ReadCheckOutput(
+        {QStringLiteral("ERROR : zzz.txt: file not in x"),
+         QStringLiteral("NOTICE: x: 1 differences found"),
+         QStringLiteral("NOTICE: Failed to check: 1 differences found")});
+    QVERIFY(differs.completed());
+    QVERIFY(!differs.matched());
+    QCOMPARE(differs.differences, 1);
+
+    const RemoteOps::CheckResult failed = RemoteOps::ReadCheckOutput(
+        {QStringLiteral("CRITICAL: Failed to create file system")});
+    QVERIFY(!failed.completed());
+  }
+
   // A name that will not do starts nothing, and says why. No job, no process,
   // no row in the history for something that was never attempted.
   void aNameThatWillNotDoStartsNothing() {

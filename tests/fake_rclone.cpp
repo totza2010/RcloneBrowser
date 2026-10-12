@@ -125,6 +125,37 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  // A listing for export, with a notice among the lines as rclone prints
+  // them, and a name with a quote in it.
+  if (std::strcmp(command, "lsl") == 0) {
+    std::printf("   300000 2026-10-12 14:16:41.398206300 films/a.mkv\n");
+    std::printf("2026/10/12 12:00:00 NOTICE: something said in the middle\n");
+    std::printf("     5000 2026-10-11 09:00:00.000000000 b \"quoted\".txt\n");
+    std::printf("        0 2026-01-01 00:00:00.000000000 empty\n");
+    return 0;
+  }
+
+  // A comparison. Differs, and ends in an error as rclone does, when
+  // FAKE_RCLONE_DIFFER is set; fails outright when FAKE_RCLONE_FAIL is.
+  if (std::strcmp(command, "check") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "2026/10/12 12:00:00 CRITICAL: Failed to create "
+                           "file system: didn't find section in config file\n");
+      return 1;
+    }
+    if (std::getenv("FAKE_RCLONE_DIFFER") != nullptr) {
+      std::printf("2026/10/12 12:00:00 ERROR : zzz.txt: file not in fake:a\n");
+      std::printf("2026/10/12 12:00:00 NOTICE: fake:b: 1 differences found\n");
+      std::printf("2026/10/12 12:00:00 NOTICE: fake:b: 2 matching files\n");
+      std::printf("2026/10/12 12:00:00 NOTICE: Failed to check: 1 differences "
+                  "found\n");
+      return 1;
+    }
+    std::printf("2026/10/12 12:00:00 NOTICE: fake:b: 0 differences found\n");
+    std::printf("2026/10/12 12:00:00 NOTICE: fake:b: 3 matching files\n");
+    return 0;
+  }
+
   // Making a folder. Refuses when told to, with a line of the kind rclone
   // prints, so the code that has to pass that line on has one to pass.
   if (std::strcmp(command, "mkdir") == 0 ||

@@ -3,6 +3,8 @@
 #include "job_registry.h"
 #include "utils.h"
 
+#include <QRegularExpression>
+
 namespace {
 
 QString trimSlashes(QString path) {
@@ -312,6 +314,109 @@ RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
     args << QStringLiteral("--dry-run");
   }
   return CopyBetween(move, what.remote, from, destRemote, destPath, args);
+}
+
+RunningJob *Check(const QString &remote, const QString &path,
+                  const QString &otherRemote, const QString &otherPath,
+                  const CheckOptions &options, QString *why) {
+  if (remote == otherRemote && trimSlashes(path) == trimSlashes(otherPath)) {
+    if (why != nullptr) {
+      *why = QStringLiteral("that is the same folder; choose another to "
+                            "compare it with");
+    }
+    return nullptr;
+  }
+
+  const QString source = Target(remote, path);
+  const QString dest = Target(otherRemote, otherPath);
+
+  QStringList command{QStringLiteral("check")};
+  if (options.oneWay) {
+    command << QStringLiteral("--one-way");
+  }
+  if (options.sizeOnly) {
+    command << QStringLiteral("--size-only");
+  }
+  if (options.download) {
+    command << QStringLiteral("--download");
+  }
+  command << source << dest;
+  qCDebug(rbRemote) << "checking" << source << "against" << dest;
+
+  return start(JobKind::Check, command,
+               QStringLiteral("rclone %1").arg(command.join(QLatin1Char(' '))),
+               source, dest);
+}
+
+CheckResult ReadCheckOutput(const QStringList &lines) {
+  static const QRegularExpression differ(
+      QStringLiteral("(\\d+) differences? found"));
+  static const QRegularExpression match(
+      QStringLiteral("(\\d+) matching files?"));
+
+  CheckResult result;
+  for (const QString &line : lines) {
+    const QRegularExpressionMatch d = differ.match(line);
+    if (d.hasMatch()) {
+      result.differences = d.captured(1).toInt();
+    }
+    const QRegularExpressionMatch m = match.match(line);
+    if (m.hasMatch()) {
+      result.matching = m.captured(1).toInt();
+    }
+  }
+  return result;
+}
+
+RunningJob *ListForExport(const QString &remote, const QString &path,
+                          const ExportOptions &options) {
+  const QString target = Target(remote, path);
+
+  QStringList command{QStringLiteral("lsl")};
+  if (options.maxDepth > 0) {
+    command << QStringLiteral("--max-depth")
+            << QString::number(options.maxDepth);
+  }
+  command << target;
+
+  return start(JobKind::Export, command,
+               QStringLiteral("Export \"%1\"").arg(target), target,
+               QString());
+}
+
+bool ParseLslLine(const QString &line, qint64 *size, QString *modified,
+                  QString *name) {
+  static const QRegularExpression pattern(QStringLiteral(
+      "^\\s*(\\d+) "
+      "(\\d\\d\\d\\d-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d)\\.\\d+ (.+)$"));
+  const QRegularExpressionMatch match = pattern.match(line);
+  if (!match.hasMatch()) {
+    return false;
+  }
+  if (size != nullptr) {
+    *size = match.captured(1).toLongLong();
+  }
+  if (modified != nullptr) {
+    *modified = match.captured(2);
+  }
+  if (name != nullptr) {
+    *name = match.captured(3);
+  }
+  return true;
+}
+
+QString ExportRow(const QString &name, const QString &modified, qint64 size,
+                  bool namesOnly) {
+  // A quote inside a name is doubled, which is what a quoted field needs to
+  // survive being read back. The window wrote the name as it stood, so a
+  // file with a quote in its name broke the row it was on.
+  QString quoted = name;
+  quoted.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+
+  if (namesOnly) {
+    return QStringLiteral("\"%1\"").arg(quoted);
+  }
+  return QStringLiteral("\"%1\",\"%2\",%3").arg(quoted, modified).arg(size);
 }
 
 } // namespace RemoteOps

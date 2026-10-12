@@ -1367,27 +1367,18 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                          QTextStream out(file);
                          out.setEncoding(QStringConverter::Utf8);
 
+                         // Taken apart and written out by the core, so the
+                         // file saved here and the file the web page
+                         // downloads are the same file.
                          for (const auto &line : output.split('\n')) {
-
-                           QString lineTmp = line;
-                           lineTmp.replace("\n", "");
-
-                              QRegularExpressionMatch match = re.match(lineTmp);
-                              if (match.hasMatch()) {
-                                  QStringList cap;
-                                  for (int i = 0; i <= re.captureCount(); ++i) {
-                                      cap << match.captured(i);
-                                  }
-
-                             if (txt) {
-                               out << "\"" << cap[3] << "\"" << '\n';
-                             } else {
-                               QString name = cap[3];
-                               out << "\"" << name << "\""
-                                   << ","
-                                   << "\"" << cap[2] << "\""
-                                   << "," << cap[1].toULongLong() << '\n';
-                             }
+                           qint64 size = 0;
+                           QString modified;
+                           QString name;
+                           if (RemoteOps::ParseLslLine(line, &size, &modified,
+                                                       &name)) {
+                             out << RemoteOps::ExportRow(name, modified, size,
+                                                         txt)
+                                 << '\n';
                            }
                          }
                        });

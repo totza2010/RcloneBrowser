@@ -161,4 +161,52 @@ RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
                      const QString &destFolder, bool dryRun,
                      QString *why = nullptr);
 
+// ---- comparing, and listing to a file ---------------------------------------
+
+struct CheckOptions {
+  bool oneWay = false;   // only that everything on the first side is on the second
+  bool sizeOnly = false; // compare sizes and not hashes
+  bool download = false; // compare by downloading both, for backends with no common hash
+};
+
+// Compares two folders and reports what differs. Changes nothing.
+//
+// rclone ends this with an error when the two differ, which makes a
+// difference look like a failure. ReadCheckOutput() tells them apart.
+// Refused when both sides are the same folder: that always matches, and
+// asking is more likely a slip than a question.
+RunningJob *Check(const QString &remote, const QString &path,
+                  const QString &otherRemote, const QString &otherPath,
+                  const CheckOptions &options, QString *why = nullptr);
+
+struct CheckResult {
+  int differences = -1; // -1: rclone never said, so the check did not finish
+  int matching = -1;
+  bool completed() const { return differences >= 0; }
+  bool matched() const { return differences == 0; }
+};
+
+// What a check found, from what rclone printed.
+CheckResult ReadCheckOutput(const QStringList &lines);
+
+struct ExportOptions {
+  int maxDepth = 0; // 0 for all the way down
+};
+
+// Lists every file under a path, for writing out as a file of its own.
+RunningJob *ListForExport(const QString &remote, const QString &path,
+                          const ExportOptions &options);
+
+// One line of that listing -- "  300000 2026-10-12 14:16:41.398206300 a.bin"
+// -- taken apart. False for a line that is not one, which is how the notices
+// rclone prints among them are left out.
+bool ParseLslLine(const QString &line, qint64 *size, QString *modified,
+                  QString *name);
+
+// The line of the exported file for one entry: the name alone, or
+// "name","modified",size. One function, so the file the window saves and the
+// file the page downloads are the same file.
+QString ExportRow(const QString &name, const QString &modified, qint64 size,
+                  bool namesOnly);
+
 } // namespace RemoteOps

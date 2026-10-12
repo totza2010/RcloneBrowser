@@ -1113,6 +1113,80 @@ private slots:
              404);
   }
 
+  // ---- comparing, and exporting ---------------------------------------------
+
+  // Two folders that differ is an answer. rclone reports it by ending in an
+  // error, and passing that on as a failure would tell the caller the check
+  // could not be done when it was done and found something.
+  void aCheckThatFindsDifferencesIsAnAnswerNotAFailure() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray same = ask(
+        "GET", "/api/v1/remotes/fake/check?path=a&to=b", mToken);
+    QCOMPARE(statusOf(same), 200);
+    QCOMPARE(bodyOf(same).object().value(QStringLiteral("matched")).toBool(),
+             true);
+    QCOMPARE(bodyOf(same).object().value(QStringLiteral("matching")).toInt(), 3);
+
+    qputenv("FAKE_RCLONE_DIFFER", "1");
+    const QByteArray differs = ask(
+        "GET", "/api/v1/remotes/fake/check?path=a&to=b", mToken);
+    qunsetenv("FAKE_RCLONE_DIFFER");
+    QCOMPARE(statusOf(differs), 200);
+
+    const QJsonObject object = bodyOf(differs).object();
+    QCOMPARE(object.value(QStringLiteral("matched")).toBool(), false);
+    QCOMPARE(object.value(QStringLiteral("differences")).toInt(), 1);
+    QVERIFY(object.value(QStringLiteral("output")).toString().contains(
+        QStringLiteral("zzz.txt")));
+
+    // And a check that could not be made at all is still a failure.
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    const QByteArray failed = ask(
+        "GET", "/api/v1/remotes/fake/check?path=a&to=b", mToken);
+    qunsetenv("FAKE_RCLONE_FAIL");
+    QCOMPARE(statusOf(failed), 502);
+  }
+
+  void aFolderIsNotCheckedAgainstItself() {
+    QVERIFY(useFakeRclone(1));
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/check?path=a&to=a",
+                          mToken)),
+             400);
+    QCOMPARE(statusOf(ask("GET",
+                          "/api/v1/remotes/fake/check?path=a&to=b&toRemote=none",
+                          mToken)),
+             404);
+  }
+
+  // The exported listing comes back as a file: the rows and nothing else,
+  // with whatever rclone said in between left out.
+  void anExportComesBackAsAFile() {
+    QVERIFY(useFakeRclone(1));
+
+    const QByteArray reply =
+        ask("GET", "/api/v1/remotes/fake/export?path=films", mToken);
+    QCOMPARE(statusOf(reply), 200);
+    QVERIFY(reply.contains("text/csv"));
+    QVERIFY(reply.contains("attachment; filename=\"export.csv\""));
+
+    const QByteArray body = reply.mid(reply.indexOf("\r\n\r\n") + 4);
+    const QList<QByteArray> rows = body.trimmed().split('\n');
+    QCOMPARE(rows.size(), 3);
+    QCOMPARE(rows.at(0),
+             QByteArray("\"films/a.mkv\",\"2026-10-12 14:16:41\",300000"));
+    QVERIFY2(!body.contains("NOTICE"), "a notice ended up in the exported file");
+    QVERIFY(rows.at(1).startsWith("\"b \"\"quoted\"\".txt\""));
+
+    // Names only.
+    const QByteArray names =
+        ask("GET", "/api/v1/remotes/fake/export?path=films&format=txt", mToken);
+    QCOMPARE(statusOf(names), 200);
+    QVERIFY(names.contains("export.txt"));
+    QVERIFY(names.endsWith("\"empty\"\n"));
+  }
+
   void makingAFolderNeedsASecretAndARealRemote() {
     QVERIFY(useFakeRclone(1));
     const QByteArray body = "{\"path\":\"\",\"name\":\"x\"}";

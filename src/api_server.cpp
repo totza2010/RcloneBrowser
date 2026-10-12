@@ -581,19 +581,56 @@ void ApiServer::remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
 
   const QString path = request.queryValue(QStringLiteral("path"));
 
+  const auto flag = [&request](const char *name) {
+    const QString value = request.queryValue(QLatin1String(name)).toLower();
+    return value == QLatin1String("1") || value == QLatin1String("true");
+  };
+  const bool namesOnly =
+      request.queryValue(QStringLiteral("format")) == QLatin1String("txt");
+
   RunningJob *job = nullptr;
   if (question == QLatin1String("size")) {
     job = RemoteOps::Size(remote, path, QStringList(), true);
   } else if (question == QLatin1String("about")) {
     job = RemoteOps::About(remote, true);
+  } else if (question == QLatin1String("check")) {
+    const QString other =
+        request.queryValue(QStringLiteral("toRemote")).isEmpty()
+            ? remote
+            : request.queryValue(QStringLiteral("toRemote"));
+    if (RemoteRegistry::instance().find(other) == nullptr) {
+      refuse(404, QStringLiteral("no_such_remote"),
+             QStringLiteral("no such remote to compare with"));
+      return;
+    }
+
+    RemoteOps::CheckOptions options;
+    options.oneWay = flag("oneWay");
+    options.sizeOnly = flag("sizeOnly");
+    options.download = flag("download");
+
+    QString why;
+    job = RemoteOps::Check(remote, path, other,
+                           request.queryValue(QStringLiteral("to")), options,
+                           &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+  } else if (question == QLatin1String("export")) {
+    RemoteOps::ExportOptions options;
+    options.maxDepth =
+        qMax(0, request.queryValue(QStringLiteral("maxDepth")).toInt());
+    job = RemoteOps::ListForExport(remote, path, options);
   } else {
     job = RemoteOps::Tree(remote, path);
   }
   qCDebug(rbApp) << "API asking" << question << "of" << remote << path;
 
   // Everything rclone prints, because here the output is the answer. Capped,
-  // because a tree of a large remote is not something to hold whole.
-  const int cap = 2 * 1024 * 1024;
+  // because a tree of a large remote is not something to hold whole. A
+  // listing for export is the one that is meant to be large.
+  const int cap = (question == QLatin1String("export") ? 64 : 2) * 1024 * 1024;
   auto said = QSharedPointer<QStringList>::create();
   auto size = QSharedPointer<int>::create(0);
   auto truncated = QSharedPointer<bool>::create(false);
@@ -615,6 +652,59 @@ void ApiServer::remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
     object.insert(QStringLiteral("remote"), remote);
     object.insert(QStringLiteral("path"), RemoteOps::Join(QString(), path));
     object.insert(QStringLiteral("requestId"), job->requestId());
+
+    if (question == QLatin1String("check")) {
+      // rclone ends a check with an error when the two sides differ. That is
+      // the answer to the question, not a failure to answer it -- so it is
+      // told apart by whether rclone got as far as counting.
+      const RemoteOps::CheckResult found = RemoteOps::ReadCheckOutput(*said);
+      if (found.completed()) {
+        object.insert(QStringLiteral("matched"), found.matched());
+        object.insert(QStringLiteral("differences"), found.differences);
+        if (found.matching >= 0) {
+          object.insert(QStringLiteral("matching"), found.matching);
+        }
+        object.insert(QStringLiteral("output"), text);
+        object.insert(QStringLiteral("truncated"), *truncated);
+        socket->write(FormatHttpResponse(200, toJson(object)));
+        return;
+      }
+    }
+
+    if (question == QLatin1String("export") &&
+        job->state() == JobState::Finished) {
+      if (*truncated) {
+        object.insert(QStringLiteral("error"),
+                      QStringLiteral("that listing is too large to send; "
+                                     "narrow it with maxDepth or a folder "
+                                     "further down"));
+        object.insert(QStringLiteral("code"), QStringLiteral("too_large"));
+        socket->write(FormatHttpResponse(413, toJson(object)));
+        return;
+      }
+
+      QByteArray file;
+      for (const QString &line : *said) {
+        qint64 size = 0;
+        QString modified;
+        QString name;
+        if (RemoteOps::ParseLslLine(line, &size, &modified, &name)) {
+          file += RemoteOps::ExportRow(name, modified, size, namesOnly).toUtf8();
+          file += '\n';
+        }
+      }
+
+      QHash<QString, QString> headers;
+      headers.insert(QStringLiteral("Content-Disposition"),
+                     QStringLiteral("attachment; filename=\"export.%1\"")
+                         .arg(namesOnly ? QStringLiteral("txt")
+                                        : QStringLiteral("csv")));
+      socket->write(FormatHttpResponse(
+          200, file, namesOnly ? "text/plain; charset=utf-8"
+                               : "text/csv; charset=utf-8",
+          headers));
+      return;
+    }
 
     if (job->state() != JobState::Finished) {
       object.insert(QStringLiteral("error"),
@@ -1138,9 +1228,10 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   // Nor are these: they run rclone and the answer is what it prints.
   {
     const QStringList parts = segmentsOf(asked.path);
-    static const QStringList questions = {QStringLiteral("size"),
-                                          QStringLiteral("about"),
-                                          QStringLiteral("tree")};
+    static const QStringList questions = {
+        QStringLiteral("size"),  QStringLiteral("about"),
+        QStringLiteral("tree"),  QStringLiteral("check"),
+        QStringLiteral("export")};
     if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         questions.contains(parts.at(2))) {

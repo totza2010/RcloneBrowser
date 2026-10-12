@@ -1014,6 +1014,94 @@ async function copyOrMove(move) {
 $("remote-copy").addEventListener("click", () => copyOrMove(false));
 $("remote-move").addEventListener("click", () => copyOrMove(true));
 
+// ---- comparing two folders, and saving a listing --------------------------
+
+$("remote-check").addEventListener("click", async () => {
+  const path = subject();
+  const what = browsing.remote + ":" + path;
+  const other = await pickFolder(
+    "Compare " + what + " with…", "Compare with this folder", browsing.remote, "");
+  if (!other) return;
+
+  const query = "?path=" + encodeURIComponent(path) +
+    "&to=" + encodeURIComponent(other.path) +
+    "&toRemote=" + encodeURIComponent(other.remote);
+  const title = "Check " + what + " against " + other.remote + ":" + other.path;
+
+  showResult(title, '<p class="muted">comparing… this reads every file on both sides</p>');
+  let answer;
+  try {
+    answer = await api("GET", "/remotes/" + encodeURIComponent(browsing.remote) + "/check" + query);
+  } catch (e) {
+    showResult(title, '<p class="error">could not reach the daemon</p>');
+    return;
+  }
+  if (answer.status !== 200) {
+    showResult(title, '<pre class="error">' + esc(reasonFrom(answer)) + "</pre>");
+    return;
+  }
+
+  // A difference is an answer, not a failure, and is said as one.
+  const d = answer.data;
+  showResult(title,
+    "<p>" + (d.matched
+      ? '<span class="tag finished">the same</span>'
+      : '<span class="tag error">' + d.differences + " difference(s)</span>") +
+    (typeof d.matching === "number" ? "  " + d.matching + " matching file(s)" : "") + "</p>" +
+    "<pre>" + esc(d.output) + "</pre>");
+});
+
+$("remote-export").addEventListener("click", () => {
+  const path = subject();
+  const what = browsing.remote + ":" + path;
+
+  showResult("Export a list of " + what,
+    '<p class="muted">Every file under this folder, as a file to keep.</p>' +
+    '<p><select id="export-format">' +
+      '<option value="csv">name, modified, size (CSV)</option>' +
+      '<option value="txt">names only</option>' +
+    "</select></p>" +
+    '<p><label>How many levels down (0 for all)' +
+      '<input id="export-depth" type="number" min="0" value="0"></label></p>' +
+    '<p><button id="export-go" class="small">Download</button> ' +
+    '<span id="export-state" class="muted"></span></p>');
+
+  $("export-go").addEventListener("click", async () => {
+    const format = $("export-format").value;
+    $("export-state").textContent = "listing… this can take a while";
+
+    // Fetched with the header and then handed over as a file. A plain link
+    // would be simpler and would need the secret in its address.
+    let response;
+    try {
+      response = await fetch(
+        "/api/v1/remotes/" + encodeURIComponent(browsing.remote) + "/export" +
+          "?path=" + encodeURIComponent(path) + "&format=" + format +
+          "&maxDepth=" + encodeURIComponent($("export-depth").value || "0"),
+        { headers: { "Authorization": "Bearer " + secret } });
+    } catch (e) {
+      $("export-state").textContent = "could not reach the daemon";
+      return;
+    }
+    if (response.status !== 200) {
+      let why = "the daemon answered " + response.status;
+      try { why = (await response.json()).error || why; } catch (e) { /* as it is */ }
+      $("export-state").textContent = why;
+      return;
+    }
+
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = (browsing.remote + "-" + (path || "root")).replace(/[^A-Za-z0-9._-]+/g, "_") + "." + format;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    $("export-state").textContent = "saved " + bytes(blob.size);
+  });
+});
+
 // ---- the ones that change something other than a name or a place ---------
 
 // A command whose output is its result, shown in the result box.
