@@ -23,6 +23,13 @@ class RunningJob;
 
 namespace RemoteOps {
 
+// One file or folder on a remote: what a command is to act on.
+struct Item {
+  QString remote;
+  QString path;
+  bool isFolder = false;
+};
+
 // Why this cannot be the name of one new file or folder, or an empty string
 // when it can.
 //
@@ -47,5 +54,36 @@ QString Target(const QString &remote, const QString &path);
 // *why then says what is wrong with it.
 RunningJob *MakeFolder(const QString &remote, const QString &parent,
                        const QString &name, QString *why = nullptr);
+
+// The folder a path is in, and its own name: "a/b/c" is "a/b" and "c". The
+// root of a remote has neither.
+QString ParentOf(const QString &path);
+QString NameOf(const QString &path);
+
+// Gives the file or folder at `path` a new name, in the folder it is already
+// in. Moving it somewhere else is a different command and a different
+// question to be asked -- which is why this takes a name and not a path.
+//
+// Returns nullptr without starting anything when the name is not usable, is
+// the name it already has, or the path is the root of the remote, which has
+// no name to change.
+RunningJob *Rename(const QString &remote, const QString &path,
+                   const QString &newName, QString *why = nullptr);
+
+// Deletes one file, or one folder and everything in it.
+//
+// Whether it is a folder has to be said, and the two are different commands
+// on purpose. A file is removed with "deletefile", which refuses a folder --
+// so being told "file" about something that is really a folder ends in an
+// error from rclone, not in a folder emptied by a request that thought it
+// was removing one thing. The window used "delete" here, which given a
+// folder quietly removes every file under it.
+//
+// A folder is removed with "purge", contents and all. There is no undo for
+// either beyond whatever the backend's own trash does.
+//
+// Refuses the root of a remote outright. Purging a path that is empty is
+// purging everything, and nobody asks for that by leaving a field blank.
+RunningJob *Delete(const Item &item, QString *why = nullptr);
 
 } // namespace RemoteOps

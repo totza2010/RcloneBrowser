@@ -1,8 +1,10 @@
 #include "delete_progress_dialog.h"
 #include "global.h"
+#include "running_job.h"
 #include "utils.h"
 
-DeleteProgressDialog::DeleteProgressDialog(const QList<QStringList> &pDataList,
+DeleteProgressDialog::DeleteProgressDialog(
+    const QList<RemoteOps::Item> &pDataList,
                                            QWidget *parent, bool close)
     : QDialog(parent) {
 
@@ -181,16 +183,29 @@ void DeleteProgressDialog::expand() { ui.buttonShowOutput->setChecked(true); }
 
 void DeleteProgressDialog::allowToClose() { ui.buttonBox->setEnabled(true); }
 
-void DeleteProgressDialog::addNewDeleteProcess(const QStringList &args) {
+void DeleteProgressDialog::addNewDeleteProcess(const RemoteOps::Item &item) {
 
-  if (args.isEmpty()) {
+  // Through the core, like everything else that runs rclone. This built a
+  // QProcess per item here, which is why a deletion left no trace in the
+  // history. See remote_ops.h.
+  QString why;
+  RunningJob *job = RemoteOps::Delete(item, &why);
+  if (job == nullptr) {
+    // Refused before anything ran -- the root of a remote, say. Shown where
+    // rclone's own complaints are shown, and counted as the failure it is.
+    mError = true;
+    ui.output->appendPlainText(why);
+    ui.labelOperation->setStyleSheet(
+        "QLabel { color: red; font-weight: bold; }");
+    ui.labelOperation->setText("Error ");
+    ui.buttonShowOutput->setChecked(true);
+    ui.buttonBox->setEnabled(true);
+    mCancelled = true;
+    mCancelButton->setText("&Close");
     return;
   }
 
-  QProcess *deleteProcess = new QProcess(this);
-  deleteProcess->setProcessChannelMode(QProcess::MergedChannels);
-
-  QObject::connect(deleteProcess, &QProcess::started, this, [=]() {
+  {
     QMutexLocker locker(&deleteProcessMutex);
 
     global.rcloneLsProcessCount++;
@@ -198,18 +213,21 @@ void DeleteProgressDialog::addNewDeleteProcess(const QStringList &args) {
     mDeletingProcessesCount++;
 
     updateInfo();
-  });
+  }
 
-  QObject::connect(deleteProcess,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, [=](int code, QProcess::ExitStatus status) {
+  QObject::connect(job, &RunningJob::outputLine, this,
+                   [=](const QString &line) {
+                     ui.output->appendPlainText(line);
+                     emit outputAvailable(line);
+                   });
+
+  const auto ended = [=](JobState state) {
                      QMutexLocker locker(&deleteProcessMutex);
 
                      global.rcloneLsProcessCount--;
                      mDeletingProcessesCount--;
 
-                     if (status == QProcess::NormalExit && code == 0) {
+                     if (state == JobState::Finished) {
                        mDeleted++;
 
                      } else {
@@ -223,7 +241,6 @@ void DeleteProgressDialog::addNewDeleteProcess(const QStringList &args) {
                      }
 
                      updateInfo();
-                     deleteProcess->deleteLater();
 
                      if (!mQuitting) {
                        if (mItemsToDelete.count() == 0 &&
@@ -260,21 +277,16 @@ void DeleteProgressDialog::addNewDeleteProcess(const QStringList &args) {
                          mCancelButton->setText("&Close");
                        }
                      }
-                   });
+                   };
 
-  QObject::connect(deleteProcess, &QProcess::readyRead, this, [=]() {
-    QString output = deleteProcess->readAll();
-    //    if (trim) {
-    //      output = output.trimmed();
-    //    }
+  QObject::connect(job, &RunningJob::finished, this, ended);
 
-    ui.output->appendPlainText(output);
-
-    emit outputAvailable(output);
-  });
-
-  UseRclonePassword(deleteProcess);
-  deleteProcess->start(GetRclone(), args, QIODevice::ReadOnly);
+  // A job that could not be started at all has ended already, and said so
+  // before anything here was listening. Without this the count of deletions
+  // in progress never comes back down and the dialog waits for ever.
+  if (!job->isRunning()) {
+    ended(job->state());
+  }
 }
 
 void DeleteProgressDialog::updateInfo() {
@@ -308,9 +320,10 @@ void DeleteProgressDialog::deleteProcessor() {
             break;
           }
 
-          QStringList args = mItemsToDelete.takeAt(mItemsToDelete.count() - 1);
+          const RemoteOps::Item item =
+              mItemsToDelete.takeAt(mItemsToDelete.count() - 1);
           rcloneLsProcessesFreeCount--;
-          addNewDeleteProcess(args);
+          addNewDeleteProcess(item);
         }
       }
     }

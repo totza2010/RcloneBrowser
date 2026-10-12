@@ -590,6 +590,52 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     return;
   }
 
+  if (operation == QLatin1String("rename")) {
+    const QString name = given.value(QStringLiteral("name")).toString();
+
+    QString why;
+    RunningJob *job = RemoteOps::Rename(remote, path, name, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("bad_name"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API renaming" << remote << path << "to" << name;
+
+    QJsonObject renamed;
+    renamed.insert(QStringLiteral("remote"), remote);
+    renamed.insert(QStringLiteral("from"), RemoteOps::Join(QString(), path));
+    renamed.insert(QStringLiteral("path"),
+                   RemoteOps::Join(RemoteOps::ParentOf(path), name));
+    answerWhenDone(socket, job, renamed);
+    return;
+  }
+
+  if (operation == QLatin1String("delete")) {
+    // Whether it is a folder has to be said outright, and saying nothing
+    // means "a file" -- the safer of the two to be wrong about, because the
+    // command for a file refuses a folder.
+    RemoteOps::Item item;
+    item.remote = remote;
+    item.path = path;
+    item.isFolder = given.value(QStringLiteral("isDir")).toBool(false);
+
+    QString why;
+    RunningJob *job = RemoteOps::Delete(item, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API deleting" << (item.isFolder ? "folder" : "file")
+                   << remote << path;
+
+    QJsonObject gone;
+    gone.insert(QStringLiteral("remote"), remote);
+    gone.insert(QStringLiteral("path"), RemoteOps::Join(QString(), path));
+    gone.insert(QStringLiteral("isDir"), item.isFolder);
+    answerWhenDone(socket, job, gone);
+    return;
+  }
+
   refuse(404, QStringLiteral("no_such_operation"),
          QStringLiteral("no such operation"));
 }
@@ -873,9 +919,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   // Nor is this: it runs rclone and answers when rclone has finished.
   {
     const QStringList parts = segmentsOf(asked.path);
+    static const QStringList operations = {QStringLiteral("mkdir"),
+                                           QStringLiteral("rename"),
+                                           QStringLiteral("delete")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
-        parts.at(2) == QLatin1String("mkdir")) {
+        operations.contains(parts.at(2))) {
       remoteOperation(socket, asked, parts.at(1), parts.at(2));
       return;
     }

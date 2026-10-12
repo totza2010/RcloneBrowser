@@ -238,7 +238,10 @@ tbody tr:hover { background: var(--panel); }
 .remote-list button.on { border-color: var(--accent); color: var(--accent); }
 .remote-list .type { color: var(--muted); font-size: 12px; display: block; }
 
-.toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+#listing tbody tr { cursor: default; }
+
+.toolbar { align-items: center; display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
 
 .crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
 .crumbs button { background: transparent; border: none; color: var(--accent); font-weight: 400; padding: 3px 4px; }

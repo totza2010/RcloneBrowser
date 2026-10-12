@@ -1,12 +1,16 @@
 #pragma once
 
+#include "remote_ops.h"
 #include "ui_delete_progress_dialog.h"
 
 class DeleteProgressDialog : public QDialog {
   Q_OBJECT
 
 public:
-  DeleteProgressDialog(const QList<QStringList> &pDataList,
+  // What to delete, not how: each item is handed to RemoteOps::Delete, so a
+  // deletion from here goes the same road as one asked for over the API --
+  // through the registry, into the history, with a log.
+  DeleteProgressDialog(const QList<RemoteOps::Item> &items,
                        QWidget *parent = nullptr, bool close = true);
 
   ~DeleteProgressDialog();
@@ -20,7 +24,7 @@ signals:
 private slots:
 
   // start single rclone purge/delete
-  void addNewDeleteProcess(const QStringList &args);
+  void addNewDeleteProcess(const RemoteOps::Item &item);
 
   // process queue of items to delete
   void deleteProcessor();
@@ -40,7 +44,7 @@ private:
 
   QPushButton *mCancelButton;
 
-  QList<QStringList> mItemsToDelete;
+  QList<RemoteOps::Item> mItemsToDelete;
 
   int mTotalToDelete = 0;
   int mDeleting = 0;

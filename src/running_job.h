@@ -50,6 +50,8 @@ enum class JobKind {
   // same reason as the tools above: the history is read by a person, and
   // "made a folder" is not the same news as "deleted one".
   Mkdir,
+  Rename,
+  Delete,
 };
 
 enum class JobState {

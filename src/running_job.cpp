@@ -68,6 +68,10 @@ QString JobKindToString(JobKind kind) {
     return QStringLiteral("cleanup");
   case JobKind::Mkdir:
     return QStringLiteral("mkdir");
+  case JobKind::Rename:
+    return QStringLiteral("rename");
+  case JobKind::Delete:
+    return QStringLiteral("delete");
   }
   return QStringLiteral("transfer");
 }

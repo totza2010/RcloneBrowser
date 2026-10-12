@@ -77,4 +77,74 @@ RunningJob *MakeFolder(const QString &remote, const QString &parent,
                target);
 }
 
+QString ParentOf(const QString &path) {
+  const QString clean = trimSlashes(path);
+  const int slash = clean.lastIndexOf(QLatin1Char('/'));
+  return slash < 0 ? QString() : clean.left(slash);
+}
+
+QString NameOf(const QString &path) {
+  const QString clean = trimSlashes(path);
+  return clean.mid(clean.lastIndexOf(QLatin1Char('/')) + 1);
+}
+
+RunningJob *Rename(const QString &remote, const QString &path,
+                   const QString &newName, QString *why) {
+  const auto refuse = [why](const QString &reason) {
+    if (why != nullptr) {
+      *why = reason;
+    }
+    return nullptr;
+  };
+
+  const QString from = trimSlashes(path);
+  if (from.isEmpty()) {
+    return refuse(QStringLiteral("the root of a remote has no name to change"));
+  }
+
+  const QString problem = WhyNotAName(newName);
+  if (!problem.isEmpty()) {
+    return refuse(problem);
+  }
+  if (newName.trimmed() == NameOf(from)) {
+    // Not an error rclone would report: it would move a thing onto itself
+    // and call that success. Said here so the caller is not told it worked.
+    return refuse(QStringLiteral("that is already its name"));
+  }
+
+  const QString source = Target(remote, from);
+  const QString dest = Target(remote, Join(ParentOf(from), newName));
+  qCDebug(rbRemote) << "renaming" << source << "to" << dest;
+
+  return start(JobKind::Rename,
+               QStringList{QStringLiteral("moveto"), source, dest},
+               QStringLiteral("Rename: \"%1\" to \"%2\"")
+                   .arg(source, newName.trimmed()),
+               source, dest);
+}
+
+RunningJob *Delete(const Item &item, QString *why) {
+  const QString path = trimSlashes(item.path);
+  if (path.isEmpty()) {
+    if (why != nullptr) {
+      *why = QStringLiteral(
+          "that is the whole remote; deleting it is not done from here");
+    }
+    return nullptr;
+  }
+
+  const QString target = Target(item.remote, path);
+  qCDebug(rbRemote) << "deleting" << (item.isFolder ? "folder" : "file")
+                    << target;
+
+  return start(JobKind::Delete,
+               QStringList{item.isFolder ? QStringLiteral("purge")
+                                         : QStringLiteral("deletefile"),
+                           target},
+               (item.isFolder ? QStringLiteral("Delete folder: \"%1\"")
+                              : QStringLiteral("Delete file: \"%1\""))
+                   .arg(target),
+               target, QString());
+}
+
 } // namespace RemoteOps

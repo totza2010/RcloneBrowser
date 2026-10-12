@@ -47,6 +47,60 @@ private slots:
              QStringLiteral("gdrive:films/2026"));
   }
 
+  void aPathIsAFolderAndAName() {
+    QCOMPARE(RemoteOps::ParentOf(QStringLiteral("a/b/c")), QStringLiteral("a/b"));
+    QCOMPARE(RemoteOps::NameOf(QStringLiteral("a/b/c")), QStringLiteral("c"));
+
+    // At the top of a remote there is a name and no folder above it.
+    QCOMPARE(RemoteOps::ParentOf(QStringLiteral("films")), QString());
+    QCOMPARE(RemoteOps::NameOf(QStringLiteral("films")), QStringLiteral("films"));
+
+    // Slashes at the ends change nothing.
+    QCOMPARE(RemoteOps::ParentOf(QStringLiteral("/a/b/")), QStringLiteral("a"));
+    QCOMPARE(RemoteOps::NameOf(QStringLiteral("/a/b/")), QStringLiteral("b"));
+  }
+
+  // Renaming takes a name, not a path: where a thing is does not change.
+  // Everything refused here is refused before rclone is started.
+  void renamingIsRefusedWhenThereIsNothingToDo() {
+    QString why;
+
+    // The root of a remote has no name.
+    QVERIFY(RemoteOps::Rename(QStringLiteral("gdrive"), QString(),
+                              QStringLiteral("x"), &why) == nullptr);
+    QVERIFY(!why.isEmpty());
+
+    // The name it already has. rclone would move it onto itself and report
+    // success, and the caller would be told something had happened.
+    why.clear();
+    QVERIFY(RemoteOps::Rename(QStringLiteral("gdrive"),
+                              QStringLiteral("films/2026"),
+                              QStringLiteral("2026"), &why) == nullptr);
+    QVERIFY(!why.isEmpty());
+
+    // A "name" that would put it somewhere else.
+    why.clear();
+    QVERIFY(RemoteOps::Rename(QStringLiteral("gdrive"),
+                              QStringLiteral("films/2026"),
+                              QStringLiteral("../elsewhere"), &why) == nullptr);
+    QVERIFY(!why.isEmpty());
+  }
+
+  // The whole remote is never what "delete" means from here, however the
+  // empty path is spelled.
+  void deletingRefusesTheRootOfARemote() {
+    for (const char *path : {"", "/", "//", "   "}) {
+      RemoteOps::Item item;
+      item.remote = QStringLiteral("gdrive");
+      item.path = QString::fromLatin1(path).trimmed();
+      item.isFolder = true;
+
+      QString why;
+      QVERIFY2(RemoteOps::Delete(item, &why) == nullptr, path);
+      QVERIFY(!why.isEmpty());
+    }
+  }
+
   // A name that will not do starts nothing, and says why. No job, no process,
   // no row in the history for something that was never attempted.
   void aNameThatWillNotDoStartsNothing() {

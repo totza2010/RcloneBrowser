@@ -34,7 +34,11 @@ const state = {
 };
 
 // Where the file browser is standing.
-const browsing = { remote: "", path: "", entries: [], error: "", loading: false };
+const browsing = {
+  remote: "", path: "", entries: [], error: "", loading: false,
+  // The row a command would act on. One for now; deleting will want several.
+  chosen: "",
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -676,7 +680,8 @@ function drawListing() {
   });
 
   const rows = sorted.map((entry) => (
-    "<tr>" +
+    '<tr data-entry="' + esc(entry.path) + '"' +
+      (entry.path === browsing.chosen ? ' class="chosen"' : "") + ">" +
       "<td>" +
         (entry.isDir
           ? '<button class="entry-name dir" data-go="' + esc(entry.path) + '">📁 ' + esc(entry.name) + "</button>"
@@ -690,11 +695,34 @@ function drawListing() {
   $("listing").innerHTML =
     "<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>" +
     rows.join("") + "</tbody></table>";
+  drawChosen();
 }
+
+// What the commands that act on one thing are allowed to do right now.
+function drawChosen() {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  $("remote-rename").disabled = !entry;
+  $("remote-delete").disabled = !entry;
+  $("remote-chosen").textContent = entry ? entry.name : "";
+  for (const row of document.querySelectorAll("#listing tbody tr")) {
+    row.classList.toggle("chosen", row.dataset.entry === browsing.chosen);
+  }
+}
+
+// Clicking a row chooses it. Clicking a folder's name still opens it, which
+// is handled with the other buttons below and never reaches here.
+$("listing").addEventListener("click", (event) => {
+  if (event.target.closest("button")) return;
+  const row = event.target.closest("tr[data-entry]");
+  if (!row) return;
+  browsing.chosen = browsing.chosen === row.dataset.entry ? "" : row.dataset.entry;
+  drawChosen();
+});
 
 async function browse(remote, path) {
   browsing.remote = remote;
   browsing.path = path || "";
+  browsing.chosen = "";
   browsing.entries = [];
   browsing.error = "";
   browsing.loading = true;
@@ -736,6 +764,38 @@ $("remote-mkdir").addEventListener("click", async () => {
     "POST", "/remotes/" + encodeURIComponent(browsing.remote) + "/mkdir",
     { path: browsing.path, name: name });
   if (made) browse(browsing.remote, browsing.path);
+});
+
+$("remote-rename").addEventListener("click", async () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (!entry) return;
+
+  const name = prompt("New name for " + entry.name, entry.name);
+  if (name === null || !name.trim() || name.trim() === entry.name) return;
+
+  const renamed = await command(
+    "POST", "/remotes/" + encodeURIComponent(browsing.remote) + "/rename",
+    { path: entry.path, name: name });
+  if (renamed) browse(browsing.remote, browsing.path);
+});
+
+$("remote-delete").addEventListener("click", async () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (!entry) return;
+
+  // Says exactly what will go, and that a folder takes its contents with it.
+  // There is no undo, so the question names the thing rather than asking
+  // "are you sure?" about something the reader has to remember.
+  const what = browsing.remote + ":" + entry.path;
+  const question = entry.isDir
+    ? "Delete the folder\n\n" + what + "\n\nand everything inside it? This cannot be undone."
+    : "Delete the file\n\n" + what + "\n\n? This cannot be undone.";
+  if (!confirm(question)) return;
+
+  const gone = await command(
+    "POST", "/remotes/" + encodeURIComponent(browsing.remote) + "/delete",
+    { path: entry.path, isDir: entry.isDir });
+  if (gone) browse(browsing.remote, browsing.path);
 });
 
 // ---- a job's log ----------------------------------------------------------

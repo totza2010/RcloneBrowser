@@ -786,6 +786,118 @@ private slots:
     QCOMPARE(RunHistory::count(), before);
   }
 
+  // Renaming, from outside the window. The thing stays where it is and gets
+  // a new name; the answer says where it now is, so the caller does not have
+  // to work that out.
+  void aThingCanBeRenamedThroughTheApi() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/rename", mToken,
+             "{\"path\":\"films/2026/old.mkv\",\"name\":\"new.mkv\"}");
+    QCOMPARE(statusOf(reply), 200);
+
+    const QJsonObject object = bodyOf(reply).object();
+    QCOMPARE(object.value(QStringLiteral("from")).toString(),
+             QStringLiteral("films/2026/old.mkv"));
+    QCOMPARE(object.value(QStringLiteral("path")).toString(),
+             QStringLiteral("films/2026/new.mkv"));
+
+    const JobRunRecord row = RunHistory::find(
+        object.value(QStringLiteral("requestId")).toString());
+    QCOMPARE(row.kind, QStringLiteral("rename"));
+    QCOMPARE(row.source, QStringLiteral("fake:films/2026/old.mkv"));
+    QCOMPARE(row.dest, QStringLiteral("fake:films/2026/new.mkv"));
+  }
+
+  void renamingIsRefusedBeforeAnythingRuns() {
+    QVERIFY(useFakeRclone(1));
+    const int before = RunHistory::count();
+
+    for (const char *body :
+         {"{\"path\":\"\",\"name\":\"x\"}",                  // the root
+          "{\"path\":\"films/a\",\"name\":\"a\"}",           // same name
+          "{\"path\":\"films/a\",\"name\":\"../b\"}",        // elsewhere
+          "{\"path\":\"films/a\",\"name\":\"\"}"}) {         // nothing
+      QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/rename", mToken,
+                             body)),
+               400);
+    }
+    QCOMPARE(RunHistory::count(), before);
+  }
+
+  void aRenameThatFailsSaysWhy() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/rename", mToken,
+             "{\"path\":\"films/a\",\"name\":\"b\"}");
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    QCOMPARE(statusOf(reply), 502);
+    QVERIFY(!bodyOf(reply).object().value(QStringLiteral("error"))
+                 .toString().isEmpty());
+  }
+
+  // Deleting, from outside the window. What ran is in the history, which is
+  // the first place anybody looks when something is gone.
+  void aFileAndAFolderAreDeletedByDifferentCommands() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    const QByteArray file =
+        send("POST", "/api/v1/remotes/fake/delete", mToken,
+             "{\"path\":\"films/old.mkv\"}");
+    QCOMPARE(statusOf(file), 200);
+    QCOMPARE(bodyOf(file).object().value(QStringLiteral("isDir")).toBool(),
+             false);
+
+    const QByteArray folder =
+        send("POST", "/api/v1/remotes/fake/delete", mToken,
+             "{\"path\":\"films/2019\",\"isDir\":true}");
+    QCOMPARE(statusOf(folder), 200);
+
+    const JobRunRecord fileRow = RunHistory::find(
+        bodyOf(file).object().value(QStringLiteral("requestId")).toString());
+    const JobRunRecord folderRow = RunHistory::find(
+        bodyOf(folder).object().value(QStringLiteral("requestId")).toString());
+    QCOMPARE(fileRow.kind, QStringLiteral("delete"));
+    QCOMPARE(fileRow.source, QStringLiteral("fake:films/old.mkv"));
+
+    // Said nothing about being a folder: treated as a file, and described so.
+    QVERIFY2(fileRow.info.startsWith(QStringLiteral("Delete file")),
+             qPrintable(fileRow.info));
+    QVERIFY2(folderRow.info.startsWith(QStringLiteral("Delete folder")),
+             qPrintable(folderRow.info));
+  }
+
+  // The one that must never work. An empty path is the whole remote, and a
+  // field left blank is not a request to delete everything.
+  void theWholeRemoteCannotBeDeletedByLeavingThePathEmpty() {
+    QVERIFY(useFakeRclone(1));
+    const int before = RunHistory::count();
+
+    for (const char *body :
+         {"{\"path\":\"\",\"isDir\":true}", "{\"isDir\":true}",
+          "{\"path\":\"/\",\"isDir\":true}", "{\"path\":\"///\"}", "{}"}) {
+      const QByteArray reply =
+          send("POST", "/api/v1/remotes/fake/delete", mToken, body);
+      QCOMPARE(statusOf(reply), 400);
+    }
+    QCOMPARE(RunHistory::count(), before);
+  }
+
+  void aDeleteThatFailsSaysWhy() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    const QByteArray reply =
+        send("POST", "/api/v1/remotes/fake/delete", mToken,
+             "{\"path\":\"films/a\",\"isDir\":true}");
+    qunsetenv("FAKE_RCLONE_FAIL");
+    QCOMPARE(statusOf(reply), 502);
+  }
+
   void makingAFolderNeedsASecretAndARealRemote() {
     QVERIFY(useFakeRclone(1));
     const QByteArray body = "{\"path\":\"\",\"name\":\"x\"}";

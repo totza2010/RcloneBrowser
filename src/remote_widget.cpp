@@ -686,24 +686,24 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                  "\""),
         QLineEdit::Normal, name);
     if (!name.isEmpty()) {
-      QProcess process;
-      UseRclonePassword(&process);
-      process.setProgram(GetRclone());
-      process.setArguments(QStringList()
-                           << "moveto" << GetRcloneConf()
-                           << GetRemoteModeRcloneOptions()
-                           << GetDefaultOptionsList("defaultRcloneOptions")
-                           << remote + ":" + path
-                           << remote + ":" +
-                                  model->path(index.parent()).filePath(name));
-      process.setProcessChannelMode(QProcess::MergedChannels);
+      // Through the core. See remote_ops.h.
+      QString why;
+      RunningJob *job = RemoteOps::Rename(remote, path, name, &why);
+      if (job == nullptr) {
+        // Typing the name it already has is not worth a warning; anything
+        // else that stopped it is.
+        if (name.trimmed() != RemoteOps::NameOf(path)) {
+          QMessageBox::warning(this, "Rename", why);
+        }
+        return;
+      }
 
       ProgressDialog progress(
           "Rename", "Renaming...",
           "\"" + metrix.elidedText(pathMsg, Qt::ElideMiddle, 500) + "\"",
-          &process, this);
+          job, this);
       if (progress.exec() == QDialog::Accepted) {
-        model->rename(index, name);
+        model->rename(index, name.trimmed());
       }
     }
   });
@@ -1019,8 +1019,8 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (button == QMessageBox::Yes) {
 
-      // list of rclone args for delete operations
-      QList<QStringList> pDataList;
+      // What is to go. How each is deleted is the core's business.
+      QList<RemoteOps::Item> pDataList;
 
       for (int i = 0; i < selection.count(); i++) {
 
@@ -1029,13 +1029,11 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
         QString path = model->path(index).path();
         QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
-        QStringList args;
-        args << (model->isFolder(index) ? "purge" : "delete") << GetRcloneConf()
-             << GetRemoteModeRcloneOptions()
-             << GetDefaultOptionsList("defaultRcloneOptions")
-             << remote + ":" + path;
-
-        pDataList.append(args);
+        RemoteOps::Item item;
+        item.remote = remote;
+        item.path = path;
+        item.isFolder = model->isFolder(index);
+        pDataList.append(item);
       }
 
       DeleteProgressDialog deleteProgress(pDataList, this, true);
