@@ -347,6 +347,57 @@
     </form>
   </div>
 
+  <!-- A schedule: which task, and when. -->
+  <div id="schedbox" class="modal hidden">
+    <form id="sched-form" class="modal-box wide">
+      <h2 id="sched-title"></h2>
+      <label>Task
+        <select id="sched-task"></select>
+      </label>
+      <label>Name
+        <input id="sched-name" type="text" placeholder="left empty, it takes the task's name">
+      </label>
+
+      <fieldset>
+        <legend>When</legend>
+        <label class="check"><input type="radio" name="sched-mode" value="daily"> On these days, at a time</label>
+        <div id="sched-daily" class="sched-daily">
+          <span class="days">
+            <label class="check"><input type="checkbox" data-day="mon"> Mon</label>
+            <label class="check"><input type="checkbox" data-day="tue"> Tue</label>
+            <label class="check"><input type="checkbox" data-day="wed"> Wed</label>
+            <label class="check"><input type="checkbox" data-day="thu"> Thu</label>
+            <label class="check"><input type="checkbox" data-day="fri"> Fri</label>
+            <label class="check"><input type="checkbox" data-day="sat"> Sat</label>
+            <label class="check"><input type="checkbox" data-day="sun"> Sun</label>
+          </span>
+          <input id="sched-time" type="time" required>
+        </div>
+        <label class="check"><input type="radio" name="sched-mode" value="cron"> By a cron expression</label>
+        <div id="sched-cronwrap">
+          <input id="sched-cron" type="text" spellcheck="false" placeholder="30 6,18 * * MON-FRI">
+          <span class="note">minute · hour · day of month · month · day of week</span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>How</legend>
+        <select id="sched-runas">
+          <option value="now">Run immediately when it comes due</option>
+          <option value="queue">Add to the queue when it comes due</option>
+        </select>
+        <label class="check"><input type="checkbox" id="sched-active"> Switched on</label>
+      </fieldset>
+
+      <p class="muted">The time is the clock of the machine the program runs on.</p>
+      <p id="sched-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" id="sched-cancel" class="ghost">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Choosing a folder on a remote: where a copy or a move should go. -->
   <div id="pickbox" class="modal hidden">
     <div class="modal-box wide">

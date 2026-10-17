@@ -7,6 +7,8 @@
 #include "list_of_job_options.h"
 #include "remote_registry.h"
 #include "run_history.h"
+#include "scheduler_store.h"
+#include "schedule.h"
 #include "utils.h"
 
 #include <QCoreApplication>
@@ -605,6 +607,159 @@ private slots:
              false);
     QCOMPARE(statusOf(ask("GET", "/api/v1/rclone/flags", QByteArray())), 401);
     qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // ---- writing schedules -----------------------------------------------------
+
+  // A task put on a schedule, changed, switched and taken off again.
+  void aTaskCanBePutOnAScheduleAndTakenOff() {
+    JobOptions *task = makeTask(QStringLiteral("to be scheduled"));
+    const QString taskId = task->uniqueId.toString();
+    const int before = SchedulerStore::instance().count();
+
+    QJsonObject asked;
+    asked.insert(QStringLiteral("taskId"), taskId);
+    asked.insert(QStringLiteral("days"),
+                 QJsonArray{QStringLiteral("mon"), QStringLiteral("fri")});
+    asked.insert(QStringLiteral("time"), QStringLiteral("06:30"));
+    asked.insert(QStringLiteral("runAs"), QStringLiteral("queue"));
+    asked.insert(QStringLiteral("active"), true);
+
+    const QByteArray made =
+        send("POST", "/api/v1/schedules", mToken,
+             QJsonDocument(asked).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(made), 201);
+    const QJsonObject schedule = bodyOf(made).object();
+    const QString id = schedule.value(QStringLiteral("id")).toString();
+    QVERIFY(!id.isEmpty());
+    // Named after its task when nobody named it.
+    QCOMPARE(schedule.value(QStringLiteral("name")).toString(),
+             QStringLiteral("to be scheduled"));
+    QCOMPARE(schedule.value(QStringLiteral("taskName")).toString(),
+             QStringLiteral("to be scheduled"));
+    QCOMPARE(schedule.value(QStringLiteral("days")).toArray().size(), 2);
+    QVERIFY(!schedule.value(QStringLiteral("nextRun")).toString().isEmpty());
+    QCOMPARE(SchedulerStore::instance().count(), before + 1);
+
+    // It is the store's, which is what the clock reads.
+    const Schedule *stored = SchedulerStore::instance().find(id);
+    QVERIFY(stored != nullptr);
+    QCOMPARE(stored->executionMode, 1);
+    QVERIFY(stored->monday && stored->friday && !stored->tuesday);
+    QVERIFY(stored->active);
+
+    const QByteArray target =
+        "/api/v1/schedules/" + QUrl::toPercentEncoding(id);
+
+    // Changing says only what changes.
+    const QByteArray changed =
+        send("PUT", target, mToken, "{\"time\":\"18:05\",\"name\":\"evening\"}");
+    QCOMPARE(statusOf(changed), 200);
+    QCOMPARE(bodyOf(changed).object().value(QStringLiteral("time")).toString(),
+             QStringLiteral("18:05"));
+    QCOMPARE(bodyOf(changed).object().value(QStringLiteral("runAs")).toString(),
+             QStringLiteral("queue"));
+    QCOMPARE(SchedulerStore::instance().find(id)->name,
+             QStringLiteral("evening"));
+
+    // A change that is wrong changes nothing.
+    QCOMPARE(statusOf(send("PUT", target, mToken,
+                           "{\"name\":\"half\",\"time\":\"25:00\"}")),
+             400);
+    QCOMPARE(statusOf(send("PUT", target, mToken, "{\"days\":[]}")), 400);
+    QCOMPARE(SchedulerStore::instance().find(id)->name,
+             QStringLiteral("evening"));
+
+    // Its own switch.
+    QCOMPARE(statusOf(ask("POST", target + "/disable", mToken)), 200);
+    QVERIFY(!SchedulerStore::instance().find(id)->active);
+    QCOMPARE(statusOf(ask("POST", target + "/enable", mToken)), 200);
+    QVERIFY(SchedulerStore::instance().find(id)->active);
+
+    // The task cannot be taken from under it.
+    const QByteArray taskTarget =
+        "/api/v1/tasks/" + QUrl::toPercentEncoding(taskId);
+    const QByteArray held = ask("DELETE", taskTarget, mToken);
+    QCOMPARE(statusOf(held), 409);
+    QCOMPARE(bodyOf(held).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("scheduled"));
+
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 404);
+    QCOMPARE(SchedulerStore::instance().count(), before);
+    // And now it can.
+    QCOMPARE(statusOf(ask("DELETE", taskTarget, mToken)), 200);
+  }
+
+  void aScheduleThatCouldNotRunIsRefused() {
+    JobOptions *task = makeTask(QStringLiteral("for refusals"));
+    const QString taskId = task->uniqueId.toString();
+    const int before = SchedulerStore::instance().count();
+
+    // About no task, or one that is not there.
+    QCOMPARE(statusOf(send("POST", "/api/v1/schedules", mToken, "{}")), 400);
+    const QByteArray nothing =
+        send("POST", "/api/v1/schedules", mToken, "{\"taskId\":\"{nope}\"}");
+    QCOMPARE(statusOf(nothing), 400);
+    QCOMPARE(bodyOf(nothing).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("no_such_task"));
+
+    // A cron expression nobody could read.
+    QJsonObject cron;
+    cron.insert(QStringLiteral("taskId"), taskId);
+    cron.insert(QStringLiteral("mode"), QStringLiteral("cron"));
+    cron.insert(QStringLiteral("cron"), QStringLiteral("whenever"));
+    const QByteArray bad =
+        send("POST", "/api/v1/schedules", mToken,
+             QJsonDocument(cron).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(bad), 400);
+    QVERIFY(bodyOf(bad).object().value(QStringLiteral("error")).toString()
+                .contains(QStringLiteral("cron")));
+
+    // A mount is not something to start every morning.
+    JobOptions *mount = makeTask(QStringLiteral("a mount"));
+    mount->operation = JobOptions::Mount;
+    QJsonObject onMount;
+    onMount.insert(QStringLiteral("taskId"), mount->uniqueId.toString());
+    QCOMPARE(statusOf(send("POST", "/api/v1/schedules", mToken,
+                           QJsonDocument(onMount).toJson(QJsonDocument::Compact))),
+             400);
+
+    QCOMPARE(statusOf(send("PUT", "/api/v1/schedules/{nope}", mToken, "{}")),
+             404);
+    QCOMPARE(statusOf(ask("POST", "/api/v1/schedules/{nope}/enable", mToken)),
+             404);
+    QCOMPARE(SchedulerStore::instance().count(), before);
+
+    // And none of it without a secret.
+    QCOMPARE(statusOf(send("POST", "/api/v1/schedules", QByteArray(), "{}")),
+             401);
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/schedules/x", QByteArray())), 401);
+    QCOMPARE(statusOf(ask("POST", "/api/v1/scheduler/pause", QByteArray())),
+             401);
+
+    ListOfJobOptions::getInstance()->Forget(task);
+    ListOfJobOptions::getInstance()->Forget(mount);
+  }
+
+  // The whole scheduler has a switch too, and it is the store's.
+  void theSchedulerCanBeSwitchedOffAndOn() {
+    const bool was = SchedulerStore::instance().isRunning();
+
+    QCOMPARE(statusOf(ask("POST", "/api/v1/scheduler/pause", mToken)), 200);
+    QVERIFY(!SchedulerStore::instance().isRunning());
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/system", mToken))
+                 .object().value(QStringLiteral("schedulerRunning")).toBool(),
+             false);
+
+    const QByteArray on = ask("POST", "/api/v1/scheduler/start", mToken);
+    QCOMPARE(statusOf(on), 200);
+    QCOMPARE(bodyOf(on).object().value(QStringLiteral("running")).toBool(), true);
+    QVERIFY(SchedulerStore::instance().isRunning());
+
+    if (!was) {
+      SchedulerStore::instance().pause();
+    }
   }
 
   // What the window shows on its "rclone cmd" tab: the command, and nothing

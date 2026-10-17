@@ -185,6 +185,15 @@ private:
 
   void restoreSchedulersFromFile();
 
+  // Makes the tab match the store when something else has changed it -- the
+  // API, which is to say the web page. See followSchedulerStore().
+  void followSchedulerStore();
+
+  // True while this window is itself writing the schedules, so that it does
+  // not take its own save for somebody else's change.
+  bool mSavingSchedules = false;
+  bool mSchedulerShownRunning = false;
+
   // Draws the Scheduler tab from the counters and the global on/off, and is
   // the only thing that does. See docs/SCHEDULER-MOVE.md.
   void refreshSchedulerView();

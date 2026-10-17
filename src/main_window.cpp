@@ -3381,6 +3381,18 @@ void MainWindow::refreshSchedulerView() {
 // Two clocks would each start the schedule that came due, so this window no
 // longer looks for itself. See docs/LAYER-SPLIT.md.
 void MainWindow::watchAppCore() {
+  mSchedulerShownRunning = SchedulerStore::instance().isRunning();
+  QObject::connect(&SchedulerStore::instance(), &SchedulerStore::changed, this,
+                   [this]() {
+                     if (mSavingSchedules) {
+                       return; // this window's own save
+                     }
+                     // Not in the middle of whatever caused it: a card may
+                     // be what is running right now.
+                     QTimer::singleShot(0, this,
+                                        [this]() { followSchedulerStore(); });
+                   });
+
   QObject::connect(&AppCore::instance(), &AppCore::ticked, this, [this]() {
     for (SchedulerWidget *widget : schedulerWidgets()) {
       widget->refreshNextRun();
@@ -3956,7 +3968,100 @@ bool MainWindow::saveSchedulerFile(void) {
     schedules.append(Schedule::fromArgs(scheduler->getSchedulerParameters()));
   }
 
-  return SchedulerStore::instance().setAll(schedules);
+  mSavingSchedules = true;
+  const bool ok = SchedulerStore::instance().setAll(schedules);
+  mSavingSchedules = false;
+  return ok;
+}
+
+// The other direction, which did not exist.
+//
+// This window holds the schedules as the cards on its tab and, whenever one
+// is edited, writes all of them over whatever the store has. That was the
+// whole arrangement while the window was the only thing that could change a
+// schedule. With the API able to, a schedule made from the web page would
+// be in the store and not on the tab -- and the next card edited here would
+// write the tab over the store and delete it without a word.
+//
+// So when the store changes and it was not this window that changed it, the
+// tab is compared with the store, and rebuilt from it if they differ. What
+// is compared is what a schedule *is* -- which task, when, switched on or
+// not -- and not what its last run did, which the clock writes all day and
+// the cards hear about by another road.
+void MainWindow::followSchedulerStore() {
+  const auto whatItIs = [](const Schedule &s) {
+    return QStringList{s.id,
+                       s.name,
+                       s.taskId,
+                       QString::number(s.active),
+                       QString::number(s.dailyMode),
+                       QString::number(s.cronMode),
+                       QString::number(s.monday) + QString::number(s.tuesday) +
+                           QString::number(s.wednesday) +
+                           QString::number(s.thursday) +
+                           QString::number(s.friday) +
+                           QString::number(s.saturday) +
+                           QString::number(s.sunday),
+                       QString::number(s.hour * 60 + s.minute),
+                       s.cron,
+                       QString::number(s.executionMode)}
+        .join(QLatin1Char('\x1f'));
+  };
+
+  QStringList shown;
+  for (SchedulerWidget *widget : schedulerWidgets()) {
+    shown << whatItIs(Schedule::fromArgs(widget->getSchedulerParameters()));
+  }
+  QStringList stored;
+  for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
+    // The tab does not show a schedule whose task is gone; see
+    // restoreSchedulersFromFile().
+    if (ListOfJobOptions::getInstance()->find(schedule.taskId)) {
+      stored << whatItIs(schedule);
+    }
+  }
+  shown.sort();
+  stored.sort();
+
+  if (shown != stored) {
+    qCDebug(rbSched) << "the schedules were changed from outside the window;"
+                     << "redrawing" << stored.size();
+    for (SchedulerWidget *widget : schedulerWidgets()) {
+      // Each card is followed by its separator line in the layout.
+      const int at = ui.schedulers->indexOf(widget);
+      QLayoutItem *after = ui.schedulers->itemAt(at + 1);
+      QWidget *line = after != nullptr ? after->widget() : nullptr;
+
+      // Cut off first: a card being taken away must not announce that it
+      // was closed, because closing is how a card asks to be saved.
+      widget->disconnect();
+      ui.schedulers->removeWidget(widget);
+      widget->deleteLater();
+      if (qobject_cast<QFrame *>(line) != nullptr &&
+          qobject_cast<SchedulerWidget *>(line) == nullptr) {
+        ui.schedulers->removeWidget(line);
+        line->deleteLater();
+      }
+    }
+    restoreSchedulersFromFile();
+    ui.noSchedulesAvailable->setVisible(ui.schedulers->count() == 2);
+    // Made afresh, the cards do not know the scheduler is off.
+    mSchedulerShownRunning = true;
+  }
+
+  // The switch for the whole scheduler is in the store as well.
+  const bool running = SchedulerStore::instance().isRunning();
+  if (running != mSchedulerShownRunning) {
+    mSchedulerShownRunning = running;
+    for (SchedulerWidget *widget : schedulerWidgets()) {
+      if (running) {
+        widget->startScheduler();
+      } else {
+        widget->stopScheduler();
+      }
+    }
+  }
+  refreshSchedulerView();
 }
 
 void MainWindow::addSavedTransfer(const QString &uniqueId, bool dryRun,

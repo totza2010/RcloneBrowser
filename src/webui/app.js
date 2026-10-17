@@ -515,6 +515,14 @@ function drawQueue() {
     : '<p class="empty">The queue is empty.</p>';
 }
 
+// The schedules that run a task, said on the task: when, and whether on.
+function scheduledLine(task) {
+  const mine = state.schedules.filter((s) => s.taskId === task.id);
+  if (!mine.length) return "";
+  return '<div class="figures">' + mine.map((s) =>
+    "<span>⏱ " + esc(whenText(s)) + (s.active ? "" : " (off)") + "</span>").join("") + "</div>";
+}
+
 function drawTasks() {
   // A mount is a task too, and is not a transfer: it is shown, and left to
   // the window to change.
@@ -531,12 +539,14 @@ function drawTasks() {
           '<button class="ghost small" data-enqueue="' + esc(task.id) + '">Queue</button>' +
           '<button class="ghost small" data-dry="' + esc(task.id) + '">Dry run</button>' +
           (editable(task)
-            ? '<button class="ghost small" data-edit="' + esc(task.id) + '">Edit</button>'
+            ? '<button class="ghost small" data-sched-new="' + esc(task.id) + '">Schedule</button>' +
+              '<button class="ghost small" data-edit="' + esc(task.id) + '">Edit</button>'
             : "") +
           '<button class="danger small" data-forget="' + esc(task.id) + '">Delete</button>' +
         "</div>" +
       "</div>" +
       '<div class="path">' + esc(task.source) + " → " + esc(task.dest) + "</div>" +
+      scheduledLine(task) +
     "</div>"
   ));
 
@@ -548,24 +558,144 @@ function drawTasks() {
     (cards.length ? cards.join("") : '<p class="empty">No saved tasks.</p>');
 }
 
+// When a schedule runs, as a person would say it.
+function whenText(s) {
+  if (s.mode === "cron") return "cron  " + s.cron;
+  const all = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const label = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
+  const days = (s.days || []).filter((d) => all.includes(d));
+  const key = all.filter((d) => days.includes(d)).join(",");
+  const which =
+    key === all.join(",") ? "Every day"
+    : key === "mon,tue,wed,thu,fri" ? "Mon–Fri"
+    : key === "sat,sun" ? "Sat, Sun"
+    : all.filter((d) => days.includes(d)).map((d) => label[d]).join(", ") || "No day";
+  return which + " at " + (s.time || "");
+}
+
 function drawSchedules() {
+  const running = !!state.system.schedulerRunning;
   const rows = state.schedules.map((s) => (
     "<tr>" +
-      "<td>" + esc(s.name) + "</td>" +
-      "<td>" + (s.active ? "active" : '<span class="muted">paused</span>') + "</td>" +
-      "<td>" + esc(when(s.nextRun)) + "</td>" +
-      "<td>" + esc(s.lastStatus || "") + "</td>" +
-      '<td style="text-align:right">' +
-        '<button class="ghost small" data-fire="' + esc(s.id) + '">Run now</button>' +
+      "<td>" + esc(s.name) +
+        (s.taskName && s.taskName !== s.name
+          ? '<br><span class="muted">' + esc(s.taskName) + "</span>" : "") + "</td>" +
+      "<td>" + esc(whenText(s)) +
+        '<br><span class="muted">' + (s.runAs === "queue" ? "into the queue" : "run at once") + "</span></td>" +
+      "<td>" + (s.active ? "on" : '<span class="muted">off</span>') + "</td>" +
+      // What would be next is not next while the whole scheduler is paused.
+      "<td>" + (s.active && running ? esc(when(s.nextRun)) : '<span class="muted">—</span>') + "</td>" +
+      "<td>" + esc(s.lastStatus || "") +
+        (s.lastRun && s.lastRun !== "never" ? '<br><span class="muted">' + esc(s.lastRun) + "</span>" : "") + "</td>" +
+      '<td style="text-align:right; white-space:nowrap">' +
+        '<button class="ghost small" data-fire="' + esc(s.id) + '">Run now</button> ' +
+        '<button class="ghost small" data-sched-switch="' + esc(s.id) + '">' +
+          (s.active ? "Switch off" : "Switch on") + "</button> " +
+        '<button class="ghost small" data-sched-edit="' + esc(s.id) + '">Edit</button> ' +
+        '<button class="danger small" data-sched-drop="' + esc(s.id) + '">Delete</button>' +
       "</td>" +
     "</tr>"
   ));
 
-  $("tab-schedules").innerHTML = rows.length
-    ? "<table><thead><tr><th>Schedule</th><th>State</th><th>Next run</th><th>Last</th><th></th></tr></thead><tbody>" +
-      rows.join("") + "</tbody></table>"
-    : '<p class="empty">No schedules.</p>';
+  $("tab-schedules").innerHTML =
+    '<div class="toolbar">' +
+      '<button class="ghost small" data-sched-new="">New schedule</button>' +
+      '<button class="ghost small" data-scheduler="' + (running ? "pause" : "start") + '">' +
+        (running ? "Pause the scheduler" : "Start the scheduler") + "</button>" +
+      '<span class="muted">' + (running
+        ? "The scheduler is running."
+        : "The scheduler is paused: nothing here will start until it is started.") + "</span>" +
+    "</div>" +
+    (rows.length
+      ? "<table><thead><tr><th>Schedule</th><th>When</th><th>State</th><th>Next run</th><th>Last</th><th></th></tr></thead><tbody>" +
+        rows.join("") + "</tbody></table>"
+      : '<p class="empty">No schedules. Make one here, or with Schedule on a task.</p>');
 }
+
+// ---- the schedule form ------------------------------------------------------
+
+const sched = { id: "" };
+
+// Greys the half that is not the one chosen, and leaves both readable: the
+// days and the time are kept while a schedule runs by cron, and come back.
+function schedRules() {
+  const cron = document.querySelector('input[name="sched-mode"]:checked').value === "cron";
+  $("sched-daily").classList.toggle("off-part", cron);
+  $("sched-cronwrap").classList.toggle("off-part", !cron);
+  for (const el of $("sched-daily").querySelectorAll("input")) el.disabled = cron;
+  $("sched-cron").disabled = !cron;
+}
+
+// `from` is a schedule to change, or what a new one starts with.
+function openSchedule(from, title) {
+  const tasks = state.tasks.filter((t) => ["copy", "move", "sync"].includes(t.operation));
+  if (!tasks.length) {
+    toast("there are no tasks to schedule — save a transfer as a task first");
+    return;
+  }
+  sched.id = from.id || "";
+  $("sched-title").textContent = title;
+  $("sched-task").innerHTML = tasks.map((t) =>
+    '<option value="' + esc(t.id) + '">' + esc(t.name) + " — " + esc(t.type) + " " + esc(t.operation) + "</option>").join("");
+  if (from.taskId) $("sched-task").value = from.taskId;
+  $("sched-name").value = from.name || "";
+
+  for (const radio of document.getElementsByName("sched-mode")) {
+    radio.checked = radio.value === (from.mode || "daily");
+  }
+  const days = from.days || ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  for (const box of $("sched-daily").querySelectorAll("[data-day]")) {
+    box.checked = days.includes(box.dataset.day);
+  }
+  $("sched-time").value = from.time || "06:30";
+  $("sched-cron").value = from.cron || "30 6,18 * * MON-FRI";
+  $("sched-runas").value = from.runAs || "now";
+  $("sched-active").checked = from.active === undefined ? true : !!from.active;
+  $("sched-error").textContent = "";
+  schedRules();
+  $("schedbox").classList.remove("hidden");
+}
+
+$("schedbox").addEventListener("change", (event) => {
+  if (event.target.name === "sched-mode") schedRules();
+});
+$("sched-cancel").addEventListener("click", () => $("schedbox").classList.add("hidden"));
+$("sched-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = {
+    taskId: $("sched-task").value,
+    name: $("sched-name").value,
+    mode: document.querySelector('input[name="sched-mode"]:checked').value,
+    days: Array.from($("sched-daily").querySelectorAll("[data-day]"))
+      .filter((box) => box.checked).map((box) => box.dataset.day),
+    time: $("sched-time").value,
+    cron: $("sched-cron").value,
+    runAs: $("sched-runas").value,
+    active: $("sched-active").checked,
+  };
+
+  let answer;
+  try {
+    answer = sched.id
+      ? await api("PUT", "/schedules/" + encodeURIComponent(sched.id), body)
+      : await api("POST", "/schedules", body);
+  } catch (e) {
+    $("sched-error").textContent = "could not reach the daemon";
+    return;
+  }
+  if (answer.status >= 400) {
+    $("sched-error").textContent = reasonFrom(answer);
+    return;
+  }
+  $("schedbox").classList.add("hidden");
+  const next = answer.data.active && answer.data.nextRun
+    ? " — next " + when(answer.data.nextRun)
+    : answer.data.active ? "" : " — switched off";
+  toast("Schedule saved: " + answer.data.name + next +
+        (answer.data.active && !state.system.schedulerRunning
+          ? ". The scheduler itself is paused." : ""));
+  refresh();
+});
 
 function duration(row) {
   if (!row.startedAt || !row.finishedAt) return "";
@@ -2441,7 +2571,7 @@ document.addEventListener("click", async (event) => {
   if (d.forget) {
     const found = state.tasks.find((t) => t.id === d.forget);
     if (!confirm("Delete the task " + (found ? found.name : d.forget) + "?\n\n" +
-                 "Schedules that run it will have nothing to run.")) return;
+                 "A task that has a schedule cannot be deleted until the schedule is.")) return;
     if (await command("DELETE", task(d.forget, ""))) refresh();
     return;
   }
@@ -2456,6 +2586,34 @@ document.addEventListener("click", async (event) => {
 
   if (d.unqueue) {
     if (await command("DELETE", "/queue/" + encodeURIComponent(d.unqueue))) refresh();
+    return;
+  }
+
+  if (d.schedNew !== undefined) {
+    const task = state.tasks.find((t) => t.id === d.schedNew);
+    return openSchedule(task ? { taskId: task.id } : {},
+                        task ? "Schedule " + task.name : "New schedule");
+  }
+  if (d.schedEdit) {
+    const found = state.schedules.find((s) => s.id === d.schedEdit);
+    if (found) openSchedule(found, "Edit schedule — " + found.name);
+    return;
+  }
+  if (d.schedSwitch) {
+    const found = state.schedules.find((s) => s.id === d.schedSwitch);
+    if (found && (await command("POST", "/schedules/" + encodeURIComponent(found.id) +
+                                (found.active ? "/disable" : "/enable")))) refresh();
+    return;
+  }
+  if (d.schedDrop) {
+    const found = state.schedules.find((s) => s.id === d.schedDrop);
+    if (!confirm("Delete the schedule " + (found ? found.name : d.schedDrop) + "?\n\n" +
+                 "The task it runs is kept.")) return;
+    if (await command("DELETE", "/schedules/" + encodeURIComponent(d.schedDrop))) refresh();
+    return;
+  }
+  if (d.scheduler) {
+    if (await command("POST", "/scheduler/" + d.scheduler)) refresh();
     return;
   }
 

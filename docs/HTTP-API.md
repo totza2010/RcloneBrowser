@@ -88,6 +88,28 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 `dryRun` รับทั้งใน query และใน body (`{"dryRun":true}`) — **อย่างที่คนพิมพ์เองจะใช้
 กับอย่างที่โปรแกรมจะส่ง** สิ่งที่ถามได้ทางเดียวคือสิ่งที่ครึ่งหนึ่งของคนเรียกผิด
 
+### ตารางเวลา — สร้าง แก้ ลบ เปิดปิด
+
+| | |
+|---|---|
+| `POST /api/v1/schedules` | สร้าง → `201` · ต้องมี `taskId` ของ task ที่มีอยู่ (ไม่ใช่ mount) |
+| `PUT /api/v1/schedules/{id}` | แก้ — ส่งเฉพาะช่องที่เปลี่ยน |
+| `DELETE /api/v1/schedules/{id}` | ลบ → `200` · รอบที่เริ่มไปแล้วทำงานต่อ |
+| `POST /api/v1/schedules/{id}/enable` · `/disable` | สวิตช์ของตารางเวลานั้น |
+| `POST /api/v1/scheduler/start` · `/pause` | สวิตช์ของทั้งระบบ — หยุดแล้วเก็บตารางเวลาไว้แต่ไม่เริ่มอะไร |
+
+```json
+{ "taskId": "{…}", "name": "nightly", "mode": "daily",
+  "days": ["mon","tue","wed","thu","fri"], "time": "06:30",
+  "runAs": "queue", "active": true }
+```
+
+- `mode`: `daily` (ใช้ `days` + `time`) หรือ `cron` (ใช้ `cron` ห้าช่อง เช่น `30 6,18 * * MON-FRI`)
+- `runAs`: `now` เริ่มทันที · `queue` ต่อท้ายคิว
+- เวลาเป็นนาฬิกาของเครื่องที่โปรแกรมรัน · คำตอบมี `nextRun`
+- `400` `bad_field` เมื่อเป็นสิ่งที่ไม่มีวันถึงกำหนด (ไม่มีวัน · เวลาไม่มีจริง · cron อ่านไม่ออก) · `400` `no_such_task`
+- ลบ task ที่มีตารางเวลา → `409` `scheduled`
+
 ### stream — `POST /api/v1/remotes/{name}/stream`
 
 `{"path": "films/a.mkv"}` หรือ `{"path": "films", "isDir": true}` → `202` `{requestId, path, isDir}`

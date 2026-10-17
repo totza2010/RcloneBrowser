@@ -64,6 +64,7 @@ set(CORE_SOURCE
   rclone_version.cpp
   task_builder.cpp
   schedule.cpp
+  schedule_json.cpp
   scheduler_store.cpp
   script_runner.cpp
   job_log.cpp
@@ -104,6 +105,7 @@ set(CORE_HEADER
   rclone_version.h
   task_builder.h
   schedule.h
+  schedule_json.h
   scheduler_store.h
   script_runner.h
   job_log.h

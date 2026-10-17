@@ -16,6 +16,7 @@
 #include "run_history.h"
 #include "running_job.h"
 #include "schedule.h"
+#include "schedule_json.h"
 #include "scheduler_store.h"
 #include "task_json.h"
 #include "task_builder.h"
@@ -218,22 +219,10 @@ QJsonValue describeRun(const JobRunRecord &run) {
   return object;
 }
 
+// The whole schedule, in words. See schedule_json.h.
 QJsonObject describe(const Schedule &schedule) {
-  QJsonObject object;
-  object.insert(QStringLiteral("id"), schedule.id);
-  object.insert(QStringLiteral("name"), schedule.name);
-  object.insert(QStringLiteral("taskId"), schedule.taskId);
-  object.insert(QStringLiteral("active"), schedule.active);
-  object.insert(QStringLiteral("executionMode"), schedule.executionMode);
-  object.insert(QStringLiteral("lastRun"), schedule.lastRun);
-  object.insert(QStringLiteral("lastStatus"), schedule.lastStatus);
-
-  const QDateTime next = schedule.nextRun(QDateTime::currentDateTime());
-  object.insert(QStringLiteral("nextRun"),
-                next.isValid() ? next.toString(Qt::ISODate) : QString());
-  return object;
+  return ScheduleJson::Write(schedule, QDateTime::currentDateTime());
 }
-
 
 // The options a command was given. A command with no options is one sent
 // with no body at all, so a missing body is an empty object rather than an
@@ -1449,6 +1438,17 @@ void ApiServer::watchWhatHappens() {
     broadcast(QStringLiteral("queue"), object);
   });
 
+  // A schedule made, changed, switched or deleted, or the whole scheduler
+  // switched -- here or in the window.
+  QObject::connect(&SchedulerStore::instance(), &SchedulerStore::changed, this,
+                   [this]() {
+                     QJsonObject object;
+                     object.insert(QStringLiteral("changed"), true);
+                     object.insert(QStringLiteral("running"),
+                                   SchedulerStore::instance().isRunning());
+                     broadcast(QStringLiteral("schedule"), object);
+                   });
+
   // A task made, changed or deleted -- here or in the window. Without this a
   // page open beside the window would go on showing a task the window had
   // just deleted, and offering to run it.
@@ -1956,6 +1956,18 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
         return refuseTask(409, QStringLiteral("running"),
                           QStringLiteral("that task is running; stop it first"));
       }
+      // Nor one a schedule still points at: the schedule would be left
+      // armed with nothing to run. The window does not offer the delete
+      // either; the schedule goes first.
+      for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
+        if (schedule.taskId == task->uniqueId.toString()) {
+          return refuseTask(
+              409, QStringLiteral("scheduled"),
+              QStringLiteral("the schedule \"%1\" runs that task; delete "
+                             "the schedule first")
+                  .arg(schedule.name));
+        }
+      }
       qCDebug(rbApp) << "API deleted task" << parts.at(1) << task->description;
       ListOfJobOptions::getInstance()->Forget(task);
       // Whatever was waiting to run it has nothing to run now.
@@ -2030,6 +2042,128 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
       *body = startedJob(requestId, QStringLiteral("now"));
       return 202;
     }
+  }
+
+  // ---- writing schedules --------------------------------------------------
+  //
+  // A schedule names a task that already exists and says when. It carries
+  // no command of its own, so unlike a task there is nothing in one that
+  // could be turned into running something else: the worst a schedule can
+  // do is run a task that is already there, at a bad time.
+
+  // scheduler/start, scheduler/pause -- the whole scheduler, as the window's
+  // two buttons do. Paused, it keeps its schedules and starts nothing.
+  if (post && parts.size() == 2 && parts.at(0) == QLatin1String("scheduler") &&
+      (parts.at(1) == QLatin1String("start") ||
+       parts.at(1) == QLatin1String("pause"))) {
+    if (parts.at(1) == QLatin1String("start")) {
+      SchedulerStore::instance().start();
+    } else {
+      SchedulerStore::instance().pause();
+    }
+    qCDebug(rbApp) << "API switched the scheduler" << parts.at(1);
+    QJsonObject object;
+    object.insert(QStringLiteral("running"),
+                  SchedulerStore::instance().isRunning());
+    *body = toJson(object);
+    return 200;
+  }
+
+  // What a schedule has to be about: a task there is, and one that is a
+  // transfer. A mount runs until it is taken down, which is not something
+  // to start again every morning; the window does not offer it either.
+  const auto taskFor = [&refuseTask](Schedule *schedule, int *status) {
+    const JobOptions *task =
+        ListOfJobOptions::getInstance()->find(schedule->taskId);
+    if (task == nullptr) {
+      *status = refuseTask(
+          400, QStringLiteral("no_such_task"),
+          QStringLiteral("a schedule runs a task; \"taskId\" has to be the id "
+                         "of one there is"));
+      return false;
+    }
+    if (task->operation == JobOptions::Mount) {
+      *status = refuseTask(400, QStringLiteral("not_a_transfer"),
+                           QStringLiteral("a mount cannot be scheduled"));
+      return false;
+    }
+    schedule->taskName = task->description;
+    if (schedule->name.isEmpty()) {
+      schedule->name = task->description;
+    }
+    return true;
+  };
+
+  // schedules -- make one
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("schedules")) {
+    Schedule schedule;
+    schedule.id = QUuid::createUuid().toString();
+
+    QString why;
+    if (!ScheduleJson::Read(options(request), &schedule, &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    int status = 0;
+    if (!taskFor(&schedule, &status)) {
+      return status;
+    }
+    SchedulerStore::instance().add(schedule);
+    qCDebug(rbApp) << "API created schedule" << schedule.id << schedule.name;
+    *body = toJson(describe(schedule));
+    return 201;
+  }
+
+  // schedules/{id} -- change one, or take it away
+  if ((put || del) && parts.size() == 2 &&
+      parts.at(0) == QLatin1String("schedules")) {
+    const Schedule *found = SchedulerStore::instance().find(parts.at(1));
+    if (found == nullptr) {
+      return refuseTask(404, QStringLiteral("no_such_schedule"),
+                        QStringLiteral("there is no such schedule"));
+    }
+
+    if (del) {
+      qCDebug(rbApp) << "API deleted schedule" << found->id << found->name;
+      // A run it has already started goes on; it only loses what would
+      // have started the next one.
+      SchedulerStore::instance().remove(parts.at(1));
+      QJsonObject object;
+      object.insert(QStringLiteral("deleted"), parts.at(1));
+      *body = toJson(object);
+      return 200;
+    }
+
+    Schedule changed = *found;
+    QString why;
+    if (!ScheduleJson::Read(options(request), &changed, &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    int status = 0;
+    if (!taskFor(&changed, &status)) {
+      return status;
+    }
+    SchedulerStore::instance().update(changed);
+    qCDebug(rbApp) << "API changed schedule" << changed.id << changed.name;
+    *body = toJson(describe(changed));
+    return 200;
+  }
+
+  // schedules/{id}/enable, schedules/{id}/disable -- one schedule's own
+  // switch, which is the thing most often changed about one.
+  if (post && parts.size() == 3 && parts.at(0) == QLatin1String("schedules") &&
+      (parts.at(2) == QLatin1String("enable") ||
+       parts.at(2) == QLatin1String("disable"))) {
+    const Schedule *found = SchedulerStore::instance().find(parts.at(1));
+    if (found == nullptr) {
+      return refuseTask(404, QStringLiteral("no_such_schedule"),
+                        QStringLiteral("there is no such schedule"));
+    }
+    Schedule changed = *found;
+    changed.active = parts.at(2) == QLatin1String("enable");
+    SchedulerStore::instance().update(changed);
+    qCDebug(rbApp) << "API switched schedule" << changed.name << parts.at(2);
+    *body = toJson(describe(changed));
+    return 200;
   }
 
   // schedules/{id}/run -- the road the clock takes, not a second copy of

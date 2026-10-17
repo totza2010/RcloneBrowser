@@ -488,3 +488,13 @@ input.bad, select.bad { border-color: var(--bad); }
 #stream-address { font: 12px/1.45 Consolas, "Courier New", monospace; }
 .player { background: #000; border-radius: 4px; max-height: 52vh; width: 100%; }
 #stream-items { max-height: 150px; }
+
+/* ---- schedules --------------------------------------------------------- */
+
+.sched-daily { align-items: center; display: flex; flex-wrap: wrap; gap: 10px 16px; padding-left: 22px; }
+.sched-daily .days { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sched-daily input[type="time"] { margin-top: 0; width: auto; }
+#sched-cronwrap { padding-left: 22px; }
+#sched-cronwrap input { font-family: Consolas, "Courier New", monospace; margin-top: 0; }
+.off-part { opacity: .45; }
+.tag.off { color: var(--muted); }
