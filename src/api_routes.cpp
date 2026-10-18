@@ -300,6 +300,17 @@ QList<Route> build() {
         R"({"path":"films/a.mkv","isDir":false,"to":"/media/films","dryRun":false})",
         "202: started; 400: refused; 403: outside the folders the API may "
         "use"),
+      r("POST", "/api/v1/remotes/{name}/receive", kRemotes,
+        "Upload a file from the browser's machine",
+        "The body is the file, as it is; Content-Length is required. It is "
+        "set down on disk as it arrives (RB_UPLOAD_STAGING) -- never held in "
+        "memory -- and then moved up to the remote as a transfer job, which "
+        "the answer names. Unlike /upload, the file comes from whoever is "
+        "asking, not from a folder of the machine the program runs on.",
+        "path: the folder on the remote; name: the file's name", "",
+        "202: received, and on its way up, with its requestId; 400: not a "
+        "name; 404: no such remote; 411: no Content-Length; 507: no room to "
+        "set it down"),
       r("POST", "/api/v1/remotes/{name}/stream", kStreams,
         "Serve a file or a folder for a player",
         "Gives back a path of this same server, under a part made at random "

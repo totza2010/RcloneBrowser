@@ -517,6 +517,30 @@ RunningJob *Upload(const QString &localPath, bool isFolder,
   return transferByTask(false, localPath, dest, isFolder, dryRun);
 }
 
+RunningJob *UploadReceived(const QString &stagedFile, const QString &remote,
+                           const QString &remoteFolder) {
+  JobOptions task(false);
+  task.operation = JobOptions::Move;
+  task.source = stagedFile;
+  task.dest = Target(remote, trimSlashes(remoteFolder));
+  task.isFolder = false;
+
+  const QString name = QFileInfo(stagedFile).fileName();
+  qCDebug(rbRemote) << "uploading a file received from a browser" << name
+                    << "to" << task.dest;
+  return JobRegistry::instance().start(
+      JobKind::Transfer, task.getOptions(),
+      JobDescription{QStringLiteral("Upload of %1 from the browser").arg(name),
+                     name, task.dest},
+      QString(), QStringLiteral("upload"), QString());
+}
+
+QString UploadStagingFolder() {
+  const QString asked = QString::fromLocal8Bit(qgetenv("RB_UPLOAD_STAGING")).trimmed();
+  return asked.isEmpty() ? QDir(QDir::tempPath()).filePath(QStringLiteral("rclonebrowser-uploads"))
+                         : asked;
+}
+
 RunningJob *Download(const Item &what, const QString &localFolder, bool dryRun,
                      QString *why) {
   const QString from = trimSlashes(what.path);

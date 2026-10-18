@@ -247,6 +247,18 @@ RunningJob *Upload(const QString &localPath, bool isFolder,
                    const QString &remote, const QString &remoteFolder,
                    bool dryRun);
 
+// Moves a file that arrived from somewhere else -- the browser's machine,
+// through the API -- from where it was set down into a folder of a remote,
+// as a transfer job like any other: progress, a history row, a Stop. Moved
+// rather than copied, so the staged copy is gone once it is up.
+RunningJob *UploadReceived(const QString &stagedFile, const QString &remote,
+                           const QString &remoteFolder);
+
+// Where files sent from a browser are set down before they go up:
+// RB_UPLOAD_STAGING, or a folder under the system's temporary one. They
+// need room there for as long as each is being sent and moved.
+QString UploadStagingFolder();
+
 // Copies a file or folder of a remote into a folder of this machine.
 RunningJob *Download(const Item &what, const QString &localFolder,
                      bool dryRun, QString *why = nullptr);

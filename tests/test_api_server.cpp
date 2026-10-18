@@ -2594,6 +2594,83 @@ private slots:
     ApiServer::setStreamIdleLimitMs(-1);
   }
 
+  // A file from the browser's machine: taken as it arrives, set down, and
+  // moved up as a transfer -- and never a request held whole in memory.
+  void aFileSentFromTheBrowserIsTakenAsItComes() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "300");
+    QTemporaryDir staging;
+    qputenv("RB_UPLOAD_STAGING", staging.path().toLocal8Bit());
+
+    // Three megabytes -- three times what any other request may be --
+    // sent in pieces, the way a browser sends it.
+    const QByteArray file(3 * 1024 * 1024, 'x');
+    QTcpSocket sender;
+    QVERIFY(openConnection(&sender));
+    sender.write("POST /api/v1/remotes/fake/receive?path=films&name=" +
+                 QUrl::toPercentEncoding(QStringLiteral("a film.mkv")) +
+                 " HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + mToken +
+                 "\r\nContent-Length: " + QByteArray::number(file.size()) + "\r\n\r\n");
+    for (int at = 0; at < file.size(); at += 256 * 1024) {
+      sender.write(file.mid(at, 256 * 1024));
+      sender.flush();
+      QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+    }
+    QByteArray answer;
+    // The answer is JSON, and its last character is the end of it.
+    QVERIFY(waitFor(&sender, &answer, "}"));
+    QCOMPARE(statusOf(answer), 202);
+    const QJsonObject started = bodyOf(answer).object();
+    QCOMPARE(started.value(QStringLiteral("dest")).toString(), QStringLiteral("fake:films"));
+
+    RunningJob *job = JobRegistry::instance().find(
+        started.value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    const QString command = job->displayCommand().join(QLatin1Char(' '));
+    QVERIFY2(command.contains(QStringLiteral("move ")), qPrintable(command));
+    QVERIFY2(command.contains(QStringLiteral("a film.mkv")), qPrintable(command));
+    // While it goes up, the whole of it is there to go.
+    QDir staged(staging.path());
+    const QStringList folders = staged.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QCOMPARE(folders.size(), 1);
+    QCOMPARE(QFileInfo(staged.filePath(folders.at(0) + QStringLiteral("/a film.mkv"))).size(),
+             qint64(file.size()));
+    // And once the job is over, nothing is left behind.
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        staged.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0, 3000);
+
+    // Abandoned half way: what came is thrown away.
+    {
+      QTcpSocket quitter;
+      QVERIFY(openConnection(&quitter));
+      quitter.write("POST /api/v1/remotes/fake/receive?name=b.mkv HTTP/1.1\r\n"
+                    "Authorization: Bearer " + mToken +
+                    "\r\nContent-Length: 1000000\r\n\r\nonly a little");
+      quitter.flush();
+      QTRY_COMPARE_WITH_TIMEOUT(
+          staged.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 1, 3000);
+      quitter.abort();
+      QTRY_COMPARE_WITH_TIMEOUT(
+          staged.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0, 3000);
+    }
+
+    const auto refusedWith = [this](const QByteArray &head) {
+      return statusOf(askRaw(head));
+    };
+    QCOMPARE(refusedWith("POST /api/v1/remotes/fake/receive?name=c HTTP/1.1\r\n"
+                         "Content-Length: 1\r\n\r\nx"), 401);
+    QCOMPARE(refusedWith("POST /api/v1/remotes/fake/receive?name=c HTTP/1.1\r\n"
+                         "Authorization: Bearer " + mToken + "\r\n\r\n"), 411);
+    QCOMPARE(refusedWith("POST /api/v1/remotes/fake/receive?name=a%2Fb HTTP/1.1\r\n"
+                         "Authorization: Bearer " + mToken + "\r\nContent-Length: 1\r\n\r\nx"), 400);
+    QCOMPARE(refusedWith("POST /api/v1/remotes/nothing/receive?name=c HTTP/1.1\r\n"
+                         "Authorization: Bearer " + mToken + "\r\nContent-Length: 1\r\n\r\nx"), 404);
+
+    qunsetenv("RB_UPLOAD_STAGING");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

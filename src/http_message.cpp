@@ -31,6 +31,38 @@ QString HttpRequest::queryValue(const QString &name) const {
 }
 
 HttpParseResult ParseHttpRequest(QByteArray &buffer, HttpRequest *request) {
+  HttpRequest parsed;
+  int bodyStart = 0;
+  const HttpParseResult head = ParseHttpHead(buffer, &parsed, &bodyStart);
+  if (head != HttpParseResult::Complete) {
+    return head;
+  }
+
+  bool lengthReadable = true;
+  const QString lengthText = parsed.header(QStringLiteral("content-length"));
+  const int length = lengthText.isEmpty()
+                         ? 0
+                         : lengthText.toInt(&lengthReadable);
+  if (!lengthReadable || length < 0 || length > kMaxBodyBytes) {
+    return HttpParseResult::Malformed;
+  }
+
+  if (buffer.size() - bodyStart < length) {
+    return HttpParseResult::Incomplete;
+  }
+
+  parsed.body = buffer.mid(bodyStart, length);
+
+  // Only what this request used. A client is allowed to send the next request
+  // down the same connection without waiting for the answer to this one.
+  buffer.remove(0, bodyStart + length);
+
+  *request = parsed;
+  return HttpParseResult::Complete;
+}
+
+HttpParseResult ParseHttpHead(const QByteArray &buffer, HttpRequest *request,
+                              int *bodyStart) {
   const int headerEnd = buffer.indexOf("\r\n\r\n");
   if (headerEnd < 0) {
     return buffer.size() > kMaxHeaderBytes ? HttpParseResult::Malformed
@@ -83,26 +115,7 @@ HttpParseResult ParseHttpRequest(QByteArray &buffer, HttpRequest *request) {
         QString::fromUtf8(line.mid(colon + 1)).trimmed());
   }
 
-  bool lengthReadable = true;
-  const QString lengthText = parsed.header(QStringLiteral("content-length"));
-  const int length = lengthText.isEmpty()
-                         ? 0
-                         : lengthText.toInt(&lengthReadable);
-  if (!lengthReadable || length < 0 || length > kMaxBodyBytes) {
-    return HttpParseResult::Malformed;
-  }
-
-  const int bodyStart = headerEnd + 4;
-  if (buffer.size() - bodyStart < length) {
-    return HttpParseResult::Incomplete;
-  }
-
-  parsed.body = buffer.mid(bodyStart, length);
-
-  // Only what this request used. A client is allowed to send the next request
-  // down the same connection without waiting for the answer to this one.
-  buffer.remove(0, bodyStart + length);
-
+  *bodyStart = headerEnd + 4;
   *request = parsed;
   return HttpParseResult::Complete;
 }

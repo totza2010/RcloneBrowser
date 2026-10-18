@@ -19,6 +19,27 @@ private:
   }
 
 private slots:
+  // The head alone, for a body that is not to be held: complete as soon as
+  // the headers are, wherever the body has got to, and nothing taken out.
+  void theHeadCanBeReadBeforeTheBody() {
+    const QByteArray buffer =
+        "POST /api/v1/remotes/x/receive?name=a.mkv HTTP/1.1\r\n"
+        "Content-Length: 5000000000\r\n\r\nfirst bytes";
+    HttpRequest request;
+    int bodyStart = 0;
+    QCOMPARE(ParseHttpHead(buffer, &request, &bodyStart), HttpParseResult::Complete);
+    QCOMPARE(request.path, QStringLiteral("/api/v1/remotes/x/receive"));
+    QCOMPARE(request.queryValue(QStringLiteral("name")), QStringLiteral("a.mkv"));
+    QCOMPARE(buffer.mid(bodyStart), QByteArray("first bytes"));
+    // Five gigabytes is no reason to refuse the head -- only a whole
+    // request read into memory is held to the small limit.
+    QByteArray copy = buffer;
+    QCOMPARE(ParseHttpRequest(copy, &request), HttpParseResult::Malformed);
+
+    QCOMPARE(ParseHttpHead("POST /x HTTP/1.1\r\nHost: a", &request, &bodyStart),
+             HttpParseResult::Incomplete);
+  }
+
   void readsAnOrdinaryRequest() {
     QByteArray buffer = get("/api/v1/tasks");
     HttpRequest request;

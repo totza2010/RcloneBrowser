@@ -180,6 +180,24 @@ private:
   // what rclone says back to whoever asked. See RemoteOps::Stream().
   void relayStream(QTcpSocket *client, const HttpRequest &request);
 
+  // A file sent from the browser's machine, taken as it arrives and set
+  // down on disk rather than held in memory -- a film does not fit in a
+  // request buffer -- and then moved up to the remote as a transfer job.
+  // See RemoteOps::UploadReceived.
+  struct Receiving {
+    class QFile *file = nullptr;
+    QString folder;      // the staging folder made for this one file
+    QString remote;
+    QString into;        // the folder on the remote
+    qint64 remaining = 0;
+    bool done = false;
+  };
+  bool startReceiving(QTcpSocket *socket, const HttpRequest &head,
+                      const QByteArray &firstBytes);
+  void receiveMore(QTcpSocket *socket, const QByteArray &bytes);
+  void dropReceiving(QTcpSocket *socket);
+  QHash<QTcpSocket *, Receiving> mReceiving;
+
   // Streams nobody is playing, stopped. A stream is a process and an open
   // address, and one left behind -- a tab closed, a player quit -- went on
   // being both until somebody remembered to press Stop. Every play passes

@@ -521,6 +521,14 @@ input.bad, select.bad { border-color: var(--bad); }
 
 #result-body tr.advanced td:first-child code { color: var(--muted); }
 
+/* ---- uploading from this computer ------------------------------------- */
+
+.uploads { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 10px; padding: 8px 12px; }
+.uploads .row { align-items: center; display: flex; font-size: 13px; gap: 10px; padding: 3px 0; }
+.uploads .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uploads .bar { flex: 0 0 160px; }
+#listing.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
 /* ---- the remote form --------------------------------------------------- */
 
 .remote-form { max-height: 92vh; }

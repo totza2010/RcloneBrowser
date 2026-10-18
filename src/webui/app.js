@@ -2480,6 +2480,158 @@ $("remote-settings").addEventListener("click", async () => {
   });
 });
 
+// ---- uploading from this computer -------------------------------------------
+//
+// Files from the machine this browser is on, sent to the daemon one at a
+// time: it sets each down as it arrives and moves it up to the remote as a
+// transfer, which then shows in Jobs. Dropped folders keep their shape.
+
+const uploading = { list: [], busy: false };
+
+function drawUploads() {
+  const box = $("uploads");
+  box.classList.toggle("hidden", !uploading.list.length);
+  box.innerHTML = uploading.list.map((u) => {
+    const done = u.size ? Math.min(100, (u.sent / u.size) * 100) : 100;
+    return '<div class="row"><span class="name" title="' + esc(u.target) + '">' + esc(u.label) + "</span>" +
+      '<span class="bar"><span style="width:' + done.toFixed(1) + '%"></span></span>' +
+      '<span class="muted">' + esc(u.state) + "</span></div>";
+  }).join("") +
+  (uploading.list.some((u) => u.finished)
+    ? '<div class="row"><span class="grow"></span><button class="ghost small" id="uploads-clear">Clear finished</button></div>'
+    : "");
+  const clear = $("uploads-clear");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      uploading.list = uploading.list.filter((u) => !u.finished);
+      drawUploads();
+    });
+  }
+}
+
+function sendOne(u) {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/remotes/" + encodeURIComponent(u.remote) + "/receive?path=" +
+             encodeURIComponent(u.folder) + "&name=" + encodeURIComponent(u.file.name));
+    if (secret) xhr.setRequestHeader("Authorization", "Bearer " + secret);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+      u.sent = e.loaded;
+      u.state = bytes(e.loaded) + " of " + bytes(u.size);
+      drawUploads();
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) { /* said below */ }
+      u.finished = true;
+      if (xhr.status === 202) {
+        u.sent = u.size;
+        u.state = "received — going up, see Jobs";
+        // The folder is read again when its upload ends, if still on screen.
+        if (data.requestId) watching.set(data.requestId, { remote: u.remote, path: u.folder });
+      } else {
+        u.state = (data && data.error) || ("refused (" + xhr.status + ")");
+      }
+      drawUploads();
+      resolve();
+    };
+    xhr.onerror = () => {
+      u.finished = true;
+      u.state = "the connection was lost";
+      drawUploads();
+      resolve();
+    };
+    xhr.send(u.file);
+  });
+}
+
+async function sendQueued() {
+  if (uploading.busy) return;
+  uploading.busy = true;
+  for (;;) {
+    const next = uploading.list.find((u) => !u.started);
+    if (!next) break;
+    next.started = true;
+    next.state = "sending";
+    drawUploads();
+    await sendOne(next);
+    refresh();
+  }
+  uploading.busy = false;
+}
+
+// `files` are {file, relative}: relative is the folder inside the drop it
+// came from, "" for a file on its own.
+function queueUploads(files) {
+  const remote = browsing.remote;
+  const base = browsing.path;
+  for (const { file, relative } of files) {
+    const folder = [base, relative].filter(Boolean).join("/");
+    uploading.list.push({
+      file: file, remote: remote, folder: folder, size: file.size, sent: 0,
+      label: (relative ? relative + "/" : "") + file.name,
+      target: remote + ":" + (folder ? folder + "/" : "") + file.name,
+      state: "waiting",
+    });
+  }
+  drawUploads();
+  sendQueued();
+}
+
+// A dropped folder, walked for its files.
+function walkEntry(entry, relative, into) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((file) => { into.push({ file: file, relative: relative }); resolve(); },
+                 () => resolve());
+      return;
+    }
+    const reader = entry.createReader();
+    const all = [];
+    const more = () => reader.readEntries(async (batch) => {
+      if (!batch.length) {
+        const inside = relative ? relative + "/" + entry.name : entry.name;
+        for (const child of all) await walkEntry(child, inside, into);
+        resolve();
+        return;
+      }
+      all.push(...batch);
+      more();
+    }, () => resolve());
+    more();
+  });
+}
+
+$("remote-upload-local").addEventListener("click", () => $("upload-files").click());
+$("upload-files").addEventListener("change", () => {
+  const picked = Array.from($("upload-files").files).map((f) => ({ file: f, relative: "" }));
+  $("upload-files").value = "";
+  if (picked.length) queueUploads(picked);
+});
+
+const dropTarget = $("listing");
+dropTarget.addEventListener("dragover", (event) => {
+  if (!browsing.remote || !event.dataTransfer || !event.dataTransfer.types.includes("Files")) return;
+  event.preventDefault();
+  dropTarget.classList.add("dropping");
+});
+dropTarget.addEventListener("dragleave", () => dropTarget.classList.remove("dropping"));
+dropTarget.addEventListener("drop", async (event) => {
+  dropTarget.classList.remove("dropping");
+  if (!browsing.remote || !event.dataTransfer) return;
+  event.preventDefault();
+  const found = [];
+  const items = Array.from(event.dataTransfer.items || []);
+  const entries = items.map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null));
+  if (entries.some(Boolean)) {
+    for (const entry of entries) if (entry) await walkEntry(entry, "", found);
+  } else {
+    for (const f of Array.from(event.dataTransfer.files || [])) found.push({ file: f, relative: "" });
+  }
+  if (found.length) queueUploads(found);
+});
+
 // ---- making a remote, or changing one --------------------------------------
 //
 // The fields come from GET /providers/{type}: rclone's own description of

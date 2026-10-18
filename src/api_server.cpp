@@ -26,6 +26,8 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QDir>
+#include <QStorageInfo>
 #include <QFileInfo>
 #include <QMimeDatabase>
 #include <QRegularExpression>
@@ -1598,6 +1600,168 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
   });
 }
 
+bool ApiServer::startReceiving(QTcpSocket *socket, const HttpRequest &head,
+                               const QByteArray &firstBytes) {
+  socket->setProperty("stream", true);
+  const auto refuse = [socket](int status, const QString &code,
+                               const QString &why) {
+    QJsonObject object;
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), code);
+    socket->write(FormatHttpResponse(status, toJson(object)));
+    socket->flush();
+    socket->disconnectFromHost();
+    return false;
+  };
+
+  // The same door as every other request: who is asking, and whether they
+  // may change files on a remote.
+  const Caller caller = callerOf(head);
+  if (!caller.known) {
+    return refuse(401, QStringLiteral("unauthorized"),
+                  QStringLiteral("a token or a session is required"));
+  }
+  const ApiRoutes::Route *route = ApiRoutes::Match(head.method, head.path);
+  const int needs = route != nullptr ? int(ApiAuth::ScopeNamed(route->scope))
+                                     : int(ApiAuth::Scope::Admin);
+  if (caller.scope < needs) {
+    return refuse(403, QStringLiteral("insufficient_scope"),
+                  QStringLiteral("this key may %1; that needs %2")
+                      .arg(ApiAuth::ScopeName(ApiAuth::Scope(caller.scope)),
+                           ApiAuth::ScopeName(ApiAuth::Scope(needs))));
+  }
+  if (AppCore::instance().isStopping()) {
+    return refuse(503, QStringLiteral("stopping"),
+                  QStringLiteral("the program is shutting down"));
+  }
+
+  const QString remote = segmentsOf(head.path).at(1);
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    return refuse(404, QStringLiteral("no_such_remote"), QStringLiteral("no such remote"));
+  }
+  const QString name = head.queryValue(QStringLiteral("name")).trimmed();
+  const QString nameProblem = RemoteOps::WhyNotAName(name);
+  if (!nameProblem.isEmpty()) {
+    return refuse(400, QStringLiteral("bad_name"), nameProblem);
+  }
+
+  // How long it is has to be said: that is what tells the end of the file
+  // from the connection dropping half way, and what the room is checked for.
+  bool readable = false;
+  const qint64 length =
+      head.header(QStringLiteral("content-length")).toLongLong(&readable);
+  if (!readable || length < 0) {
+    return refuse(411, QStringLiteral("length_required"),
+                  QStringLiteral("say how long the file is (Content-Length)"));
+  }
+
+  const QString staging = RemoteOps::UploadStagingFolder();
+  QDir().mkpath(staging);
+  const QStorageInfo room(staging);
+  // The file and a margin, so a full disk is said now rather than found
+  // part way through somebody's film.
+  if (room.isValid() && room.bytesAvailable() < length + 64LL * 1024 * 1024) {
+    return refuse(507, QStringLiteral("no_room"),
+                  QStringLiteral("there is not room for it where files are set "
+                                 "down before they go up (%1)")
+                      .arg(staging));
+  }
+
+  Receiving receiving;
+  receiving.folder = QDir(staging).filePath(QUuid::createUuid().toString(QUuid::Id128));
+  receiving.remote = remote;
+  receiving.into = head.queryValue(QStringLiteral("path"));
+  receiving.remaining = length;
+  QDir().mkpath(receiving.folder);
+  receiving.file = new QFile(QDir(receiving.folder).filePath(name), socket);
+  if (!receiving.file->open(QIODevice::WriteOnly)) {
+    QDir(receiving.folder).removeRecursively();
+    return refuse(507, QStringLiteral("no_room"),
+                  QStringLiteral("it could not be set down: %1")
+                      .arg(receiving.file->errorString()));
+  }
+  mReceiving.insert(socket, receiving);
+  mCallerName = caller.who;
+  qCDebug(rbApp) << "receiving a file from a browser" << name << length
+                 << "bytes for" << remote << receiving.into;
+
+  // Gone before it all came: what came is thrown away.
+  QObject::connect(socket, &QTcpSocket::disconnected, this, [this, socket]() {
+    if (mReceiving.contains(socket) && !mReceiving.value(socket).done) {
+      qCDebug(rbApp) << "a file being received was abandoned";
+      dropReceiving(socket);
+    }
+  });
+
+  receiveMore(socket, firstBytes);
+  return true;
+}
+
+void ApiServer::receiveMore(QTcpSocket *socket, const QByteArray &bytes) {
+  auto found = mReceiving.find(socket);
+  if (found == mReceiving.end() || found->done) {
+    return;
+  }
+  Receiving &receiving = found.value();
+
+  const QByteArray part = bytes.left(int(qMin<qint64>(bytes.size(), receiving.remaining)));
+  if (!part.isEmpty() && receiving.file->write(part) != part.size()) {
+    const QString why = receiving.file->errorString();
+    dropReceiving(socket);
+    QJsonObject object;
+    object.insert(QStringLiteral("error"),
+                  QStringLiteral("it could not be set down: %1").arg(why));
+    object.insert(QStringLiteral("code"), QStringLiteral("no_room"));
+    socket->write(FormatHttpResponse(507, toJson(object)));
+    socket->flush();
+    socket->disconnectFromHost();
+    return;
+  }
+  receiving.remaining -= part.size();
+  if (receiving.remaining > 0) {
+    return;
+  }
+
+  // All of it. Up it goes, as a transfer like any other.
+  receiving.done = true;
+  receiving.file->close();
+  const QString staged = receiving.file->fileName();
+  const QString folder = receiving.folder;
+  RunningJob *job = RemoteOps::UploadReceived(staged, receiving.remote, receiving.into);
+
+  QJsonObject object;
+  int status = 202;
+  if (job == nullptr) {
+    QDir(folder).removeRecursively();
+    status = 500;
+    object.insert(QStringLiteral("error"), QStringLiteral("rclone could not be started"));
+  } else {
+    // The staged copy is moved by rclone; what is left of its folder goes
+    // when the job ends, however it ends.
+    QObject::connect(job, &RunningJob::finished, this,
+                     [folder](JobState) { QDir(folder).removeRecursively(); });
+    object.insert(QStringLiteral("requestId"), job->requestId());
+    object.insert(QStringLiteral("started"), QStringLiteral("upload"));
+    object.insert(QStringLiteral("dest"), job->description().dest);
+  }
+  mReceiving.remove(socket);
+  socket->write(FormatHttpResponse(status, toJson(object)));
+  socket->flush();
+  socket->disconnectFromHost();
+}
+
+void ApiServer::dropReceiving(QTcpSocket *socket) {
+  auto found = mReceiving.find(socket);
+  if (found == mReceiving.end()) {
+    return;
+  }
+  if (found->file != nullptr) {
+    found->file->close();
+  }
+  QDir(found->folder).removeRecursively();
+  mReceiving.erase(found);
+}
+
 void ApiServer::openEventStream(QTcpSocket *socket) {
   socket->setProperty("stream", true);
 
@@ -1836,6 +2000,14 @@ void ApiServer::accept() {
 }
 
 void ApiServer::read(QTcpSocket *socket) {
+  // A file on its way in: every byte is the file's. Before the check below,
+  // because such a connection is also one this server no longer answers
+  // requests on.
+  if (mReceiving.contains(socket)) {
+    receiveMore(socket, socket->readAll());
+    return;
+  }
+
   // Once a connection is an event stream it is ours to write to, not to read
   // from. Anything the client sends down it afterwards is dropped rather
   // than answered into the middle of the stream.
@@ -1846,6 +2018,24 @@ void ApiServer::read(QTcpSocket *socket) {
 
   QByteArray buffer = socket->property("buffer").toByteArray();
   buffer += socket->readAll();
+
+  // A file being sent is recognised by its head, before its body has come:
+  // waiting for the whole of it, as for any other request, would be holding
+  // a film in memory.
+  {
+    HttpRequest head;
+    int bodyStart = 0;
+    if (ParseHttpHead(buffer, &head, &bodyStart) == HttpParseResult::Complete &&
+        head.method == QLatin1String("POST")) {
+      const QStringList parts = segmentsOf(head.path);
+      if (parts.size() == 3 && parts.at(0) == QLatin1String("remotes") &&
+          parts.at(2) == QLatin1String("receive")) {
+        socket->setProperty("buffer", QByteArray());
+        startReceiving(socket, head, buffer.mid(bodyStart));
+        return;
+      }
+    }
+  }
 
   for (;;) {
     HttpRequest request;

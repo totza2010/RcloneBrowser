@@ -49,6 +49,13 @@ enum class HttpParseResult {
 // treated as the body of the first.
 HttpParseResult ParseHttpRequest(QByteArray &buffer, HttpRequest *request);
 
+// Only the request line and the headers, for a request whose body is not to
+// be held in memory -- a file being sent. Complete as soon as the headers
+// are there, with *bodyStart where the body begins in `buffer`; nothing is
+// removed from it, and no limit is put on the body's length.
+HttpParseResult ParseHttpHead(const QByteArray &buffer, HttpRequest *request,
+                              int *bodyStart);
+
 // A complete response, ready to write. `contentType` defaults to JSON
 // because everything this API returns is JSON; the exception is the empty
 // body of a 204.
