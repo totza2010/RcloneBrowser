@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTest>
+#include <QTimeZone>
 
 // A schedule as another program reads and writes it: words rather than the
 // nine booleans storage keeps.
@@ -126,6 +127,21 @@ private slots:
     QVERIFY2(why.contains(key), qPrintable(why));
     // And nothing was half written.
     QCOMPARE(ScheduleJson::Write(s, aMonday()), before);
+  }
+
+  // One way of writing a moment, on every system: Qt's own "t" says
+  // "GMT+7" on Windows and "+07" on Linux.
+  void aMomentIsWrittenTheSameWayEverywhere() {
+    const QDate day(2026, 10, 18);
+    const QTime at(23, 54, 1);
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(7 * 3600))),
+             QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT+7"));
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(19800))),
+             QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT+5:30"));
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(-4 * 3600))),
+             QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT-4"));
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::UTC)),
+             QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT"));
   }
 
   void aCronExpressionThatCannotBeReadIsRefused() {

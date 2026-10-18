@@ -98,7 +98,21 @@ bool Schedule::isDue(const QDateTime &now) const {
 }
 
 QString ScheduleStamp(const QDateTime &when) {
-  return when.toString(QStringLiteral("ddd, dd/MMM/yyyy HH:mm:ss t"));
+  // The zone is written out here rather than left to "t", which Qt spells
+  // the way each system does: "GMT+7" on Windows, "+07" on Linux. A schedule
+  // moved between the two, or read by the page, would otherwise say the same
+  // moment two ways. "GMT+7" is the form the stored schedules already hold.
+  const int offset = when.offsetFromUtc();
+  QString zone = QStringLiteral("GMT");
+  if (offset != 0) {
+    const int minutes = qAbs(offset) / 60;
+    zone += (offset < 0 ? QLatin1Char('-') : QLatin1Char('+')) +
+            QString::number(minutes / 60);
+    if (minutes % 60 != 0) {
+      zone += QStringLiteral(":%1").arg(minutes % 60, 2, 10, QLatin1Char('0'));
+    }
+  }
+  return when.toString(QStringLiteral("ddd, dd/MMM/yyyy HH:mm:ss ")) + zone;
 }
 
 QDateTime Schedule::nextRun(const QDateTime &from) const {
