@@ -493,26 +493,50 @@ function drawJobs() {
 }
 
 function drawQueue() {
-  const rows = state.queue.map((entry) => {
+  // The running entry is first and stays first, so nothing may move above
+  // it and it does not move at all.
+  const first = state.queue.length && state.queue[0].running ? 1 : 0;
+  const last = state.queue.length - 1;
+  const waiting = state.queue.length - first;
+
+  const rows = state.queue.map((entry, i) => {
     const task = state.tasks.find((t) => t.id === entry.taskId);
+    const move = (to, label, title, can) =>
+      '<button class="ghost small" title="' + title + '" data-queue-move="' +
+        esc(entry.requestId) + '" data-to="' + to + '"' + (can ? "" : " disabled") + ">" +
+        label + "</button>";
     return (
       "<tr>" +
+        '<td class="muted">' + (i + 1) + "</td>" +
         "<td>" + esc(task ? task.name : entry.taskId) + "</td>" +
         "<td>" + (entry.running ? '<span class="tag running">running</span>' : "waiting") + "</td>" +
         "<td>" + (entry.dryRun ? "dry run" : "") + "</td>" +
-        '<td style="text-align:right">' +
+        '<td style="text-align:right; white-space:nowrap">' +
           (entry.running
             ? ""
-            : '<button class="ghost small" data-unqueue="' + esc(entry.requestId) + '">Remove</button>') +
+            : move("top", "⤒", "to the front", i > first) +
+              move("up", "↑", "one up", i > first) +
+              move("down", "↓", "one down", i < last) +
+              move("bottom", "⤓", "to the back", i < last) + " " +
+              '<button class="ghost small" data-unqueue="' + esc(entry.requestId) + '">Remove</button>') +
         "</td>" +
       "</tr>"
     );
   });
 
-  $("tab-queue").innerHTML = rows.length
-    ? "<table><thead><tr><th>Task</th><th>State</th><th></th><th></th></tr></thead><tbody>" +
-      rows.join("") + "</tbody></table>"
-    : '<p class="empty">The queue is empty.</p>';
+  const running = !!state.system.queueRunning;
+  $("tab-queue").innerHTML =
+    '<div class="toolbar">' +
+      '<button class="ghost small" id="queue-toggle-2">' + (running ? "Pause the queue" : "Start the queue") + "</button>" +
+      '<button class="danger small" data-queue-clear=""' + (waiting ? "" : " disabled") + ">Clear the queue</button>" +
+      '<span class="muted">' + (running
+        ? "The queue is running: each task starts when the one before it ends."
+        : "The queue is paused: nothing in it will start until it is started.") + "</span>" +
+    "</div>" +
+    (rows.length
+      ? "<table><thead><tr><th>#</th><th>Task</th><th>State</th><th></th><th></th></tr></thead><tbody>" +
+        rows.join("") + "</tbody></table>"
+      : '<p class="empty">The queue is empty. Tasks are added with Queue on a task, or by a schedule.</p>');
 }
 
 // The schedules that run a task, said on the task: when, and whether on.
@@ -1244,6 +1268,124 @@ $("pick-ok").addEventListener("click", () => {
     return;
   }
   pickClose({ remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked });
+});
+
+// ---- the API, described -------------------------------------------------------
+//
+// Drawn from the description the daemon serves, which is made from the list
+// every request is checked against -- so this tab cannot show a route the
+// daemon does not have, or miss one it does.
+
+let apiSpec = null;
+
+async function drawApi() {
+  const box = $("tab-api");
+  if (!apiSpec) {
+    box.innerHTML = "<p>reading…</p>";
+    try {
+      const answer = await api("GET", "/openapi.json");
+      if (answer.status !== 200) throw new Error(reasonFrom(answer));
+      apiSpec = answer.data;
+    } catch (e) {
+      box.innerHTML = '<p class="error">could not read the description: ' + esc(String(e.message || e)) + "</p>";
+      return;
+    }
+  }
+
+  // Grouped by section, in the order the daemon lists them.
+  const sections = new Map();
+  for (const [path, item] of Object.entries(apiSpec.paths || {})) {
+    for (const [method, op] of Object.entries(item)) {
+      const tag = (op.tags || ["Other"])[0];
+      if (!sections.has(tag)) sections.set(tag, []);
+      sections.get(tag).push({ path, method: method.toUpperCase(), op });
+    }
+  }
+
+  const origin = location.origin;
+  const parts = [
+    '<div class="api-head">' +
+      "<p>Everything the page does, another program can do the same way. " +
+      "Every route but the ones marked <b>open</b> needs " +
+      "<code>Authorization: Bearer &lt;token or session&gt;</code>. The token " +
+      "is printed when the daemon starts and kept in its settings; a session " +
+      "comes from <code>POST /api/v1/login</code>.</p>" +
+      '<p><a href="/api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a> ' +
+      '<span class="muted">— OpenAPI ' + esc(apiSpec.openapi || "") +
+      ", for Swagger, Postman, a generated client · " + esc(origin) + "</span></p>" +
+      '<input id="api-filter" type="text" placeholder="filter: tasks, schedule, stream…" autocomplete="off">' +
+    "</div>",
+  ];
+
+  for (const [tag, ops] of sections) {
+    parts.push('<h3 class="api-section" data-api-section>' + esc(tag) + "</h3>");
+    for (const { path, method, op } of ops) {
+      const params = (op.parameters || []).filter((p) => p.in === "query");
+      const body = op.requestBody && op.requestBody.content &&
+        op.requestBody.content["application/json"] &&
+        op.requestBody.content["application/json"].example;
+      const answers = Object.entries(op.responses || {});
+      // Only what can be asked safely and without filling anything in.
+      const tryable = method === "GET" && !path.includes("{") &&
+        path.startsWith("/api/v1/") && path !== "/api/v1/events";
+
+      parts.push(
+        '<details class="api-op" data-api-text="' +
+          esc((method + " " + path + " " + op.summary + " " + tag).toLowerCase()) + '">' +
+          "<summary>" +
+            '<span class="verb ' + method.toLowerCase() + '">' + method + "</span>" +
+            "<code>" + esc(path) + "</code>" +
+            '<span class="api-summary">' + esc(op.summary || "") + "</span>" +
+            (op.security && !op.security.length ? '<span class="tag">open</span>' : "") +
+          "</summary>" +
+          (op.description ? "<p>" + esc(op.description) + "</p>" : "") +
+          (params.length
+            ? "<dl>" + params.map((p) =>
+                "<dt><code>" + esc(p.name) + "</code></dt><dd>" + esc(p.description || "") + "</dd>").join("") + "</dl>"
+            : "") +
+          (body ? '<p class="muted">Body</p><pre class="command">' + esc(JSON.stringify(body, null, 2)) + "</pre>" : "") +
+          "<dl>" + answers.map(([code, r]) =>
+            "<dt><code>" + esc(code) + "</code></dt><dd>" + esc(r.description || "") + "</dd>").join("") + "</dl>" +
+          (tryable
+            ? '<p><button type="button" class="ghost small" data-api-try="' + esc(path.slice(7)) + '">Try it</button></p>' +
+              '<pre class="command hidden" data-api-out="' + esc(path.slice(7)) + '"></pre>'
+            : "") +
+        "</details>");
+    }
+  }
+  box.innerHTML = parts.join("");
+
+  $("api-filter").addEventListener("input", () => {
+    const words = $("api-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
+    for (const op of box.querySelectorAll(".api-op")) {
+      op.classList.toggle("hidden", !words.every((w) => op.dataset.apiText.includes(w)));
+    }
+    for (const h of box.querySelectorAll("[data-api-section]")) {
+      let next = h.nextElementSibling;
+      let any = false;
+      while (next && next.classList.contains("api-op")) {
+        any = any || !next.classList.contains("hidden");
+        next = next.nextElementSibling;
+      }
+      h.classList.toggle("hidden", !any);
+    }
+  });
+}
+
+$("tab-api").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-api-try]");
+  if (!button) return;
+  const path = button.dataset.apiTry;
+  const out = $("tab-api").querySelector('[data-api-out="' + CSS.escape(path) + '"]');
+  out.classList.remove("hidden");
+  out.textContent = "…";
+  try {
+    const answer = await api("GET", path);
+    const text = typeof answer.data === "string" ? answer.data : JSON.stringify(answer.data, null, 2);
+    out.textContent = answer.status + "\n" + (text.length > 20000 ? text.slice(0, 20000) + "\n…" : text);
+  } catch (e) {
+    out.textContent = "could not reach the daemon";
+  }
 });
 
 // ---- the transfer form ------------------------------------------------------
@@ -2584,6 +2726,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (d.queueMove) {
+    if (await command("POST", "/queue/" + encodeURIComponent(d.queueMove) + "/move", { to: d.to })) refresh();
+    return;
+  }
+  if (d.queueClear !== undefined) {
+    const waiting = state.queue.filter((e) => !e.running).length;
+    if (!confirm("Take all " + waiting + " waiting tasks out of the queue?\n\n" +
+                 "One that is running is left to finish; the tasks themselves are kept.")) return;
+    if (await command("POST", "/queue/clear")) refresh();
+    return;
+  }
+  if (button.id === "queue-toggle-2") {
+    const to = state.system.queueRunning ? "/queue/pause" : "/queue/start";
+    if (await command("POST", to)) refresh();
+    return;
+  }
+
   if (d.unqueue) {
     if (await command("DELETE", "/queue/" + encodeURIComponent(d.unqueue))) refresh();
     return;
@@ -2638,7 +2797,9 @@ document.addEventListener("click", async (event) => {
 
   if (d.tab) {
     tab = d.tab;
-    for (const b of document.querySelectorAll("nav button")) {
+    if (tab === "api") drawApi();
+    // The tab bar's own buttons: the transfer form has a bar of its own.
+    for (const b of document.querySelectorAll("#tabs button")) {
       b.classList.toggle("on", b.dataset.tab === tab);
     }
     for (const section of document.querySelectorAll(".tab")) {

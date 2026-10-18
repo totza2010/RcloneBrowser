@@ -1,4 +1,5 @@
 #include "api_auth.h"
+#include "api_routes.h"
 #include "api_server.h"
 #include "database.h"
 #include "job_options.h"
@@ -250,6 +251,23 @@ private slots:
   }
 
   void cleanupTestCase() {
+    // Everything these tests sent, looked up in the list the API's
+    // documentation is made from. Anything not there is a route added to
+    // the code and not to the list -- the documentation would not show it --
+    // apart from the requests below, which are nonsense on purpose.
+    static const QStringList nonsense = {
+        QStringLiteral("GET /api/v1/nothing"),
+    };
+    QStringList missing;
+    for (const QString &request : ApiRoutes::Unlisted()) {
+      if (!nonsense.contains(request)) {
+        missing << request;
+      }
+    }
+    QVERIFY2(missing.isEmpty(),
+             qPrintable(QStringLiteral("not in ApiRoutes: ") +
+                        missing.join(QStringLiteral(", "))));
+
     JobQueue::instance().clear();
     JobQueue::instance().pause();
     ApiServer::instance().stop();
@@ -852,6 +870,119 @@ private slots:
     QCOMPARE(JobQueue::instance().count(), 0);
 
     ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  // The line can be put in another order and emptied, as from the window.
+  void theQueueCanBeReorderedAndCleared() {
+    JobOptions *a = makeTask(QStringLiteral("first in"));
+    JobOptions *b = makeTask(QStringLiteral("second in"));
+    JobOptions *c = makeTask(QStringLiteral("third in"));
+    QStringList ids;
+    for (JobOptions *task : {a, b, c}) {
+      const QByteArray reply = send(
+          "POST", "/api/v1/tasks/" + task->uniqueId.toString().toUtf8() + "/enqueue",
+          mToken, QByteArray());
+      QCOMPARE(statusOf(reply), 202);
+      ids << bodyOf(reply).object().value(QStringLiteral("requestId")).toString();
+    }
+    const auto order = []() {
+      QStringList now;
+      for (const QueueEntry &entry : JobQueue::instance().entries()) {
+        now << entry.requestId;
+      }
+      return now;
+    };
+    const auto move = [this](const QString &id, const QByteArray &to) {
+      return statusOf(send("POST",
+                           "/api/v1/queue/" + QUrl::toPercentEncoding(id) + "/move",
+                           mToken, "{\"to\":" + to + "}"));
+    };
+
+    QCOMPARE(move(ids.at(2), "\"top\""), 200);
+    QCOMPARE(order(), (QStringList{ids.at(2), ids.at(0), ids.at(1)}));
+    QCOMPARE(move(ids.at(2), "\"down\""), 200);
+    QCOMPARE(order(), (QStringList{ids.at(0), ids.at(2), ids.at(1)}));
+    QCOMPARE(move(ids.at(0), "2"), 200);
+    QCOMPARE(order(), (QStringList{ids.at(2), ids.at(1), ids.at(0)}));
+    // Already at the top: done, not an error.
+    QCOMPARE(move(ids.at(2), "\"up\""), 409);
+    QCOMPARE(move(ids.at(2), "\"top\""), 200);
+    QCOMPARE(move(ids.at(2), "7"), 409);
+    QCOMPARE(move(ids.at(2), "\"sideways\""), 400);
+    QCOMPARE(move(QStringLiteral("{nobody}"), "\"top\""), 404);
+    QCOMPARE(order(), (QStringList{ids.at(2), ids.at(1), ids.at(0)}));
+
+    // Emptied, and the tasks are still tasks.
+    const QByteArray cleared = ask("POST", "/api/v1/queue/clear", mToken);
+    QCOMPARE(statusOf(cleared), 200);
+    QCOMPARE(bodyOf(cleared).object().value(QStringLiteral("removed")).toInt(), 3);
+    QCOMPARE(JobQueue::instance().count(), 0);
+    QVERIFY(ListOfJobOptions::getInstance()->find(a->uniqueId) != nullptr);
+
+    QCOMPARE(statusOf(ask("POST", "/api/v1/queue/clear", QByteArray())), 401);
+
+    for (JobOptions *task : {a, b, c}) {
+      ListOfJobOptions::getInstance()->Forget(task);
+    }
+  }
+
+  // The API describes itself, from the same list every request is checked
+  // against, and a tool can read the description before it has a key.
+  void theApiDescribesItself() {
+    const QByteArray reply = ask("GET", "/api/v1/openapi.json", QByteArray());
+    QCOMPARE(statusOf(reply), 200);
+    const QJsonObject spec = bodyOf(reply).object();
+    QCOMPARE(spec.value(QStringLiteral("openapi")).toString(),
+             QStringLiteral("3.1.0"));
+    const QJsonObject paths = spec.value(QStringLiteral("paths")).toObject();
+
+    // Every route is in it, and no route is in it twice.
+    int operations = 0;
+    for (const QString &path : paths.keys()) {
+      operations += paths.value(path).toObject().size();
+    }
+    QCOMPARE(operations, int(ApiRoutes::All().size()));
+
+    const QJsonObject make = paths.value(QStringLiteral("/api/v1/tasks"))
+                                 .toObject()
+                                 .value(QStringLiteral("post"))
+                                 .toObject();
+    QVERIFY(make.contains(QStringLiteral("requestBody")));
+    QVERIFY(make.value(QStringLiteral("responses")).toObject()
+                .contains(QStringLiteral("201")));
+
+    // What needs no key says so; everything else needs one.
+    QVERIFY(paths.value(QStringLiteral("/api/v1/ping")).toObject()
+                .value(QStringLiteral("get")).toObject()
+                .contains(QStringLiteral("security")));
+    QVERIFY(!make.contains(QStringLiteral("security")));
+    QVERIFY(!spec.value(QStringLiteral("security")).toArray().isEmpty());
+
+    // A path's placeholders are parameters.
+    const QJsonArray parameters =
+        paths.value(QStringLiteral("/api/v1/tasks/{id}")).toObject()
+            .value(QStringLiteral("put")).toObject()
+            .value(QStringLiteral("parameters")).toArray();
+    QCOMPARE(parameters.at(0).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("id"));
+
+    // Nothing of this installation is in it.
+    QVERIFY(!reply.contains(mToken));
+
+    // A literal segment is matched before a placeholder in the same place.
+    const ApiRoutes::Route *route =
+        ApiRoutes::Match(QStringLiteral("GET"), QStringLiteral("/api/v1/tasks/defaults"));
+    QVERIFY(route != nullptr);
+    QCOMPARE(route->path, QStringLiteral("/api/v1/tasks/defaults"));
+    QVERIFY(ApiRoutes::Match(QStringLiteral("HEAD"), QStringLiteral("/api/v1/ping")));
+    QVERIFY(!ApiRoutes::Match(QStringLiteral("GET"), QStringLiteral("/api/v1/tasks/")));
+
+    // And the check at the end of this file is a check: a request on no
+    // route is noted, one on a route is not.
+    ask("GET", "/api/v1/nothing", mToken);
+    ask("GET", "/api/v1/system", mToken);
+    QVERIFY(ApiRoutes::Unlisted().contains(QStringLiteral("GET /api/v1/nothing")));
+    QVERIFY(!ApiRoutes::Unlisted().contains(QStringLiteral("GET /api/v1/system")));
   }
 
   // A dry run asked for in the query, because that is how somebody testing

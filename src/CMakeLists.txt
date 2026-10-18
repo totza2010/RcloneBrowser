@@ -54,6 +54,7 @@ set(CORE_SOURCE
   app_core.cpp
   http_message.cpp
   api_server.cpp
+  api_routes.cpp
   api_auth.cpp
   shutdown_signal.cpp
   remote_registry.cpp
@@ -95,6 +96,7 @@ set(CORE_HEADER
   app_core.h
   http_message.h
   api_server.h
+  api_routes.h
   api_auth.h
   shutdown_signal.h
   remote_registry.h

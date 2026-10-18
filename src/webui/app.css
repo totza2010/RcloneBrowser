@@ -489,6 +489,26 @@ input.bad, select.bad { border-color: var(--bad); }
 .player { background: #000; border-radius: 4px; max-height: 52vh; width: 100%; }
 #stream-items { max-height: 150px; }
 
+/* ---- the API tab -------------------------------------------------------- */
+
+.api-head { margin-bottom: 12px; }
+.api-head p { margin: 0 0 8px; }
+.api-section { color: var(--muted); font-size: 12px; letter-spacing: .04em; margin: 18px 0 6px; text-transform: uppercase; }
+.api-op { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; padding: 0 12px; }
+.api-op[open] { padding-bottom: 10px; }
+.api-op summary { align-items: center; cursor: pointer; display: flex; gap: 10px; list-style: none; padding: 8px 0; }
+.api-op summary::-webkit-details-marker { display: none; }
+.api-op summary code { background: none; padding: 0; }
+.api-summary { color: var(--muted); font-size: 13px; }
+.api-op p { font-size: 13px; margin: 6px 0; }
+.api-op dl { display: grid; font-size: 13px; gap: 4px 14px; grid-template-columns: max-content 1fr; margin: 6px 0; }
+.api-op dd { margin: 0; }
+.verb { border-radius: 3px; font-size: 11px; font-weight: 600; min-width: 52px; padding: 2px 6px; text-align: center; }
+.verb.get { background: rgba(60, 140, 220, .18); color: #3c8cdc; }
+.verb.post { background: rgba(40, 160, 90, .18); color: #28a05a; }
+.verb.put { background: rgba(200, 140, 30, .2); color: #c88c1e; }
+.verb.delete { background: rgba(210, 60, 60, .18); color: #d23c3c; }
+
 /* ---- schedules --------------------------------------------------------- */
 
 .sched-daily { align-items: center; display: flex; flex-wrap: wrap; gap: 10px 16px; padding-left: 22px; }

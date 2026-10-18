@@ -1,5 +1,6 @@
 #include "api_server.h"
 #include "api_auth.h"
+#include "api_routes.h"
 #include "app_core.h"
 #include "directory_listing.h"
 #include "extra_flags.h"
@@ -22,6 +23,7 @@
 #include "task_builder.h"
 #include "utils.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QMimeDatabase>
@@ -304,7 +306,7 @@ bool isSomethingWeCanShow(const QString &path) {
       QStringLiteral("/api/v1/remotes"),   QStringLiteral("/api/v1/tasks"),
       QStringLiteral("/api/v1/queue"),     QStringLiteral("/api/v1/jobs"),
       QStringLiteral("/api/v1/schedules"), QStringLiteral("/api/v1/history"),
-      QStringLiteral("/api/v1/events")};
+      QStringLiteral("/api/v1/events"),  QStringLiteral("/api/v1/openapi.json")};
   if (exact.contains(path)) {
     return true;
   }
@@ -1579,9 +1581,20 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   //   /auth   says whether a password has been set, so the page knows what
   //           form to show
   //   /login  is how the password is turned into a session in the first place
+  //   /openapi.json  describes the routes and nothing of this installation;
+  //           tools that read one expect to fetch it before they have a key
   static const QStringList open = {QStringLiteral("/api/v1/ping"),
                                    QStringLiteral("/api/v1/auth"),
-                                   QStringLiteral("/api/v1/login")};
+                                   QStringLiteral("/api/v1/login"),
+                                   QStringLiteral("/api/v1/openapi.json")};
+
+  // Every request is looked up in the list the documentation is made from,
+  // and one that is not there is noted. Nothing else changes: this only
+  // lets the tests say a route was added to the code and not to the list.
+  // See api_routes.h.
+  if (ApiRoutes::Match(request.method, asked.path) == nullptr) {
+    ApiRoutes::NoteUnlisted(request.method, asked.path);
+  }
 
   if (!open.contains(asked.path) && !mayAsk(asked)) {
     qCDebug(rbApp) << "refused an API request from somebody not signed in"
@@ -2214,6 +2227,20 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
       JobQueue::instance().start();
     } else if (parts.at(1) == QLatin1String("pause")) {
       JobQueue::instance().pause();
+    } else if (parts.at(1) == QLatin1String("clear")) {
+      // Everything that is waiting. The entry that is running stays: it is
+      // a job now, and stopping it is how that one ends -- the same thing
+      // the window's button has always promised.
+      const int before = JobQueue::instance().count();
+      JobQueue::instance().clear();
+      qCDebug(rbApp) << "API cleared the queue of"
+                     << before - JobQueue::instance().count();
+      QJsonObject object;
+      object.insert(QStringLiteral("removed"),
+                    before - JobQueue::instance().count());
+      object.insert(QStringLiteral("queued"), JobQueue::instance().count());
+      *body = toJson(object);
+      return 200;
     } else {
       *body = problem(QStringLiteral("the queue does not do that"));
       return 404;
@@ -2224,6 +2251,72 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
     QJsonObject object;
     object.insert(QStringLiteral("running"), JobQueue::instance().isRunning());
     object.insert(QStringLiteral("queued"), JobQueue::instance().count());
+    *body = toJson(object);
+    return 200;
+  }
+
+  // queue/{requestId}/move -- a waiting entry put somewhere else in the
+  // line. {"to": 0} is a place counted from the front; "up", "down", "top"
+  // and "bottom" are what the window's buttons say, and what a person
+  // clicking means without having to count.
+  if (post && parts.size() == 3 && parts.at(0) == QLatin1String("queue") &&
+      parts.at(2) == QLatin1String("move")) {
+    const QList<QueueEntry> &entries = JobQueue::instance().entries();
+    int from = -1;
+    for (int i = 0; i < entries.size(); ++i) {
+      if (entries.at(i).requestId == parts.at(1)) {
+        from = i;
+      }
+    }
+    if (from < 0) {
+      *body = problem(QStringLiteral("nothing in the queue by that name"));
+      return 404;
+    }
+
+    const QJsonValue asked = options(request).value(QStringLiteral("to"));
+    // The front place is not on offer while it is running: everything the
+    // queue does depends on the running job being first.
+    const int first = JobQueue::instance().taskIsRunning() ? 1 : 0;
+    const int last = int(entries.size()) - 1;
+    int to = -1;
+    if (asked.isDouble()) {
+      to = asked.toInt();
+    } else if (asked.toString() == QLatin1String("up")) {
+      to = from - 1;
+    } else if (asked.toString() == QLatin1String("down")) {
+      to = from + 1;
+    } else if (asked.toString() == QLatin1String("top")) {
+      to = first;
+    } else if (asked.toString() == QLatin1String("bottom")) {
+      to = last;
+    } else {
+      *body = problem(QStringLiteral(
+          "\"to\" has to be a place in the line, or up, down, top or bottom"));
+      return 400;
+    }
+
+    if (from == to) {
+      // Already there. Said as done rather than refused: asking for the top
+      // when already at the top is not a mistake worth an error.
+      QJsonObject object;
+      object.insert(QStringLiteral("at"), from);
+      *body = toJson(object);
+      return 200;
+    }
+    if (to < first || to > last) {
+      *body = problem(to < first && first == 1
+                          ? QStringLiteral("the first place is the one running")
+                          : QStringLiteral("there is no such place in the line"));
+      return 409;
+    }
+    if (!JobQueue::instance().move(from, to)) {
+      *body = problem(QStringLiteral("that one is running and stays first"));
+      return 409;
+    }
+    qCDebug(rbApp) << "API moved queue entry" << parts.at(1) << from << "->"
+                   << to;
+    QJsonObject object;
+    object.insert(QStringLiteral("at"), to);
     *body = toJson(object);
     return 200;
   }
@@ -2272,6 +2365,19 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     QJsonObject object;
     object.insert(QStringLiteral("ok"), true);
     *body = toJson(object);
+    return 200;
+  }
+
+  // The routes, described. Made from ApiRoutes, the same list every request
+  // is checked against, so it cannot describe an API this is not.
+  if (path == QLatin1String("/api/v1/openapi.json")) {
+#ifdef RCLONE_BROWSER_VERSION
+    const QString version = QStringLiteral(RCLONE_BROWSER_VERSION).trimmed();
+#else
+    const QString version = QStringLiteral("dev");
+#endif
+    *body = QJsonDocument(ApiRoutes::OpenApi(version))
+                .toJson(QJsonDocument::Indented);
     return 200;
   }
 
