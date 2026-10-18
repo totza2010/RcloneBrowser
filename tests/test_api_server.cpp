@@ -1,5 +1,6 @@
 #include "api_auth.h"
 #include "api_routes.h"
+#include "app_core.h"
 #include "api_server.h"
 #include "database.h"
 #include "job_options.h"
@@ -781,6 +782,49 @@ private slots:
 
     qputenv("FAKE_RCLONE_SLEEP_MS", "0");
     QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  // After a restart a schedule is told what is true of its run: still in
+  // the queue if its entry is, "unknown" if it said running.
+  void aScheduleIsToldTheTruthAboutItsRunAfterAStart() {
+    JobQueue::instance().pause();
+    JobOptions *task = makeTask(QStringLiteral("across a restart"));
+
+    Schedule waiting;
+    waiting.id = QUuid::createUuid().toString();
+    waiting.name = QStringLiteral("still waiting");
+    waiting.taskId = task->uniqueId.toString();
+    waiting.requestId = JobQueue::instance().enqueue(waiting.taskId);
+    waiting.lastStatus = QStringLiteral("in the queue");
+    SchedulerStore::instance().add(waiting);
+
+    Schedule gone = waiting;
+    gone.id = QUuid::createUuid().toString();
+    gone.name = QStringLiteral("was running");
+    gone.requestId = QUuid::createUuid().toString();
+    gone.lastStatus = QStringLiteral("running");
+    SchedulerStore::instance().add(gone);
+
+    Schedule lost = gone;
+    lost.id = QUuid::createUuid().toString();
+    lost.name = QStringLiteral("queued, and the entry is gone");
+    lost.lastStatus = QStringLiteral("in the queue");
+    SchedulerStore::instance().add(lost);
+
+    AppCore::instance().reconcileSchedules();
+
+    QCOMPARE(SchedulerStore::instance().find(waiting.id)->lastStatus,
+             QStringLiteral("in the queue"));
+    QCOMPARE(SchedulerStore::instance().find(gone.id)->lastStatus,
+             QStringLiteral("unknown"));
+    QCOMPARE(SchedulerStore::instance().find(lost.id)->lastStatus,
+             QStringLiteral("unknown"));
+
+    for (const QString &id : {waiting.id, gone.id, lost.id}) {
+      SchedulerStore::instance().remove(id);
+    }
+    JobQueue::instance().remove(waiting.requestId);
     ListOfJobOptions::getInstance()->Forget(task);
   }
 

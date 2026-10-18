@@ -39,6 +39,13 @@ public:
   // test, and for anything that wants to be sure it has not just missed one.
   void checkSchedules();
 
+  // After the store and the queue are read: a schedule that says its run is
+  // "running" or "in the queue" is told what is true now. A run still
+  // waiting in the stored queue is still in the queue; nothing is running
+  // in a program that has only just started; anything else is "unknown".
+  // Public so a test can ask for it without starting the clock.
+  void reconcileSchedules();
+
   // Starts a schedule's run because somebody asked, rather than because its
   // minute came. Returns the request id, or an empty string with *reason
   // saying why not.

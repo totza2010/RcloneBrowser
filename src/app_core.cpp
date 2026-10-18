@@ -6,6 +6,7 @@
 #include "list_of_job_options.h"
 #include "rclone_version.h"
 #include "remote_registry.h"
+#include "running_job.h"
 #include "schedule.h"
 #include "scheduler_store.h"
 #include "script_runner.h"
@@ -161,12 +162,45 @@ void AppCore::start() {
   qCDebug(rbApp) << "loaded schedules=" << SchedulerStore::instance().count()
                  << "queue=" << JobQueue::instance().count();
 
+  reconcileSchedules();
+
   // The same five seconds the window used to wait before its first look, so
   // a schedule due in the minute the program starts in behaves as it did.
   QTimer::singleShot(5000, Qt::VeryCoarseTimer, this, [this]() { tick(); });
 }
 
 void AppCore::checkSchedules() { tick(); }
+
+void AppCore::reconcileSchedules() {
+  // The scheduler card used to do this for itself, by turning both words
+  // into "unknown" whenever it was made -- which was right for "running" and
+  // wrong for "in the queue": the queue is stored, the run is still waiting
+  // in it, and it will start. Here it is decided once, against the queue,
+  // and the card shows what the store says.
+  for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
+    if (schedule.lastStatus != QLatin1String("running") &&
+        schedule.lastStatus != QLatin1String("in the queue")) {
+      continue;
+    }
+    bool waiting = false;
+    for (const QueueEntry &entry : JobQueue::instance().entries()) {
+      waiting = waiting || (!schedule.requestId.isEmpty() &&
+                            entry.requestId == schedule.requestId);
+    }
+    const RunningJob *job = JobRegistry::instance().find(schedule.requestId);
+    const QString now = waiting ? QStringLiteral("in the queue")
+                        : (job != nullptr && job->isRunning())
+                            ? QStringLiteral("running")
+                            : QStringLiteral("unknown");
+    if (now != schedule.lastStatus) {
+      qCDebug(rbSched) << "after starting," << schedule.name << "was"
+                       << schedule.lastStatus << "and is" << now;
+      Schedule updated = schedule;
+      updated.lastStatus = now;
+      SchedulerStore::instance().update(updated);
+    }
+  }
+}
 
 void AppCore::readRcloneVersion() {
   if (GetRclone().isEmpty()) {

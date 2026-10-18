@@ -48,7 +48,13 @@ public:
   void refreshNextRun();
   void updateTaskName(const QString newTaskName);
   void updateTaskStatus(const QString requestID, const QString taskStatus);
-  void stopScheduler();
+  // Shows the scheduler as stopped. `cancelRun` is whether a run this card
+  // started and that is still waiting or going is called off with it --
+  // which is what the window's Stop button has always meant. Showing a
+  // scheduler that was already stopped (at start-up, or because the page
+  // stopped it) calls nothing off: the core's pause does not, and a restart
+  // must not be what takes a queued run away.
+  void stopScheduler(bool cancelRun = true);
   void startScheduler();
 
 public slots:

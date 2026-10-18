@@ -1965,8 +1965,9 @@ MainWindow::MainWindow() {
 
   if (!SchedulerStore::instance().isRunning()) {
 
+    // Shown as stopped, nothing called off: see stopScheduler().
     for (SchedulerWidget *scheduler : schedulerWidgets()) {
-      scheduler->stopScheduler();
+      scheduler->stopScheduler(false);
     }
 
     refreshSchedulerView();
@@ -4060,7 +4061,9 @@ void MainWindow::followSchedulerStore() {
       if (running) {
         widget->startScheduler();
       } else {
-        widget->stopScheduler();
+        // Stopped from somewhere else -- the page, the API. The core's pause
+        // calls nothing off, and the card does not either.
+        widget->stopScheduler(false);
       }
     }
   }

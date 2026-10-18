@@ -1,5 +1,8 @@
 #include "scheduler_widget.h"
 #include "debug_log.h"
+#include "job_queue.h"
+#include "job_registry.h"
+#include "running_job.h"
 #include "list_of_job_options.h"
 #include "schedule.h"
 #include "qcron.h"
@@ -44,9 +47,25 @@ SchedulerWidget::SchedulerWidget(const QString &taskId, const QString &taskName,
 
     applyArgsToScheduler(args);
 
-    // in case things went south and wrong LastRunStatus would lock scheduler
+    // A run this card thinks is going, that is not: "unknown", so the card
+    // is not left locked waiting for it. One that is still waiting in the
+    // queue, or still running, is shown as it is. (AppCore::reconcileSchedules
+    // has already said the same in the store; this is for a card made later,
+    // when the window follows a change from the page.)
     if (mLastRunStatus == "in the queue" || mLastRunStatus == "running") {
-      mLastRunStatus = "unknown";
+      bool waiting = false;
+      for (const QueueEntry &entry : JobQueue::instance().entries()) {
+        waiting = waiting ||
+                  (!mRequestId.isEmpty() && entry.requestId == mRequestId);
+      }
+      const RunningJob *job = JobRegistry::instance().find(mRequestId);
+      if (waiting) {
+        mLastRunStatus = "in the queue";
+      } else if (job != nullptr && job->isRunning()) {
+        mLastRunStatus = "running";
+      } else {
+        mLastRunStatus = "unknown";
+      }
     }
 
     mNextRun = nextRun();
@@ -713,7 +732,7 @@ void SchedulerWidget::updateTaskName(const QString newTaskName) {
   ui.taskName->setText(currentTaskName());
 }
 
-void SchedulerWidget::stopScheduler() {
+void SchedulerWidget::stopScheduler(bool cancelRun) {
 
   mGlobalStop = true;
 
@@ -727,7 +746,8 @@ void SchedulerWidget::stopScheduler() {
 
   ui.showDetails->setText("  Stopped");
 
-  if (mLastRunStatus == "in the queue" || mLastRunStatus == "running") {
+  if (cancelRun &&
+      (mLastRunStatus == "in the queue" || mLastRunStatus == "running")) {
     emit stopTask();
   }
   ui.runTask->setEnabled(false);
