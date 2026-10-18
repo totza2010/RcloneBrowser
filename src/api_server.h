@@ -172,6 +172,11 @@ private:
   void changeRemote(QTcpSocket *socket, const HttpRequest &request,
                     const QString &remote);
 
+  // A running transfer's speed limit, or every one's, changed through its
+  // own remote control -- an answer that has to wait for rclone.
+  void changeBandwidth(QTcpSocket *socket, const HttpRequest &request,
+                       const QString &requestId);
+
   // Runs `then` once rclone has described its backends, or after fifteen
   // seconds without -- what the settings of a remote are judged by.
   void afterBackendsAreKnown(QTcpSocket *socket, std::function<void()> then);

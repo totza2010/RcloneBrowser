@@ -116,6 +116,15 @@ public:
   quint16 streamPort() const { return mStreamPort; }
   QString streamPath() const { return mStreamPath; }
 
+  // How fast it may go, changed while it runs. Only a transfer can be
+  // asked, and only once its remote control is up. `done` gets whether
+  // rclone took it and the rate rclone says it now has.
+  void setBandwidth(const QString &rate,
+                    std::function<void(bool ok, const QString &now)> done);
+  // The rate last set this way, empty when it never was. What the job was
+  // started with is in its command.
+  QString bandwidth() const { return mBandwidth; }
+
   // The remote-control port rclone settled on, read from its output. Zero
   // until it is announced, and zero forever when the task set no port.
   QString rcPort() const { return mRcPort; }
@@ -220,6 +229,7 @@ private:
   JobLogWriter mLog;
 
   QString mMountScript;
+  QString mBandwidth;
   quint16 mStreamPort = 0;
   QString mStreamPath;
   QProcess *mScriptProcess = nullptr;

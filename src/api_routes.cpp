@@ -174,6 +174,21 @@ QList<Route> build() {
         "Plain text, while it runs or long after.",
         "tail: how many lines from the end", "",
         "200: the log; 404: no such job, or it wrote no log"),
+      r("POST", "/api/v1/jobs/{requestId}/bandwidth", kJobs,
+        "Change how fast a running transfer may go",
+        "rate: a size per second -- 500k, 2M, 1.5G -- or off for no limit. "
+        "Told to rclone while it runs (core/bwlimit), and lasts until the job "
+        "ends.",
+        "", R"({"rate":"2M"})",
+        "200: the rate rclone now has; 400: not a rate; 404: no such job; "
+        "409: not a running transfer, or its remote control is not up yet; "
+        "502: rclone did not take it"),
+      r("POST", "/api/v1/bandwidth", kJobs,
+        "Change how fast every running transfer may go",
+        "The same rate told to each running transfer. Each has its own: four "
+        "transfers at 2M are 8M together.",
+        "", R"({"rate":"off"})",
+        "200: how many took it; 400: not a rate"),
       r("POST", "/api/v1/jobs/{requestId}/stop", kJobs, "Stop a job",
         "A mount is unmounted; a stream stops being served.", "", "",
         "202: stopping; 404: no such job; 409: it has already finished"),
@@ -442,6 +457,8 @@ QString scopeOf(const Route &route) {
       QStringLiteral("POST /api/v1/queue/{requestId}/move"),
       QStringLiteral("DELETE /api/v1/queue/{requestId}"),
       QStringLiteral("POST /api/v1/jobs/{requestId}/stop"),
+      QStringLiteral("POST /api/v1/jobs/{requestId}/bandwidth"),
+      QStringLiteral("POST /api/v1/bandwidth"),
       QStringLiteral("POST /api/v1/schedules/{id}/enable"),
       QStringLiteral("POST /api/v1/schedules/{id}/disable"),
       QStringLiteral("POST /api/v1/schedules/{id}/run"),

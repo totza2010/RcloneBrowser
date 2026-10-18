@@ -143,6 +143,13 @@ int main(int argc, char *argv[]) {
   if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
       std::strcmp(command, "move") == 0 || std::strcmp(command, "mount") == 0 ||
       std::strcmp(command, "serve") == 0) {
+    // A remote control to talk to, when a test stands one up: the line rclone
+    // prints when it is serving one.
+    if (const char *port = std::getenv("FAKE_RCLONE_RC_PORT")) {
+      std::printf("2026/10/19 12:00:00 NOTICE: Serving remote control on "
+                  "http://127.0.0.1:%s/\n", port);
+      std::fflush(stdout);
+    }
     int ms = 0;
     if (const char *asked = std::getenv("FAKE_RCLONE_SLEEP_MS")) {
       ms = std::atoi(asked);

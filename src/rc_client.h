@@ -10,6 +10,8 @@
 #include <QPointer>
 #include <QTimer>
 
+#include <functional>
+
 class QNetworkReply;
 
 class RcClient : public QObject {
@@ -32,6 +34,12 @@ public:
   // Asks rclone to stop the job and quit. Used instead of killing the process
   // so in-flight writes get a chance to finish.
   void requestQuit();
+
+  // Changes how fast this rclone may go while it runs: "core/bwlimit" with
+  // a rate such as "2M", "512k" or "off". `done` gets whether rclone took
+  // it and the rate it says it now has.
+  void setBandwidth(const QString &rate,
+                    std::function<void(bool ok, const QString &now)> done);
 
 signals:
   void statsReceived(const JobStats &stats);

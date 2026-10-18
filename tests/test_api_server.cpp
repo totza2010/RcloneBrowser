@@ -2671,6 +2671,73 @@ private slots:
     qputenv("FAKE_RCLONE_SLEEP_MS", "0");
   }
 
+  // A running transfer's speed limit is changed through its own remote
+  // control, while it runs. Standing in for rclone's: something on a port
+  // that answers core/stats and core/bwlimit the way rclone does.
+  void aRunningTransferCanBeSlowedAndFreed() {
+    QVERIFY(useFakeRclone(1));
+    QTcpServer rc;
+    QVERIFY(rc.listen(QHostAddress::LocalHost, 0));
+    QByteArray limits;
+    QObject::connect(&rc, &QTcpServer::newConnection, &rc, [&]() {
+      QTcpSocket *peer = rc.nextPendingConnection();
+      QObject::connect(peer, &QTcpSocket::readyRead, peer, [&limits, peer]() {
+        const QByteArray asked = peer->readAll();
+        QByteArray body = "{\"bytes\":1000,\"totalBytes\":4000,\"speed\":2500,\"eta\":1}";
+        if (asked.contains("/core/bwlimit")) {
+          const QByteArray rate = asked.mid(asked.indexOf("\"rate\":\"") + 8).split('"').first();
+          limits += rate + ";";
+          body = "{\"bytesPerSecond\":1,\"rate\":\"" + rate + "\"}";
+        }
+        peer->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    QByteArray::number(body.size()) + "\r\n\r\n" + body);
+      });
+    });
+    qputenv("FAKE_RCLONE_RC_PORT", QByteArray::number(rc.serverPort()));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+
+    JobOptions *task = makeTask(QStringLiteral("slowed down"));
+    const QByteArray run =
+        ask("POST", "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+            mToken);
+    QCOMPARE(statusOf(run), 202);
+    const QString id = bodyOf(run).object().value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(job->stats().valid, 5000); // its remote control is up
+    const QByteArray target = "/api/v1/jobs/" + QUrl::toPercentEncoding(id) + "/bandwidth";
+
+    const QByteArray slowed = send("POST", target, mToken, "{\"rate\":\"2M\"}");
+    QCOMPARE(statusOf(slowed), 200);
+    QCOMPARE(bodyOf(slowed).object().value(QStringLiteral("rate")).toString(), QStringLiteral("2M"));
+    QCOMPARE(job->bandwidth(), QStringLiteral("2M"));
+    // Said by the job, and the speed with it.
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("requestId")).toString() == id) {
+        QCOMPARE(value.toObject().value(QStringLiteral("bandwidth")).toString(), QStringLiteral("2M"));
+        QCOMPARE(value.toObject().value(QStringLiteral("stats")).toObject()
+                     .value(QStringLiteral("speed")).toDouble(), 2500.0);
+      }
+    }
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/system", mToken)).object()
+                 .value(QStringLiteral("speed")).toDouble(), 2500.0);
+
+    // Every running transfer at once.
+    const QByteArray freed = send("POST", "/api/v1/bandwidth", mToken, "{\"rate\":\"off\"}");
+    QCOMPARE(statusOf(freed), 200);
+    QCOMPARE(bodyOf(freed).object().value(QStringLiteral("changed")).toInt(), 1);
+    QCOMPARE(limits, QByteArray("2M;off;"));
+
+    QCOMPARE(statusOf(send("POST", target, mToken, "{\"rate\":\"fast\"}")), 400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/jobs/{nope}/bandwidth", mToken, "{\"rate\":\"1M\"}")), 404);
+
+    job->stop();
+    QCOMPARE(statusOf(send("POST", target, mToken, "{\"rate\":\"1M\"}")), 409);
+    qunsetenv("FAKE_RCLONE_RC_PORT");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

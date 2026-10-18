@@ -162,6 +162,10 @@ QJsonObject describe(const RunningJob &job) {
   object.insert(QStringLiteral("command"),
                 job.displayCommand().join(QLatin1Char(' ')));
 
+  if (!job.bandwidth().isEmpty()) {
+    object.insert(QStringLiteral("bandwidth"), job.bandwidth());
+  }
+
   // Where a stream can be opened: a path of this same server. The host is
   // not here: this program does not know by what name whoever is asking
   // reached it, and they do.
@@ -182,6 +186,10 @@ QJsonObject describe(const RunningJob &job) {
     figures.insert(QStringLiteral("transfers"), double(stats.transfers));
     figures.insert(QStringLiteral("errors"), double(stats.errors));
     figures.insert(QStringLiteral("elapsedSeconds"), stats.elapsedSeconds);
+    figures.insert(QStringLiteral("speed"), stats.speed);
+    figures.insert(QStringLiteral("etaSeconds"), double(stats.etaSeconds));
+    figures.insert(QStringLiteral("percent"), stats.percent());
+    figures.insert(QStringLiteral("totalTransfers"), double(stats.totalTransfers));
     object.insert(QStringLiteral("stats"), figures);
   }
   return object;
@@ -1762,6 +1770,97 @@ void ApiServer::dropReceiving(QTcpSocket *socket) {
   mReceiving.erase(found);
 }
 
+void ApiServer::changeBandwidth(QTcpSocket *socket, const HttpRequest &request,
+                                const QString &requestId) {
+  socket->setProperty("stream", true);
+  QPointer<QTcpSocket> held(socket);
+  const auto answer = [held](int status, const QJsonObject &object) {
+    if (!held) {
+      return;
+    }
+    held->write(FormatHttpResponse(status, toJson(object)));
+    held->flush();
+    held->disconnectFromHost();
+  };
+  const auto refuse = [answer](int status, const QString &code, const QString &why) {
+    QJsonObject object;
+    object.insert(QStringLiteral("error"), why);
+    object.insert(QStringLiteral("code"), code);
+    answer(status, object);
+  };
+
+  // What rclone takes for a rate: a number with an optional unit, an upload
+  // and download pair ("10M:1M"), or "off". A timetable of rates is
+  // rclone's too, but is a thing to set before a job, not while it runs.
+  static const QRegularExpression rate(
+      QStringLiteral("^(off|[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?(:[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?)?)$"));
+  const QString asked = options(request).value(QStringLiteral("rate")).toString().trimmed();
+  if (!rate.match(asked).hasMatch()) {
+    refuse(400, QStringLiteral("bad_rate"),
+           QStringLiteral("\"rate\" has to be a speed such as 500k, 2M or 1.5G, "
+                          "or off"));
+    return;
+  }
+
+  QList<RunningJob *> jobs;
+  if (!requestId.isEmpty()) {
+    RunningJob *job = JobRegistry::instance().find(requestId);
+    if (job == nullptr) {
+      refuse(404, QStringLiteral("no_such_job"), QStringLiteral("no such job"));
+      return;
+    }
+    if (!job->isRunning() || job->kind() != JobKind::Transfer) {
+      refuse(409, QStringLiteral("not_a_running_transfer"),
+             QStringLiteral("only a running transfer has a speed to change"));
+      return;
+    }
+    jobs << job;
+  } else {
+    for (RunningJob *job : JobRegistry::instance().jobs()) {
+      if (job->isRunning() && job->kind() == JobKind::Transfer) {
+        jobs << job;
+      }
+    }
+    if (jobs.isEmpty()) {
+      QJsonObject object;
+      object.insert(QStringLiteral("changed"), 0);
+      object.insert(QStringLiteral("of"), 0);
+      answer(200, object);
+      return;
+    }
+  }
+
+  // Asked of each, and answered when all have said.
+  auto left = QSharedPointer<int>::create(int(jobs.size()));
+  auto took = QSharedPointer<int>::create(0);
+  auto said = QSharedPointer<QString>::create();
+  const bool one = !requestId.isEmpty();
+  const int asking = int(jobs.size());
+  for (RunningJob *job : jobs) {
+    qCDebug(rbApp) << "API changing the speed of" << job->requestId() << "to" << asked;
+    job->setBandwidth(asked, [=](bool ok, const QString &now) {
+      if (ok) {
+        *took += 1;
+        *said = now;
+      }
+      if (--*left > 0) {
+        return;
+      }
+      if (one && *took == 0) {
+        refuse(409, QStringLiteral("no_remote_control"),
+               QStringLiteral("rclone's remote control for this job did not "
+                              "answer; it may still be starting"));
+        return;
+      }
+      QJsonObject object;
+      object.insert(QStringLiteral("rate"), one ? *said : asked);
+      object.insert(QStringLiteral("changed"), *took);
+      object.insert(QStringLiteral("of"), asking);
+      answer(200, object);
+    });
+  }
+}
+
 void ApiServer::openEventStream(QTcpSocket *socket) {
   socket->setProperty("stream", true);
 
@@ -2207,6 +2306,13 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         parts.at(0) == QLatin1String("remotes") &&
         parts.at(2) == QLatin1String("answer")) {
       changeRemote(socket, asked, parts.at(1));
+      return;
+    }
+    if (asked.method == QLatin1String("POST") &&
+        ((parts.size() == 3 && parts.at(0) == QLatin1String("jobs") &&
+          parts.at(2) == QLatin1String("bandwidth")) ||
+         (parts.size() == 1 && parts.at(0) == QLatin1String("bandwidth")))) {
+      changeBandwidth(socket, asked, parts.size() == 3 ? parts.at(1) : QString());
       return;
     }
   }
@@ -3096,6 +3202,16 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
   }
 
   if (path == QLatin1String("/api/v1/system")) {
+    // Everything moving at once, for a dashboard: the speeds of the running
+    // transfers added up.
+    double speed = 0;
+    int transferring = 0;
+    for (const RunningJob *job : JobRegistry::instance().jobs()) {
+      if (job->isRunning() && job->kind() == JobKind::Transfer) {
+        ++transferring;
+        speed += job->stats().valid ? job->stats().speed : 0;
+      }
+    }
     QJsonObject object;
     object.insert(QStringLiteral("rcloneVersion"),
                   GetSettings()->value("Settings/rcloneVersion").toString());
@@ -3108,6 +3224,8 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
                   SchedulerStore::instance().isRunning());
     object.insert(QStringLiteral("coreStarted"),
                   AppCore::instance().isStarted());
+    object.insert(QStringLiteral("transferring"), transferring);
+    object.insert(QStringLiteral("speed"), speed); // bytes per second, all together
     *body = toJson(object);
     return 200;
   }

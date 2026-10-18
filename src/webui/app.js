@@ -423,7 +423,10 @@ async function refresh() {
 function draw() {
   const s = state.system;
   $("version").textContent = s.rcloneVersion ? "rclone " + s.rcloneVersion : "";
+  // All of it at a glance: how fast everything is moving together, and how
+  // much is going on.
   $("summary").textContent =
+    (s.transferring ? "⇅ " + bytes(s.speed || 0) + "/s · " : "") +
     (s.runningJobs || 0) + " running · " + (s.queued || 0) + " queued";
   $("queue-toggle").textContent = s.queueRunning ? "Pause queue" : "Start queue";
   $("no-password").classList.toggle("hidden", auth.passwordSet);
@@ -450,6 +453,9 @@ function jobCard(job) {
   if (stats.transfers) figures.push(stats.transfers + " files");
   if (stats.errors) figures.push(stats.errors + " errors");
   if (stats.elapsedSeconds) figures.push(seconds(stats.elapsedSeconds));
+  if (job.running && stats.speed) figures.push(bytes(stats.speed) + "/s");
+  if (job.running && stats.etaSeconds > 0) figures.push(seconds(stats.etaSeconds) + " left");
+  if (job.bandwidth) figures.push("limited to " + esc(job.bandwidth) + (job.bandwidth === "off" ? "" : "/s"));
   figures.push("started by " + esc(job.startedBy || "?"));
 
   return (
@@ -462,6 +468,9 @@ function jobCard(job) {
           '<button class="ghost small" data-log="' + esc(job.requestId) + '">Log</button>' +
           (job.running && job.stream
             ? '<button class="small" data-stream="' + esc(job.requestId) + '">Play</button>'
+            : "") +
+          (job.running && job.kind === "transfer"
+            ? '<button class="ghost small" data-speed="' + esc(job.requestId) + '">Speed…</button>'
             : "") +
           (job.running
             ? '<button class="danger small" data-stop="' + esc(job.requestId) + '">' +
@@ -486,10 +495,24 @@ function jobOrder(a, b) {
   return String(b.startedAt || "").localeCompare(String(a.startedAt || ""));
 }
 
+// A speed limit, asked for in words rclone takes.
+function askRate(what) {
+  const asked = prompt("How fast may " + what + " go?\n\n" +
+    "A speed per second such as 500k, 2M or 1.5G — or off for no limit.", "off");
+  return asked === null ? null : asked.trim();
+}
+
 function drawJobs() {
-  $("tab-jobs").innerHTML = state.jobs.length
+  const s = state.system;
+  // How fast everything is moving together, and one place to slow it all.
+  const head = s.transferring
+    ? '<div class="toolbar"><span>' + s.transferring + " transferring · <b>" +
+      bytes(s.speed || 0) + "/s</b> together</span>" +
+      '<button class="ghost small" data-speed-all="">Limit every running transfer…</button></div>'
+    : "";
+  $("tab-jobs").innerHTML = head + (state.jobs.length
     ? state.jobs.slice().sort(jobOrder).map(jobCard).join("")
-    : '<p class="empty">Nothing is running.</p>';
+    : '<p class="empty">Nothing is running.</p>');
 }
 
 function drawQueue() {
@@ -3317,6 +3340,24 @@ document.addEventListener("click", async (event) => {
 
   if (d.log) return openLog(d.log);
   if (d.stream) return reopenStream(d.stream);
+  if (d.speed) {
+    const job = state.jobs.find((j) => j.requestId === d.speed);
+    const rate = askRate(job ? '"' + job.info + '"' : "this transfer");
+    if (rate === null) return;
+    const answer = await api("POST", "/jobs/" + encodeURIComponent(d.speed) + "/bandwidth", { rate: rate });
+    if (answer.status !== 200) return toast(reasonFrom(answer));
+    toast("now " + (answer.data.rate === "off" ? "not limited" : "limited to " + answer.data.rate + "/s"));
+    return refresh();
+  }
+  if (d.speedAll !== undefined) {
+    const rate = askRate("every running transfer");
+    if (rate === null) return;
+    const answer = await api("POST", "/bandwidth", { rate: rate });
+    if (answer.status !== 200) return toast(reasonFrom(answer));
+    toast(answer.data.changed + " of " + answer.data.of + " running transfers " +
+          (rate === "off" ? "no longer limited" : "limited to " + rate + "/s each"));
+    return refresh();
+  }
   if (d.remoteNew !== undefined) return openRemoteForm(null);
   if (d.remote) return browse(d.remote, "");
   if (d.go !== undefined) return browse(browsing.remote, d.go);

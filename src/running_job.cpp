@@ -1,5 +1,6 @@
 #include "debug_log.h"
 #include "running_job.h"
+#include <QPointer>
 #include "utils.h"
 
 #include <QDir>
@@ -403,6 +404,21 @@ void RunningJob::unmount() {
 #else
   client->start("fusermount", QStringList{"-u", mDescription.dest});
 #endif
+}
+
+void RunningJob::setBandwidth(const QString &rate,
+                              std::function<void(bool, const QString &)> done) {
+  if (mRc == nullptr || !isRunning() || mRc->port() == 0) {
+    done(false, QString());
+    return;
+  }
+  QPointer<RunningJob> self(this);
+  mRc->setBandwidth(rate, [self, done](bool ok, const QString &now) {
+    if (self && ok) {
+      self->mBandwidth = now;
+    }
+    done(ok, now);
+  });
 }
 
 void RunningJob::stop() {

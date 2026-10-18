@@ -1,4 +1,6 @@
 #include "rc_client.h"
+#include <QJsonObject>
+#include <QJsonDocument>
 
 #include <QNetworkReply>
 #include <QUrl>
@@ -82,6 +84,27 @@ void RcClient::poll() {
     mEverSucceeded = true;
     mConsecutiveFailures = 0;
     emit statsReceived(stats);
+  });
+}
+
+void RcClient::setBandwidth(const QString &rate,
+                            std::function<void(bool, const QString &)> done) {
+  if (mPort == 0) {
+    done(false, QString());
+    return;
+  }
+  QJsonObject body;
+  body.insert(QStringLiteral("rate"), rate);
+  QNetworkReply *reply = mNetwork.post(request(QStringLiteral("/core/bwlimit")),
+                                       QJsonDocument(body).toJson(QJsonDocument::Compact));
+  QObject::connect(reply, &QNetworkReply::finished, this, [reply, done]() {
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+      done(false, QString());
+      return;
+    }
+    const QJsonObject answer = QJsonDocument::fromJson(reply->readAll()).object();
+    done(true, answer.value(QStringLiteral("rate")).toString());
   });
 }
 
