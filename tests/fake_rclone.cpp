@@ -56,7 +56,11 @@ int main(int argc, char *argv[]) {
           "\"Hide\":0,\"Exclusive\":false,\"Examples\":null},"
           "{\"Name\":\"page_size\",\"Help\":\"Page size\",\"Type\":\"int\",\"DefaultStr\":\"500\","
           "\"Required\":false,\"IsPassword\":false,\"Sensitive\":false,\"Advanced\":true,"
-          "\"Hide\":0,\"Exclusive\":false,\"Examples\":null}]}]\n");
+          "\"Hide\":0,\"Exclusive\":false,\"Examples\":null}]},"
+          "{\"Name\":\"fakeoauth\",\"Description\":\"Signs in with a browser\",\"Prefix\":\"fakeoauth\","
+          "\"Options\":[{\"Name\":\"client_id\",\"Help\":\"Client id\",\"Type\":\"string\","
+          "\"Sensitive\":true},{\"Name\":\"token\",\"Help\":\"OAuth token\",\"Type\":\"string\","
+          "\"Sensitive\":true,\"Advanced\":true}]}]\n");
       return 0;
     }
     // create and delete: succeed, and write down what they were given when
@@ -71,6 +75,30 @@ int main(int argc, char *argv[]) {
           std::fprintf(file, "\n");
           std::fclose(file);
         }
+      }
+      // A remote that signs in with a browser asks two things after it is
+      // made, the way drive does: whether to refresh the token, and then a
+      // question of its own.
+      bool hasToken = false;
+      const char *state = "";
+      for (int i = 3; i < argc; ++i) {
+        hasToken = hasToken || std::strncmp(argv[i], "token=", 6) == 0;
+        if (std::strcmp(argv[i], "--state") == 0 && i + 1 < argc) {
+          state = argv[i + 1];
+        }
+      }
+      if (std::strcmp(state, "*oauth-confirm,pick,,") == 0) {
+        std::printf("{\"State\":\"pick_done\",\"Option\":{\"Name\":\"config_pick\","
+                    "\"Help\":\"Which one?\",\"DefaultStr\":\"a\",\"Exclusive\":true,"
+                    "\"Examples\":[{\"Value\":\"a\",\"Help\":\"the first\"},"
+                    "{\"Value\":\"b\",\"Help\":\"the second\"}]},\"Error\":\"\"}\n");
+        return 0;
+      }
+      if (hasToken && *state == '\0') {
+        std::printf("{\"State\":\"*oauth-confirm,pick,,\",\"Option\":{\"Name\":"
+                    "\"config_refresh_token\",\"Help\":\"Already have a token - refresh?\","
+                    "\"DefaultStr\":\"true\"},\"Error\":\"\"}\n");
+        return 0;
       }
       std::printf("{\"State\":\"\",\"Option\":null,\"Error\":\"\",\"Result\":\"\"}\n");
       return 0;

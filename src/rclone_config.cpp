@@ -347,15 +347,32 @@ QStringList settingArgs(const QJsonObject &settings) {
   return args;
 }
 
-// What rclone said back to a non-interactive create or update: a question
-// it would have gone on to ask, if any.
-QString questionIn(const QString &said) {
+// rclone's question, from what a non-interactive create or update printed,
+// in the API's words. Empty when it asked nothing.
+QJsonObject questionIn(const QString &said) {
   const QJsonObject answer = QJsonDocument::fromJson(said.toUtf8()).object();
-  if (answer.value(QStringLiteral("State")).toString().isEmpty()) {
-    return QString();
+  const QString state = answer.value(QStringLiteral("State")).toString();
+  if (state.isEmpty()) {
+    return QJsonObject();
   }
-  return answer.value(QStringLiteral("Option")).toObject()
-      .value(QStringLiteral("Name")).toString();
+  const QJsonObject option = answer.value(QStringLiteral("Option")).toObject();
+  QJsonObject question;
+  question.insert(QStringLiteral("state"), state);
+  question.insert(QStringLiteral("name"), option.value(QStringLiteral("Name")).toString());
+  question.insert(QStringLiteral("help"), option.value(QStringLiteral("Help")).toString());
+  question.insert(QStringLiteral("default"), option.value(QStringLiteral("DefaultStr")).toString());
+  question.insert(QStringLiteral("exclusive"), option.value(QStringLiteral("Exclusive")).toBool());
+  question.insert(QStringLiteral("password"), option.value(QStringLiteral("IsPassword")).toBool());
+  QJsonArray examples;
+  for (const QJsonValue &each : option.value(QStringLiteral("Examples")).toArray()) {
+    const QJsonObject e = each.toObject();
+    examples.append(QJsonObject{
+        {QStringLiteral("value"), e.value(QStringLiteral("Value")).toVariant().toString()},
+        {QStringLiteral("help"), e.value(QStringLiteral("Help")).toString()}});
+  }
+  question.insert(QStringLiteral("examples"), examples);
+  question.insert(QStringLiteral("error"), answer.value(QStringLiteral("Error")).toString());
+  return question;
 }
 
 void runConfigWhole(QObject *context, const QStringList &args,
@@ -438,6 +455,79 @@ QString WhyNotSettings(const Provider &provider, const QJsonObject &settings,
   return QString();
 }
 
+QString TokenFrom(const QString &pasted) {
+  const int open = pasted.indexOf(QLatin1Char('{'));
+  const int close = pasted.lastIndexOf(QLatin1Char('}'));
+  if (open < 0 || close <= open) {
+    return QString();
+  }
+  const QJsonObject token =
+      QJsonDocument::fromJson(pasted.mid(open, close - open + 1).toUtf8()).object();
+  if (!token.contains(QStringLiteral("access_token")) &&
+      !token.contains(QStringLiteral("refresh_token"))) {
+    return QString();
+  }
+  return QString::fromUtf8(QJsonDocument(token).toJson(QJsonDocument::Compact));
+}
+
+namespace {
+
+// What rclone printed after a create, an update or an answer, made into the
+// result -- answering for the person the one question that is not theirs to
+// answer: "Already have a token -- refresh?" is asked after every change to
+// a remote that signs in with a browser, and refreshing would mean a sign-in
+// page this program cannot show. The token was given a moment ago; no.
+void settle(QObject *context, const QString &name, const QString &said,
+            RemoteChange change, std::function<void(const RemoteChange &)> done,
+            int depth = 0) {
+  const QJsonObject question = questionIn(said);
+  if (!question.isEmpty() && depth < 3 &&
+      question.value(QStringLiteral("name")).toString() ==
+          QLatin1String("config_refresh_token")) {
+    ContinueRemote(context, name, question.value(QStringLiteral("state")).toString(),
+                   QStringLiteral("false"),
+                   [change, done](const RemoteChange &next) {
+                     RemoteChange merged = next;
+                     merged.tasks = change.tasks;
+                     done(merged);
+                   });
+    return;
+  }
+  change.question = question;
+  change.asks = question.value(QStringLiteral("name")).toString();
+  done(change);
+}
+
+} // namespace
+
+void ContinueRemote(QObject *context, const QString &name, const QString &state,
+                    const QString &answer,
+                    std::function<void(const RemoteChange &)> done) {
+  if (state.isEmpty()) {
+    done(refused(QStringLiteral("bad_name"),
+                 QStringLiteral("there is no question to answer")));
+    return;
+  }
+  if (answer.contains(QLatin1Char('\n'))) {
+    done(refused(QStringLiteral("bad_name"),
+                 QStringLiteral("an answer cannot be more than one line")));
+    return;
+  }
+  runConfigWhole(context,
+                 {QStringLiteral("update"), name, QStringLiteral("--continue"),
+                  QStringLiteral("--state"), state, QStringLiteral("--result"),
+                  answer, QStringLiteral("--non-interactive")},
+                 [context, name, done](bool ok, const QString &said) {
+                   if (!ok) {
+                     done(refused(QStringLiteral("rclone_refused"), said));
+                     return;
+                   }
+                   RemoteChange change;
+                   change.ok = true;
+                   settle(context, name, said, change, done, 1);
+                 });
+}
+
 void CreateRemote(QObject *context, const QString &name, const QString &type,
                   const QJsonObject &settings,
                   std::function<void(const RemoteChange &)> done) {
@@ -454,24 +544,39 @@ void CreateRemote(QObject *context, const QString &name, const QString &type,
                      .arg(type)));
     return;
   }
+  QJsonObject given = settings;
   if (SignsInWithBrowser(*provider)) {
-    done(refused(QStringLiteral("signs_in_with_browser"),
-                 QStringLiteral("a %1 remote signs in through a web browser, "
-                                "which cannot be done from here yet; make it "
-                                "with rclone config")
-                     .arg(provider->description.isEmpty() ? type
-                                                          : provider->description)));
-    return;
+    if (!given.contains(QStringLiteral("token"))) {
+      done(refused(QStringLiteral("signs_in_with_browser"),
+                   QStringLiteral("a %1 remote signs in through a web browser: "
+                                  "run  rclone authorize \"%2\"  on a machine "
+                                  "with one, and give what it prints as the "
+                                  "token")
+                       .arg(provider->description.isEmpty() ? type
+                                                            : provider->description,
+                            type)));
+      return;
+    }
   }
-  const QString wrong = WhyNotSettings(*provider, settings, true);
+  if (given.contains(QStringLiteral("token"))) {
+    const QString token = TokenFrom(given.value(QStringLiteral("token")).toString());
+    if (token.isEmpty()) {
+      done(refused(QStringLiteral("bad_name"),
+                   QStringLiteral("that is not a token: it should be what "
+                                  "rclone authorize printed, {\"access_token\": ...}")));
+      return;
+    }
+    given.insert(QStringLiteral("token"), token);
+  }
+  const QString wrong = WhyNotSettings(*provider, given, true);
   if (!wrong.isEmpty()) {
     done(refused(QStringLiteral("bad_name"), wrong));
     return;
   }
 
   RcloneConfigRegistry::instance().readDump(
-      context, [context, name, type, settings, done](bool ok, const QJsonObject &dump,
-                                                     const QString &why) {
+      context, [context, name, type, given, done](bool ok, const QJsonObject &dump,
+                                                  const QString &why) {
         if (!ok) {
           done(refused(QStringLiteral("config_unreadable"), why));
           return;
@@ -484,19 +589,18 @@ void CreateRemote(QObject *context, const QString &name, const QString &type,
         qCDebug(rbRemote) << "making remote" << name << "of type" << type;
         runConfigWhole(context,
                        QStringList{QStringLiteral("create"), name, type} +
-                           settingArgs(settings) +
+                           settingArgs(given) +
                            QStringList{QStringLiteral("--non-interactive"),
                                        QStringLiteral("--obscure")},
-                       [done](bool made, const QString &said) {
+                       [context, name, done](bool made, const QString &said) {
                          if (!made) {
                            done(refused(QStringLiteral("rclone_refused"), said));
                            return;
                          }
                          RemoteChange change;
                          change.ok = true;
-                         change.asks = questionIn(said);
                          RemoteRegistry::instance().refresh();
-                         done(change);
+                         settle(context, name, said, change, done);
                        });
       });
 }
@@ -517,9 +621,21 @@ void UpdateRemote(QObject *context, const QString &name,
                      .arg(name)));
     return;
   }
+  QJsonObject given = settings;
+  if (given.contains(QStringLiteral("token"))) {
+    // Signing in again: a new token, pasted as it was printed.
+    const QString token = TokenFrom(given.value(QStringLiteral("token")).toString());
+    if (token.isEmpty()) {
+      done(refused(QStringLiteral("bad_name"),
+                   QStringLiteral("that is not a token: it should be what "
+                                  "rclone authorize printed, {\"access_token\": ...}")));
+      return;
+    }
+    given.insert(QStringLiteral("token"), token);
+  }
   RcloneConfigRegistry::instance().readDump(
-      context, [context, name, settings, done](bool ok, const QJsonObject &dump,
-                                               const QString &why) {
+      context, [context, name, given, done](bool ok, const QJsonObject &dump,
+                                            const QString &why) {
         if (!ok) {
           done(refused(QStringLiteral("config_unreadable"), why));
           return;
@@ -541,26 +657,25 @@ void UpdateRemote(QObject *context, const QString &name,
                            .arg(type)));
           return;
         }
-        const QString wrong = WhyNotSettings(*provider, settings, false);
+        const QString wrong = WhyNotSettings(*provider, given, false);
         if (!wrong.isEmpty()) {
           done(refused(QStringLiteral("bad_name"), wrong));
           return;
         }
-        qCDebug(rbRemote) << "changing remote" << name << settings.keys();
+        qCDebug(rbRemote) << "changing remote" << name << given.keys();
         runConfigWhole(context,
                        QStringList{QStringLiteral("update"), name} +
-                           settingArgs(settings) +
+                           settingArgs(given) +
                            QStringList{QStringLiteral("--non-interactive"),
                                        QStringLiteral("--obscure")},
-                       [done](bool changed, const QString &said) {
+                       [context, name, done](bool changed, const QString &said) {
                          if (!changed) {
                            done(refused(QStringLiteral("rclone_refused"), said));
                            return;
                          }
                          RemoteChange change;
                          change.ok = true;
-                         change.asks = questionIn(said);
-                         done(change);
+                         settle(context, name, said, change, done);
                        });
       });
 }

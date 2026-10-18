@@ -365,6 +365,33 @@
         </label>
       </div>
       <p id="remote-form-about" class="muted"></p>
+
+      <!-- For a kind that signs in through a web browser. The sign-in is
+           done by rclone on any machine that has one; what it prints is
+           pasted here. That works the same with the program on this
+           machine or in a container somewhere else. -->
+      <div id="remote-form-signin" class="signin hidden">
+        <p><b id="remote-form-signin-title">Sign in</b></p>
+        <ol>
+          <li>On any computer with a web browser and rclone, run
+            <code id="remote-form-authorize"></code>
+            <button type="button" id="remote-form-authorize-copy" class="ghost small">Copy</button></li>
+          <li>Sign in on the page it opens.</li>
+          <li>Paste everything it prints here:</li>
+        </ol>
+        <textarea id="remote-form-token" rows="4" spellcheck="false"
+                  placeholder='{"access_token":"…","token_type":"Bearer",…}'></textarea>
+      </div>
+
+      <!-- rclone's own questions, asked after the remote is saved: which
+           drive of the account, whether it is a team drive. -->
+      <div id="remote-form-question" class="signin hidden">
+        <p><b>rclone asks</b> <code id="remote-form-q-name"></code></p>
+        <p id="remote-form-q-help" class="q-help"></p>
+        <p id="remote-form-q-error" class="error"></p>
+        <div id="remote-form-q-input"></div>
+      </div>
+
       <div id="remote-form-fields" class="remote-fields"></div>
       <p><button type="button" id="remote-form-advanced" class="link hidden"></button></p>
       <div id="remote-form-more" class="remote-fields hidden"></div>

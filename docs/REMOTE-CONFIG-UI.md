@@ -147,8 +147,31 @@ rclone config providers      # JSON ของทุก backend และทุ�
   แก้ port → รหัสผ่านคงเดิม · ลบ → **รีโหมดของผู้ใช้เหมือนเดิมทุกค่า**
 - ⚠ ยังไม่ได้ดูฟอร์มบนหน้าเว็บด้วยตา · ค่าลับอยู่ในบรรทัดคำสั่งของ rclone ชั่วครู่ (เหมือน R3)
 
-**ขั้นต่อไป**: R5 OAuth — ทางที่ใช้ได้ทั้งบนเครื่องและใน Docker คือให้ผู้ใช้รัน `rclone authorize <type>` บนเครื่องที่มี browser
-แล้ววาง token ที่ได้ลงในหน้าเว็บ (rclone รองรับอยู่แล้ว) · ทางที่สะดวกกว่า (เปิด browser ให้เอง) ใช้ได้เฉพาะเมื่อ browser อยู่เครื่องเดียวกับโปรแกรม
+## ทำแล้ว (2026-10-19) — R5 รีโหมดที่ sign in ผ่าน browser
+
+**ทางที่เลือก: วาง token** — ผู้ใช้รัน `rclone authorize "<type>"` บนเครื่องใดก็ได้ที่มี browser แล้ววางสิ่งที่มันพิมพ์ลงในหน้าเว็บ
+ใช้ได้เหมือนกันทั้งโปรแกรมบนเครื่องและใน Docker (ที่ไม่มี browser ให้เปิด) · การเปิด browser ให้เองยังไม่ได้ทำ
+
+ลองกับสำเนา config ก่อน: สร้าง drive จาก token ที่มีอยู่ด้วย `--non-interactive` แล้ว rclone **ถามต่อสองข้อ**
+(`config_refresh_token` แล้ว `config_change_team_drive`) และตอบได้ด้วย `config update <ชื่อ> --continue --state … --result …`
+— จึงทำเป็น**ขั้นตอบคำถามทั่วไป** ใช้ได้กับทุก backend ที่ถามต่อ ไม่ต้องรู้จักทีละตัว
+
+- **`TokenFrom`** — หา JSON ระหว่าง `{` แรกกับ `}` สุดท้าย ต้องมี access_token หรือ refresh_token · วางทั้งก้อนที่ authorize พิมพ์ได้
+- **`ContinueRemote`** — ส่งคำตอบ · ได้คำถามถัดไปหรือจบ · `RemoteChange.question` = `{state, name, help, default, examples, exclusive, password, error}`
+- **คำถาม "มี token แล้ว refresh ไหม" ถูกตอบ "ไม่" ให้เอง** — token เพิ่งได้มา และการ refresh ต้องเปิดหน้า sign in ที่โปรแกรมเปิดไม่ได้
+- **สร้างชนิด OAuth โดยไม่มี token** → 409 พร้อมบอกคำสั่ง `rclone authorize` · ข้อความที่ไม่ใช่ token → 400
+- **แก้รีโหมด OAuth**: วาง token ใหม่ได้ (sign in ใหม่เมื่อ token หมดอายุ — เช่น OneDrive ของผู้ใช้ที่ token ใช้ไม่ได้แล้ว)
+- **API**: `POST /remotes/{name}/answer {state, result}` · `POST /remotes` และ `PUT …/config` ส่ง `question` กลับเมื่อ rclone ถาม
+- **หน้าเว็บ**: ชนิด OAuth แสดงกล่อง "Sign in": คำสั่ง `rclone authorize "drive"` พร้อมปุ่ม Copy · ช่องวาง · ช่อง token ไม่อยู่ในฟอร์มปกติ ·
+  หลังบันทึก ถ้า rclone ถาม → ฟอร์มเปลี่ยนเป็นคำถาม (รายการตัวเลือกหรือช่องพิมพ์ + help ของ rclone + error ของคำตอบก่อน) · ปุ่ม "Leave the rest"
+- **ตรวจกับโปรแกรมจริง** (สำรอง config ก่อน): สร้าง drive `zz-r5` จาก token ที่วาง (ใช้ token ของ gdrive) → 201 พร้อมคำถาม team drive →
+  ตอบ false → จบ → **เดินดูได้ 158 รายการ** → ลบ → ชื่อรีโหมดเหมือนเดิม และ token ของ gdrive ไม่ถูกแตะ
+- OneDrive: บนสำเนา config คำถามเลือกชนิดไดรฟ์ตอบกลับเป็น error ดึง token ไม่ได้ (token เดิมของผู้ใช้ใช้ไม่ได้แล้ว) —
+  หน้าเว็บแสดง error ของ rclone ใต้คำถาม · ต้องลองกับ token ใหม่
+
+**ที่เหลือของเรื่องนี้**: หน้าต่างยังดู/สร้าง/แก้/ลบ/เปลี่ยนชื่อรีโหมดเองไม่ได้ (มีแต่ `rclone config` ในเทอร์มินัล) — ตามกติกาข้อ 1 ·
+เปิด browser ให้เองเมื่อ browser อยู่เครื่องเดียวกับโปรแกรม · ใช้ rc API แทนบรรทัดคำสั่งเพื่อไม่ให้ค่าลับอยู่ในรายการ process ·
+config ที่เข้ารหัส (ต้องถามรหัสก่อน) ยังไม่ได้ลอง
 
 **ตัดสินแล้วระหว่างทาง**: การเขียนจะเรียก `rclone config create/update/delete` เสมอ ไม่เขียนไฟล์เอง
 (rclone รู้เรื่อง obscure และรหัสผ่านของ config ที่เข้ารหัส)

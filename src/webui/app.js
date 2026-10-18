@@ -2487,7 +2487,7 @@ $("remote-settings").addEventListener("click", async () => {
 // are not offered, and anything that is a password or sensitive is a
 // password field that is sent only if something is typed into it.
 
-const remoteForm = { editing: null, provider: null, shown: {}, providers: [] };
+const remoteForm = { editing: null, provider: null, shown: {}, providers: [], question: null, made: "" };
 
 async function loadProviderList() {
   if (remoteForm.providers.length) return remoteForm.providers;
@@ -2559,11 +2559,15 @@ async function drawRemoteFields() {
   const provider = answer.data;
   remoteForm.provider = provider;
   const signsIn = provider.options.some((o) => o.name === "token");
-  $("remote-form-about").textContent = (provider.description || provider.name) +
-    (signsIn && !remoteForm.editing
-      ? " — signs in through a web browser, which cannot be done from here yet. Make it with rclone config; once it exists, its settings can be changed here."
-      : "");
-  $("remote-form-save").disabled = signsIn && !remoteForm.editing;
+  $("remote-form-about").textContent = provider.description || provider.name;
+  $("remote-form-signin").classList.toggle("hidden", !signsIn);
+  $("remote-form-token").value = "";
+  if (signsIn) {
+    $("remote-form-signin-title").textContent = remoteForm.editing
+      ? "Sign in again (only if it has stopped working)"
+      : "Sign in";
+    $("remote-form-authorize").textContent = 'rclone authorize "' + provider.name + '"';
+  }
 
   const now = {};
   const set = {};
@@ -2572,7 +2576,9 @@ async function drawRemoteFields() {
     set[s.name] = true;
   }
   remoteForm.shown = now;
-  const offered = provider.options.filter((o) => !o.hidden);
+  // The token is the paste box above, not a field: it is a page of JSON
+  // that rclone hands over, not something anybody types.
+  const offered = provider.options.filter((o) => !o.hidden && o.name !== "token");
   const plain = offered.filter((o) => !o.advanced);
   const more = offered.filter((o) => o.advanced);
   $("remote-form-fields").innerHTML = plain.map((o) => remoteField(o, now[o.name], set[o.name])).join("");
@@ -2591,6 +2597,10 @@ async function drawRemoteFields() {
 // what differs from what it has -- and a secret only if something was typed.
 function readRemoteFields() {
   const settings = {};
+  const pasted = $("remote-form-token").value.trim();
+  if (pasted && !$("remote-form-signin").classList.contains("hidden")) {
+    settings.token = pasted; // the daemon finds the token in what was pasted
+  }
   for (const option of remoteForm.provider.options) {
     const el = $("rf-" + option.name);
     if (!el) continue;
@@ -2613,8 +2623,40 @@ function readRemoteFields() {
   return settings;
 }
 
+// rclone's question, shown in place of the fields until it is answered.
+function showQuestion(question) {
+  remoteForm.question = question;
+  const asking = !!question;
+  for (const id of ["remote-form-fields", "remote-form-more", "remote-form-advanced",
+                    "remote-form-signin", "remote-form-type-wrap"]) {
+    $(id).classList.toggle("hidden", asking || (id === "remote-form-type-wrap" && !!remoteForm.editing));
+  }
+  $("remote-form-question").classList.toggle("hidden", !asking);
+  $("remote-form-name").disabled = asking;
+  $("remote-form-save").textContent = asking ? "Answer" : "Save";
+  $("remote-form-cancel").textContent = asking ? "Leave the rest" : "Cancel";
+  if (!asking) return;
+
+  $("remote-form-q-name").textContent = question.name || "";
+  $("remote-form-q-help").textContent = question.help || "";
+  $("remote-form-q-error").textContent = question.error || "";
+  const examples = question.examples || [];
+  $("remote-form-q-input").innerHTML = examples.length && question.exclusive
+    ? '<select id="remote-form-q-answer">' + examples.map((e) =>
+        '<option value="' + esc(e.value) + '"' + (e.value === question.default ? " selected" : "") + ">" +
+        esc(e.value) + (e.help ? " — " + esc(e.help.split("\n")[0]) : "") + "</option>").join("") + "</select>"
+    : '<input id="remote-form-q-answer" type="' + (question.password ? "password" : "text") +
+      '" value="' + esc(question.default || "") + '"' +
+      (examples.length ? ' list="remote-form-q-list"' : "") + ">" +
+      (examples.length ? '<datalist id="remote-form-q-list">' + examples.map((e) =>
+        '<option value="' + esc(e.value) + '">' + esc((e.help || "").split("\n")[0]) + "</option>").join("") + "</datalist>" : "");
+}
+
 async function openRemoteForm(editing) {
   remoteForm.editing = editing || null;
+  remoteForm.made = "";
+  showQuestion(null);
+  $("remote-form-name").disabled = false;
   $("remote-form-title").textContent = editing ? "Settings of " + editing.name + ":" : "New remote";
   $("remote-form-name").value = editing ? editing.name : "";
   $("remote-form-type-wrap").classList.toggle("hidden", !!editing);
@@ -2639,10 +2681,48 @@ $("remote-form-advanced").addEventListener("click", () => {
   $("remote-form-advanced").textContent = $("remote-form-advanced").textContent
     .replace(/^(Show|Hide)/, more.classList.contains("hidden") ? "Show" : "Hide");
 });
-$("remote-form-cancel").addEventListener("click", () => $("remotebox").classList.add("hidden"));
+$("remote-form-cancel").addEventListener("click", () => {
+  $("remotebox").classList.add("hidden");
+  if (remoteForm.question) {
+    toast("Saved as far as it went; the rest is rclone config's");
+    refresh();
+  }
+});
+$("remote-form-authorize-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("remote-form-authorize").textContent);
+    toast("copied");
+  } catch (e) {
+    toast("select it and copy it");
+  }
+});
+
+// The answer to rclone's question, and whatever it asks next.
+async function answerQuestion() {
+  const name = remoteForm.made;
+  const result = $("remote-form-q-answer").value;
+  $("remote-form-save").disabled = true;
+  const answer = await api("POST", "/remotes/" + encodeURIComponent(name) + "/answer",
+                           { state: remoteForm.question.state, result: result });
+  $("remote-form-save").disabled = false;
+  if (answer.status !== 200) {
+    $("remote-form-q-error").textContent = reasonFrom(answer);
+    return;
+  }
+  if (answer.data.question) {
+    showQuestion(answer.data.question);
+    return;
+  }
+  showQuestion(null);
+  $("remotebox").classList.add("hidden");
+  toast("Finished " + name + ":");
+  refresh();
+  browse(name, "");
+}
 $("remote-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("remote-form-error").textContent = "";
+  if (remoteForm.question) return answerQuestion();
   if (!remoteForm.provider) {
     $("remote-form-error").textContent = "choose a kind of remote first";
     return;
@@ -2672,10 +2752,16 @@ $("remote-form").addEventListener("submit", async (event) => {
     $("remote-form-error").textContent = reasonFrom(answer);
     return;
   }
-  $("remotebox").classList.add("hidden");
   const now = name || (editing && editing.name);
-  toast((editing ? "Saved " : "Made ") + now + ":" +
-        (answer.data.asks ? " — rclone would also ask about " + answer.data.asks + "; that part is rclone config's" : ""));
+  if (answer.data.question) {
+    // Saved; rclone has a question before it is finished.
+    remoteForm.made = now;
+    showQuestion(answer.data.question);
+    refresh();
+    return;
+  }
+  $("remotebox").classList.add("hidden");
+  toast((editing ? "Saved " : "Made ") + now + ":");
   refresh();
   if (!editing || now !== editing.name) browse(now, "");
 });

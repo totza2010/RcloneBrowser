@@ -320,7 +320,9 @@ QList<Route> build() {
         "settings are the backend's own options (GET /providers/{type}); a "
         "password is given as typed and rclone obscures it. Every option the "
         "backend calls required has to be there. A kind that signs in through "
-        "a web browser (drive, onedrive...) cannot be made here yet.",
+        "a web browser (drive, onedrive...) needs its token: what  rclone "
+        "authorize <type>  prints, run on any machine with a browser. The "
+        "answer may carry a question from rclone; see /answer.",
         "",
         R"({"name":"films","type":"sftp","settings":{"host":"nas.local","user":"me","pass":"..."}})",
         "201: made; 400: not a name, no such kind, or a setting that cannot be; "
@@ -337,6 +339,15 @@ QList<Route> build() {
         "200: done, with the tasks changed; 400: not a name, or a setting that "
         "cannot be; 404: no such remote; 409: the name is taken, or a job is "
         "using it; 502: rclone refused"),
+      r("POST", "/api/v1/remotes/{name}/answer", kRemotes,
+        "Answer rclone's question about a remote",
+        "Making or changing a remote can end with a question from rclone -- "
+        "which drive of the account, whether it is a team drive -- given back "
+        "as \"question\". This sends the answer, with the question's state. "
+        "What comes back is the next question, or none when it is finished.",
+        "", R"({"state":"teamdrive_ok","result":"false"})",
+        "200: answered, with the next question if there is one; 400: no state; "
+        "502: rclone refused"),
       r("DELETE", "/api/v1/remotes/{name}", kRemotes,
         "Delete a remote from the configuration",
         "Its files are not touched: they are on the remote. Refused while a "
@@ -437,6 +448,7 @@ QString scopeOf(const Route &route) {
       QStringLiteral("DELETE /api/v1/keys/{id}"),
       QStringLiteral("PUT /api/v1/remotes/{name}/config"),
       QStringLiteral("POST /api/v1/remotes"),
+      QStringLiteral("POST /api/v1/remotes/{name}/answer"),
       QStringLiteral("DELETE /api/v1/remotes/{name}")};
 
   const QString key = route.method + QLatin1Char(' ') + route.path;

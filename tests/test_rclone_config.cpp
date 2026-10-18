@@ -115,6 +115,22 @@ private slots:
     QVERIFY(!SignsInWithBrowser(*sftp));
   }
 
+  // What rclone authorize prints, pasted whole or just the token.
+  void aTokenIsFoundInWhateverWasPasted() {
+    const QString printed = QStringLiteral(
+        "Paste the following into your remote machine --->\n"
+        "{\"access_token\":\"ya29\",\"token_type\":\"Bearer\",\"expiry\":\"2026-10-19T12:00:00Z\"}\n"
+        "<---End paste");
+    const QString token = TokenFrom(printed);
+    QVERIFY(token.startsWith(QStringLiteral("{")));
+    QVERIFY(token.contains(QStringLiteral("ya29")));
+    QVERIFY(!token.contains(QLatin1Char('\n')));
+    QCOMPARE(TokenFrom(QStringLiteral("{\"refresh_token\":\"r\"}")),
+             QStringLiteral("{\"refresh_token\":\"r\"}"));
+    QCOMPARE(TokenFrom(QStringLiteral("not a token")), QString());
+    QCOMPARE(TokenFrom(QStringLiteral("{\"hello\":1}")), QString());
+  }
+
   void aRemoteNameIsHeldToRclonesRule() {
     for (const char *good : {"gdrive", "films drive", "a.b-c_d+e@f", "ไดรฟ์"}) {
       QVERIFY2(WhyNotARemoteName(QString::fromUtf8(good)).isEmpty(), good);

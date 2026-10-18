@@ -1501,9 +1501,10 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
                    : 409;
     }
     object.insert(QStringLiteral("tasks"), QJsonArray::fromStringList(change.tasks));
-    if (!change.asks.isEmpty()) {
-      // Done; rclone would have gone on to ask this. Said, so a person who
-      // wanted it answered knows to use rclone config for that part.
+    if (!change.question.isEmpty()) {
+      // Not finished: rclone has a question, which is the caller's to
+      // answer through /answer.
+      object.insert(QStringLiteral("question"), change.question);
       object.insert(QStringLiteral("asks"), change.asks);
     }
     if (change.ok && held->property("made").toBool()) {
@@ -1513,6 +1514,16 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
     held->flush();
     held->disconnectFromHost();
   };
+
+  if (request.method == QLatin1String("POST") &&
+      request.path.endsWith(QLatin1String("/answer"))) {
+    const QJsonObject given = options(request);
+    qCDebug(rbApp) << "API answering rclone about remote" << remote;
+    ContinueRemote(socket, remote, given.value(QStringLiteral("state")).toString(),
+                   given.value(QStringLiteral("result")).toVariant().toString(),
+                   answer);
+    return;
+  }
 
   if (request.method == QLatin1String("DELETE")) {
     const QString force = request.queryValue(QStringLiteral("force"));
@@ -1577,7 +1588,8 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
                    }
                    RenameRemote(held, remote, name,
                                 [changed, answer](RemoteChange renamed) {
-                                  if (renamed.asks.isEmpty()) {
+                                  if (renamed.question.isEmpty()) {
+                                    renamed.question = changed.question;
                                     renamed.asks = changed.asks;
                                   }
                                   answer(renamed);
@@ -1999,6 +2011,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
     if (asked.method == QLatin1String("POST") && parts.size() == 1 &&
         parts.at(0) == QLatin1String("remotes")) {
       changeRemote(socket, asked, QString());
+      return;
+    }
+    if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("answer")) {
+      changeRemote(socket, asked, parts.at(1));
       return;
     }
   }

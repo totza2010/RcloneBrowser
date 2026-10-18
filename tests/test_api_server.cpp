@@ -1328,6 +1328,68 @@ private slots:
     qunsetenv("FAKE_RCLONE_RECORD");
   }
 
+  // A remote that signs in with a browser: made from a pasted token, and
+  // finished by answering rclone's questions -- all but the one that is not
+  // the person's to answer.
+  void aRemoteThatSignsInWithABrowserIsMadeFromAPastedToken() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir scratch;
+    const QString record = scratch.filePath(QStringLiteral("said.txt"));
+    qputenv("FAKE_RCLONE_RECORD", record.toLocal8Bit());
+
+    // No token: told how to get one.
+    const QByteArray none = send("POST", "/api/v1/remotes", mToken,
+                                 "{\"name\":\"cloud\",\"type\":\"fakeoauth\",\"settings\":{}}");
+    QCOMPARE(statusOf(none), 409);
+    QVERIFY(bodyOf(none).object().value(QStringLiteral("error")).toString()
+                .contains(QStringLiteral("rclone authorize")));
+    // Something that is not a token.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"cloud\",\"type\":\"fakeoauth\",\"settings\":{\"token\":\"hello\"}}")),
+             400);
+
+    // What rclone authorize printed, pasted whole.
+    QJsonObject settings;
+    settings.insert(QStringLiteral("token"),
+                    QStringLiteral("Paste the following into your remote machine --->\n"
+                                   "{\"access_token\":\"AT\",\"expiry\":\"2026-10-19T12:00:00Z\"}\n"
+                                   "<---End paste"));
+    QJsonObject body;
+    body.insert(QStringLiteral("name"), QStringLiteral("cloud"));
+    body.insert(QStringLiteral("type"), QStringLiteral("fakeoauth"));
+    body.insert(QStringLiteral("settings"), settings);
+    const QByteArray made = send("POST", "/api/v1/remotes", mToken,
+                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(made), 201);
+    // The refresh question was answered "no" without asking anybody; the
+    // next one is the person's.
+    const QJsonObject question = bodyOf(made).object().value(QStringLiteral("question")).toObject();
+    QCOMPARE(question.value(QStringLiteral("name")).toString(), QStringLiteral("config_pick"));
+    QCOMPARE(question.value(QStringLiteral("examples")).toArray().size(), 2);
+    QVERIFY(!made.contains("AT\""));
+
+    QFile file(record);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QList<QByteArray> lines = file.readAll().split('\n');
+    QVERIFY(lines.at(0).split('\x1f').contains(
+        "token={\"access_token\":\"AT\",\"expiry\":\"2026-10-19T12:00:00Z\"}"));
+    QVERIFY2(lines.at(1).contains("--continue\x1f--state\x1f*oauth-confirm,pick,,\x1f--result\x1f" "false"),
+             lines.at(1).constData());
+    file.close();
+
+    // Answered: finished.
+    QJsonObject answer;
+    answer.insert(QStringLiteral("state"), question.value(QStringLiteral("state")));
+    answer.insert(QStringLiteral("result"), QStringLiteral("b"));
+    const QByteArray done = send("POST", "/api/v1/remotes/cloud/answer", mToken,
+                                 QJsonDocument(answer).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(done), 200);
+    QVERIFY(!bodyOf(done).object().contains(QStringLiteral("question")));
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/cloud/answer", mToken, "{}")), 400);
+
+    qunsetenv("FAKE_RCLONE_RECORD");
+  }
+
   void aRemoteIsNotDeletedFromUnderItsTasks() {
     QVERIFY(useFakeRclone(1));
     JobOptions *task = makeTask(QStringLiteral("needs the fake"));

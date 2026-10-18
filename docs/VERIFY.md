@@ -1816,6 +1816,22 @@ marker: `CreateRemote` · `UpdateRemote` · `WhyNotSettings` · การ์ด 
 
 ---
 
+### V-48 · รีโหมดที่ sign in ผ่าน browser (R5)
+
+marker: `TokenFrom` · `ContinueRemote` · `POST /api/v1/remotes/{name}/answer` · กล่อง Sign in
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | + New remote · ชนิด drive | กล่อง Sign in: คำสั่ง `rclone authorize "drive"` · ปุ่ม Copy · ช่องวาง | ⬜ | |
+| 2 | รันคำสั่งบนเครื่องที่มี browser · วางทั้งก้อน · Save | ฟอร์มเปลี่ยนเป็นคำถาม team drive · ตอบ No · รีโหมดขึ้นในรายการ เดินดูได้ | ✅ **PASS** (API · token ของ gdrive) | AI / 2026-10-19 · 158 รายการ |
+| 3 | วางข้อความที่ไม่ใช่ token | ไม่บันทึก บอกว่าไม่ใช่ token | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 4 | OneDrive · Settings · Edit settings · วาง token ใหม่จาก `rclone authorize "onedrive"` | sign in ใหม่ได้ · รีโหมดกลับมาใช้ได้ | ⬜ | |
+| 5 | สร้าง onedrive ใหม่ | คำถามเลือกชนิดไดรฟ์ (onedrive / sharepoint …) แล้วเลือกไดรฟ์ | ⬜ | |
+| 6 | ใน Docker โหมด web | ทำข้อ 2 ได้เหมือนกัน (ไม่ต้องมี browser ในคอนเทนเนอร์) | ⬜ | |
+| 7 | กด **Leave the rest** ระหว่างคำถาม | ปิดได้ · รีโหมดถูกบันทึกเท่าที่ไปถึง | ⬜ | |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

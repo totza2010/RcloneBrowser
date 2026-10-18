@@ -90,15 +90,35 @@ struct RemoteChange {
   QString code;
   QString why;
   QStringList tasks; // the tasks it concerns: changed, or in the way
-  // Done, but rclone would have gone on to ask this: an option's name.
-  // rclone asks a remote that signs in with a browser whether to refresh
-  // its token after a change, and that is not something to answer here.
-  QString asks;
+  // Done so far, and rclone has a question before it is finished: which
+  // drive of an account, whether it is a team drive. Empty when it has
+  // none. {state, name, help, default, examples: [{value, help}],
+  // exclusive, password, error} -- "state" is what an answer is sent back
+  // with (ContinueRemote), and "error" is rclone's when the last answer
+  // did not take.
+  QJsonObject question;
+  QString asks; // the question's name, kept for whoever read the first shape
 };
 
+// The token in what "rclone authorize" printed, as rclone stores it, or
+// empty when there is none: the JSON object between the first "{" and the
+// last "}", which has to have an access_token or a refresh_token. What it
+// printed around it ("Paste the following into your remote machine --->")
+// may be pasted along with it.
+QString TokenFrom(const QString &pasted);
+
+// Answers the question rclone asked while making or changing a remote:
+// "rclone config update <name> --continue --state <state> --result <answer>".
+// What comes back is the next question, or none when it is finished.
+void ContinueRemote(QObject *context, const QString &name, const QString &state,
+                    const QString &answer,
+                    std::function<void(const RemoteChange &)> done);
+
 // Whether a kind of remote signs in through a web browser (OAuth): it has a
-// "token" that rclone gets by sending somebody to a sign-in page. Making
-// one of these needs that step, which is R5; changing one does not.
+// "token" that rclone gets by sending somebody to a sign-in page. Making one
+// here needs that token pasted in: "rclone authorize <type>" run on any
+// machine with a browser prints it -- which is also the only way at all for
+// a program running in a container, where there is no browser to open.
 bool SignsInWithBrowser(const Provider &provider);
 
 // What is wrong with a set of settings for this backend, or empty. Only
