@@ -20,6 +20,8 @@
 //   - nothing here can change where rclone is or what scripts run: that
 //     would turn a stolen token into "run any program on this machine"
 
+#include <QDateTime>
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
@@ -65,6 +67,13 @@ public:
     QString who;    // "api" for the token and sessions, "api:<key name>"
   };
   static Caller callerOf(const HttpRequest &request);
+
+  // How long a stream may go with nobody playing it before it is stopped:
+  // RB_STREAM_IDLE_MINUTES, or Settings/streamIdleMinutes, 30 when neither
+  // is set; 0 is never. In milliseconds, and settable so a test need not
+  // wait half an hour.
+  static qint64 streamIdleLimitMs();
+  static void setStreamIdleLimitMs(qint64 ms);
 
   // Who the request being answered came from. One request is answered at a
   // time, on this thread, so this is the one being answered.
@@ -156,6 +165,19 @@ private:
   // Passes a request for a stream on to the rclone that is serving it, and
   // what rclone says back to whoever asked. See RemoteOps::Stream().
   void relayStream(QTcpSocket *client, const HttpRequest &request);
+
+  // Streams nobody is playing, stopped. A stream is a process and an open
+  // address, and one left behind -- a tab closed, a player quit -- went on
+  // being both until somebody remembered to press Stop. Every play passes
+  // through relayStream(), so it is known here whether anyone is.
+  struct StreamUse {
+    int open = 0;       // players connected right now
+    QDateTime last;     // when anything last went through, or it started
+  };
+  void watchStream(const QString &requestId);
+  void stopIdleStreams();
+  QHash<QString, StreamUse> mStreams;
+  QTimer *mStreamWatch = nullptr;
   void broadcast(const QString &event, const QJsonObject &data);
 
   // Connects to the things worth telling anyone about. Done once, when the

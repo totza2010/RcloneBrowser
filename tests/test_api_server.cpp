@@ -2143,6 +2143,59 @@ private slots:
              409);
   }
 
+  // A stream nobody plays stops itself; one somebody is playing does not,
+  // however long it goes.
+  void aStreamNobodyPlaysStopsItself() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "20000"); // would stay up a long time
+    ApiServer::setStreamIdleLimitMs(400);
+
+    const auto start = [this](const QByteArray &path) {
+      const QByteArray reply = send("POST", "/api/v1/remotes/fake/stream",
+                                    mToken, "{\"path\":\"" + path + "\"}");
+      return bodyOf(reply).object();
+    };
+
+    // Opened by nobody: gone after the limit.
+    const QJsonObject left = start("films/left.mkv");
+    QCOMPARE(left.value(QStringLiteral("stopsWhenIdleFor")).toInt(), 0); // 400 ms
+    RunningJob *leftJob = JobRegistry::instance().find(
+        left.value(QStringLiteral("requestId")).toString());
+    QVERIFY(leftJob != nullptr && leftJob->isRunning());
+    QTRY_VERIFY_WITH_TIMEOUT(!leftJob->isRunning(), 5000);
+    QCOMPARE(leftJob->finalStatus(), QStringLiteral("stopped"));
+
+    // Played: kept for as long as the player stays, however quiet it is.
+    const QJsonObject played = start("films/played.mkv");
+    RunningJob *playedJob = JobRegistry::instance().find(
+        played.value(QStringLiteral("requestId")).toString());
+    QVERIFY(playedJob != nullptr);
+
+    QTcpServer rclone; // standing in, sending the headers and then nothing
+    QVERIFY(rclone.listen(QHostAddress::LocalHost, playedJob->streamPort()));
+    QObject::connect(&rclone, &QTcpServer::newConnection, &rclone, [&]() {
+      QTcpSocket *peer = rclone.nextPendingConnection();
+      peer->write("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nx");
+    });
+
+    QTcpSocket player;
+    QVERIFY(openConnection(&player));
+    player.write("GET " +
+                 played.value(QStringLiteral("path")).toString().toUtf8() +
+                 " HTTP/1.1\r\nHost: x\r\n\r\n");
+    QByteArray seen;
+    QVERIFY(waitFor(&player, &seen, "200 OK"));
+    QTest::qWait(1500); // well past the limit, paused
+    QVERIFY2(playedJob->isRunning(), "a stream being played was stopped");
+
+    // The player goes; the stream follows after the limit.
+    player.abort();
+    QTRY_VERIFY_WITH_TIMEOUT(!playedJob->isRunning(), 5000);
+
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ApiServer::setStreamIdleLimitMs(-1);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

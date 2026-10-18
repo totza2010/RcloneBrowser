@@ -135,6 +135,8 @@ QString flagsProblem(const QString &extra) {
                            LocalFiles::IsRestricted());
 }
 
+qint64 gStreamIdleOverrideMs = -1;
+
 QJsonObject describe(const RunningJob &job) {
   QJsonObject object;
   object.insert(QStringLiteral("requestId"), job.requestId());
@@ -162,6 +164,9 @@ QJsonObject describe(const RunningJob &job) {
   if (job.kind() == JobKind::Stream && job.streamPort() != 0) {
     QJsonObject stream;
     stream.insert(QStringLiteral("path"), job.streamPath());
+    // How long it may sit unplayed before it stops itself, 0 for never.
+    stream.insert(QStringLiteral("stopsWhenIdleFor"),
+                  int(ApiServer::streamIdleLimitMs() / 1000));
     object.insert(QStringLiteral("stream"), stream);
   }
 
@@ -415,6 +420,72 @@ ApiServer::Caller ApiServer::callerOf(const HttpRequest &request) {
     caller.who = QStringLiteral("api:") + key.name;
   }
   return caller;
+}
+
+qint64 ApiServer::streamIdleLimitMs() {
+  if (gStreamIdleOverrideMs >= 0) {
+    return gStreamIdleOverrideMs;
+  }
+  bool readable = false;
+  int minutes = qEnvironmentVariableIntValue("RB_STREAM_IDLE_MINUTES", &readable);
+  if (!readable) {
+    minutes = GetSettings()->value("Settings/streamIdleMinutes", 30).toInt();
+  }
+  return qMax(0, minutes) * 60LL * 1000LL;
+}
+
+void ApiServer::setStreamIdleLimitMs(qint64 ms) { gStreamIdleOverrideMs = ms; }
+
+void ApiServer::watchStream(const QString &requestId) {
+  StreamUse use;
+  // Starting counts as use: a stream nobody ever opened is stopped as long
+  // after it began as one that was played and then left.
+  use.last = QDateTime::currentDateTime();
+  mStreams.insert(requestId, use);
+
+  if (mStreamWatch == nullptr) {
+    mStreamWatch = new QTimer(this);
+    QObject::connect(mStreamWatch, &QTimer::timeout, this,
+                     &ApiServer::stopIdleStreams);
+  }
+  // Looked at four times in the time a stream may sit idle, and never more
+  // than every half minute: being a little late to stop one costs nothing.
+  const qint64 limit = streamIdleLimitMs();
+  mStreamWatch->setInterval(
+      int(qBound(qint64(50), limit > 0 ? limit / 4 : qint64(30000),
+                 qint64(30000))));
+  if (!mStreamWatch->isActive()) {
+    mStreamWatch->start();
+  }
+}
+
+void ApiServer::stopIdleStreams() {
+  const qint64 limit = streamIdleLimitMs();
+  const QDateTime now = QDateTime::currentDateTime();
+
+  for (auto it = mStreams.begin(); it != mStreams.end();) {
+    RunningJob *job = JobRegistry::instance().find(it.key());
+    if (job == nullptr || !job->isRunning()) {
+      it = mStreams.erase(it); // stopped some other way
+      continue;
+    }
+    // Somebody connected is somebody playing, even paused: a player keeps
+    // its connection while it waits, and stopping under it would be the
+    // film vanishing when the pause button is let go.
+    if (limit > 0 && it.value().open == 0 && it.value().last.msecsTo(now) >= limit) {
+      qCDebug(rbApp) << "stopping a stream nobody has played for"
+                     << it.value().last.secsTo(now) << "s:"
+                     << job->description().source;
+      job->stop();
+      it = mStreams.erase(it);
+      continue;
+    }
+    ++it;
+  }
+
+  if (mStreams.isEmpty() && mStreamWatch != nullptr) {
+    mStreamWatch->stop();
+  }
 }
 
 bool ApiServer::isListening() const {
@@ -1070,6 +1141,7 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
       return;
     }
     qCDebug(rbApp) << "API streaming" << remote << path;
+    watchStream(job->requestId());
 
     // Answered now, like a mount: it runs until it is stopped.
     QJsonObject started;
@@ -1078,6 +1150,8 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     started.insert(QStringLiteral("source"), job->description().source);
     started.insert(QStringLiteral("isDir"), item.isFolder);
     started.insert(QStringLiteral("path"), job->streamPath());
+    started.insert(QStringLiteral("stopsWhenIdleFor"),
+                   int(streamIdleLimitMs() / 1000));
     socket->write(FormatHttpResponse(202, toJson(started)));
     return;
   }
@@ -1198,6 +1272,15 @@ void ApiServer::relayStream(QTcpSocket *client, const HttpRequest &request) {
   // From here the connection belongs to the stream: read() leaves it alone.
   client->setProperty("stream", true);
 
+  // Counted as a player for as long as it is connected, and its traffic
+  // keeps the stream from being stopped as idle. See stopIdleStreams().
+  const QString streamId = serving->requestId();
+  if (!mStreams.contains(streamId)) {
+    watchStream(streamId); // one started before this ran, or elsewhere
+  }
+  mStreams[streamId].open += 1;
+  mStreams[streamId].last = QDateTime::currentDateTime();
+
   // The request, written out again. Only what a player needs is carried
   // across -- above all Range, which is how it seeks -- and never the
   // Authorization or Cookie a browser may have sent along: rclone has no
@@ -1244,10 +1327,15 @@ void ApiServer::relayStream(QTcpSocket *client, const HttpRequest &request) {
 
   QObject::connect(upstream, &QTcpSocket::connected, upstream,
                    [upstream, head]() { upstream->write(head); });
-  QObject::connect(upstream, &QTcpSocket::readyRead, upstream, [client, pump]() {
-    client->setProperty("answered", true);
-    pump();
-  });
+  QObject::connect(upstream, &QTcpSocket::readyRead, upstream,
+                   [this, streamId, client, pump]() {
+                     client->setProperty("answered", true);
+                     const auto found = mStreams.find(streamId);
+                     if (found != mStreams.end()) {
+                       found->last = QDateTime::currentDateTime();
+                     }
+                     pump();
+                   });
   QObject::connect(client, &QTcpSocket::bytesWritten, upstream, pump);
   QObject::connect(upstream, &QTcpSocket::disconnected, upstream, pump);
   QObject::connect(
@@ -1278,6 +1366,16 @@ void ApiServer::relayStream(QTcpSocket *client, const HttpRequest &request) {
   // crash, and it was one: the first real film played through this took the
   // program down when the player closed. So every connection from this
   // socket is cut before anything else, and then it is dropped.
+  // Connected with this server as the context, not the socket being torn
+  // down, so the count goes down however the connection ends.
+  QObject::connect(client, &QTcpSocket::disconnected, this,
+                   [this, streamId]() {
+                     const auto found = mStreams.find(streamId);
+                     if (found != mStreams.end()) {
+                       found->open = qMax(0, found->open - 1);
+                       found->last = QDateTime::currentDateTime();
+                     }
+                   });
   QObject::connect(client, &QTcpSocket::disconnected, upstream,
                    [client, upstream]() {
                      upstream->disconnect();

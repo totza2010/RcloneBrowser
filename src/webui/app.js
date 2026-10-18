@@ -2412,7 +2412,7 @@ function playlist(items) {
 
 // The player. `items` is what there is to play -- one file, or the media of
 // a folder -- and `requestId` is the job, so it can be stopped from here.
-function showStream(title, items, requestId) {
+function showStream(title, items, requestId, idleSeconds) {
   if (!items.length) {
     showResult("Streaming " + title, '<p class="muted">There are no files in this folder to play.</p>');
     return;
@@ -2427,7 +2427,11 @@ function showStream(title, items, requestId) {
       : "") +
     '<p class="muted">Or in a player of your own — in VLC: Media → Open Network ' +
     "Stream. The address works until the stream is stopped, and anyone who " +
-    "has it can play this while it does.</p>" +
+    "has it can play this while it does." +
+    (idleSeconds
+      ? " It stops by itself when nobody has played it for " +
+        Math.round(idleSeconds / 60) + " minutes."
+      : "") + "</p>" +
     '<p><input id="stream-address" type="text" readonly></p>' +
     '<p><button id="stream-copy" class="ghost small">Copy address</button> ' +
       '<button id="stream-m3u" class="ghost small">Download .m3u</button> ' +
@@ -2553,7 +2557,7 @@ $("remote-stream").addEventListener("click", async () => {
   const items = isDir
     ? await streamItems(remote, path, started.path)
     : [{ name: entry.name, url: streamUrl(started.path) }];
-  showStream(remote + ":" + path, items, started.requestId);
+  showStream(remote + ":" + path, items, started.requestId, started.stopsWhenIdleFor);
 });
 
 // From a stream's card: the player again.
@@ -2565,7 +2569,7 @@ async function reopenStream(requestId) {
   const items = folder
     ? await streamItems(job.source.slice(0, at), job.source.slice(at + 1), job.stream.path)
     : [{ name: job.source.slice(at + 1).split("/").pop(), url: streamUrl(job.stream.path) }];
-  showStream(job.source, items, requestId);
+  showStream(job.source, items, requestId, job.stream.stopsWhenIdleFor);
 }
 
 // ---- comparing two folders, and saving a listing --------------------------
