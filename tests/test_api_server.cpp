@@ -730,6 +730,12 @@ private slots:
     const QString requestId =
         bodyOf(fired).object().value(QStringLiteral("requestId")).toString();
     QCOMPARE(SchedulerStore::instance().find(id)->requestId, requestId);
+    // And said, so the queue's entry can be told for this schedule's.
+    bool said = false;
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/schedules", mToken)).array()) {
+      said = said || value.toObject().value(QStringLiteral("requestId")).toString() == requestId;
+    }
+    QVERIFY(said);
 
     QCOMPARE(statusOf(ask("DELETE",
                           "/api/v1/queue/" + QUrl::toPercentEncoding(requestId),

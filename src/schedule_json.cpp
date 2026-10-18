@@ -75,6 +75,10 @@ QJsonObject Write(const Schedule &schedule, const QDateTime &now) {
   // Kept for whoever read the first shape of this, which had only this.
   json.insert(QStringLiteral("executionMode"), schedule.executionMode);
 
+  // The run it started last, by the id the queue, the jobs and the history
+  // know it by -- so whoever reads the queue can tell which entry is this
+  // schedule's. Read only: it is the clock's to set.
+  json.insert(QStringLiteral("requestId"), schedule.requestId);
   json.insert(QStringLiteral("lastRun"), schedule.lastRun);
   json.insert(QStringLiteral("lastFinished"), schedule.lastFinished);
   json.insert(QStringLiteral("lastStatus"), schedule.lastStatus);

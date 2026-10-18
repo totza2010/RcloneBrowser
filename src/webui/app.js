@@ -501,6 +501,9 @@ function drawQueue() {
 
   const rows = state.queue.map((entry, i) => {
     const task = state.tasks.find((t) => t.id === entry.taskId);
+    // Put there by a schedule, which is worth saying: taking it out is
+    // taking that schedule's run away.
+    const by = state.schedules.find((s) => s.requestId && s.requestId === entry.requestId);
     const move = (to, label, title, can) =>
       '<button class="ghost small" title="' + title + '" data-queue-move="' +
         esc(entry.requestId) + '" data-to="' + to + '"' + (can ? "" : " disabled") + ">" +
@@ -508,7 +511,8 @@ function drawQueue() {
     return (
       "<tr>" +
         '<td class="muted">' + (i + 1) + "</td>" +
-        "<td>" + esc(task ? task.name : entry.taskId) + "</td>" +
+        "<td>" + esc(task ? task.name : entry.taskId) +
+          (by ? '<br><span class="muted">⏱ ' + esc(by.name) + "</span>" : "") + "</td>" +
         "<td>" + (entry.running ? '<span class="tag running">running</span>' : "waiting") + "</td>" +
         "<td>" + (entry.dryRun ? "dry run" : "") + "</td>" +
         '<td style="text-align:right; white-space:nowrap">' +
