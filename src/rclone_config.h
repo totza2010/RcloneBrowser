@@ -61,12 +61,55 @@ bool LooksSecret(const QString &key);
 // order the backend lists its options, with the value of anything that is a
 // password, sensitive, or looks like a secret left out -- said to be set,
 // and nothing more. Keys the backend does not describe are listed last.
+// With no `provider` -- the backends not read, or a kind rclone does not
+// describe -- every value is left out.
 //
 // "Sensitive" is rclone's word and is followed even where it seems
 // cautious (a teldrive host is marked so): it is what "rclone config
 // redacted" hides too, and a second opinion here would be a second rule.
 QJsonArray DescribeSettings(const QJsonObject &section,
                             const Provider *provider);
+
+// ---- changing remotes (R3) ---------------------------------------------------
+//
+// Always through rclone ("rclone config create / delete"), never by writing
+// the file: rclone knows how passwords are obscured and how an encrypted
+// configuration is opened, and a second writer of its file would be a
+// second idea of its format.
+
+// Why a name cannot be a remote's, or empty when it can. rclone's own rule:
+// letters, digits, and _ - . + @ and space, not starting with - or a space
+// and not ending with a space.
+QString WhyNotARemoteName(const QString &name);
+
+// What became of a change to a remote. `code` is for a machine:
+// "no_such_remote", "bad_name", "taken", "in_use", "used_by_tasks",
+// "config_unreadable", "rclone_refused".
+struct RemoteChange {
+  bool ok = false;
+  QString code;
+  QString why;
+  QStringList tasks; // the tasks it concerns: changed, or in the way
+};
+
+// Renames a remote. rclone has no command for it, so it is made again under
+// the new name with exactly what it has -- passwords passed as they are
+// stored, already obscured, and tokens as they are -- and then the old one
+// is deleted. Tried on a copy of a real configuration: drive (with its OAuth
+// token), sftp and teldrive each came out identical.
+//
+// Refused while a job is using it. Saved tasks that name it are changed to
+// the new name, and said in `tasks`: otherwise renaming a remote would be
+// a quiet way to break every task on it.
+void RenameRemote(QObject *context, const QString &from, const QString &to,
+                  std::function<void(const RemoteChange &)> done);
+
+// Deletes a remote from rclone.conf. Its files are not touched -- they are
+// on the remote, not in the configuration. Refused while a job is using it,
+// and while saved tasks name it unless `evenIfTasksUseIt`: those tasks would
+// be left pointing at nothing.
+void DeleteRemote(QObject *context, const QString &name, bool evenIfTasksUseIt,
+                  std::function<void(const RemoteChange &)> done);
 
 // The backends, asked of rclone once per process and kept, as the flag list
 // is. Empty until the answer lands.

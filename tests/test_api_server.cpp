@@ -1156,9 +1156,16 @@ private slots:
 
   void aRemotesSettingsAreShownWithTheSecretsLeftOut() {
     QVERIFY(useFakeRclone(1));
-    // The backends first, as the page would: asked, and then there.
-    ask("GET", "/api/v1/providers", mToken);
-    QTRY_VERIFY_WITH_TIMEOUT(RcloneConfigRegistry::instance().isLoaded(), 10000);
+
+    // Asked for first thing, before anything has read the backends -- the
+    // moment a host the backend marks sensitive once went out because only
+    // its name was there to judge it by. The answer waits for the backends.
+    QVERIFY(!RcloneConfigRegistry::instance().isLoaded());
+    const QByteArray first = ask("GET", "/api/v1/remotes/fake/config", mToken);
+    QCOMPARE(statusOf(first), 200);
+    QCOMPARE(bodyOf(first).object().value(QStringLiteral("described")).toBool(), true);
+    QVERIFY2(!first.contains("SECRET"), first.constData());
+    QVERIFY(RcloneConfigRegistry::instance().isLoaded());
 
     const QByteArray kinds = ask("GET", "/api/v1/providers", mToken);
     QCOMPARE(statusOf(kinds), 200);
@@ -1205,6 +1212,90 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/config", key)), 403);
     QCOMPARE(statusOf(ask("GET", "/api/v1/providers", key)), 200);
     ApiAuth::Keys::instance().forgetAll();
+  }
+
+  // A remote renamed: made again under the new name with exactly what it
+  // had, the old one deleted, and the tasks on it following.
+  void aRemoteCanBeRenamedAndItsTasksFollow() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir scratch;
+    const QString record = scratch.filePath(QStringLiteral("said.txt"));
+    qputenv("FAKE_RCLONE_RECORD", record.toLocal8Bit());
+
+    JobOptions *task = makeTask(QStringLiteral("on the fake"));
+    task->dest = QStringLiteral("fake:backup/films");
+    ListOfJobOptions::getInstance()->Persist(task);
+
+    const QByteArray reply = send("PUT", "/api/v1/remotes/fake/config", mToken,
+                                  "{\"name\":\"renamed\"}");
+    QCOMPARE(statusOf(reply), 200);
+    QCOMPARE(bodyOf(reply).object().value(QStringLiteral("tasks")).toArray()
+                 .at(0).toString(),
+             QStringLiteral("on the fake"));
+    QCOMPARE(task->dest, QStringLiteral("renamed:backup/films"));
+
+    QFile said(record);
+    QVERIFY(said.open(QIODevice::ReadOnly));
+    const QList<QByteArray> lines = said.readAll().split('\n');
+    const QList<QByteArray> create = lines.at(0).split('\x1f');
+    QCOMPARE(create.at(0), QByteArray("create"));
+    QCOMPARE(create.at(1), QByteArray("renamed"));
+    QCOMPARE(create.at(2), QByteArray("fake"));
+    // Everything it had, the password as it is stored, and not obscured
+    // a second time.
+    QVERIFY2(create.contains("access_token=SECRET-TOKEN"), QByteArray(lines.at(0)).replace('', ' ').constData());
+    QVERIFY2(create.contains("pass=OBSCURED-PASS"), QByteArray(lines.at(0)).replace('', ' ').constData());
+    QVERIFY2(create.contains("--no-obscure"), QByteArray(lines.at(0)).replace('', ' ').constData());
+    QVERIFY2(create.contains("--non-interactive"), QByteArray(lines.at(0)).replace('', ' ').constData());
+    QCOMPARE(lines.at(1), QByteArray("delete\x1f" "fake"));
+    // The secrets went to rclone and nowhere else.
+    QVERIFY(!reply.contains("SECRET"));
+
+    // Refused: no name, a bad one, one taken, a setting not offered yet.
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"\"}")), 400);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"a:b\"}")), 400);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"fake\"}")), 409);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken,
+                           "{\"name\":\"x\",\"chunk_size\":\"1Gi\"}")), 400);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/nothing/config", mToken,
+                           "{\"name\":\"x\"}")), 404);
+
+    qunsetenv("FAKE_RCLONE_RECORD");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  void aRemoteIsNotDeletedFromUnderItsTasks() {
+    QVERIFY(useFakeRclone(1));
+    JobOptions *task = makeTask(QStringLiteral("needs the fake"));
+    task->dest = QStringLiteral("fake:backup");
+
+    const QByteArray held = ask("DELETE", "/api/v1/remotes/fake", mToken);
+    QCOMPARE(statusOf(held), 409);
+    QCOMPARE(bodyOf(held).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("used_by_tasks"));
+    QCOMPARE(bodyOf(held).object().value(QStringLiteral("tasks")).toArray().at(0).toString(),
+             QStringLiteral("needs the fake"));
+
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/remotes/fake?force=1", mToken)), 200);
+    // The task is left as it was: deleting a remote is not deleting tasks.
+    QCOMPARE(task->dest, QStringLiteral("fake:backup"));
+
+    // Not while a job is using it.
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000");
+    const QByteArray started = send("POST", "/api/v1/remotes/fake/stream", mToken,
+                                    "{\"path\":\"films/a.mkv\"}");
+    QCOMPARE(statusOf(started), 202);
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/remotes/fake?force=1", mToken)), 409);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken,
+                           "{\"name\":\"y\"}")), 409);
+    JobRegistry::instance().find(bodyOf(started).object()
+                                     .value(QStringLiteral("requestId")).toString())->stop();
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/remotes/nothing", mToken)), 404);
+    // The owner's business.
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/remotes/fake", QByteArray())), 401);
+    ListOfJobOptions::getInstance()->Forget(task);
   }
 
   // The API describes itself, from the same list every request is checked

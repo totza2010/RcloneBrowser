@@ -88,18 +88,33 @@ private slots:
     }
   }
 
-  // With no description at all -- rclone not asked yet -- the names still
-  // keep secrets in.
-  void withoutTheBackendTheNamesStillGuard() {
+  void aRemoteNameIsHeldToRclonesRule() {
+    for (const char *good : {"gdrive", "films drive", "a.b-c_d+e@f", "ไดรฟ์"}) {
+      QVERIFY2(WhyNotARemoteName(QString::fromUtf8(good)).isEmpty(), good);
+    }
+    for (const char *bad : {"", "-x", " x", "x ", "a:b", "a/b", "a\\b"}) {
+      QVERIFY2(!WhyNotARemoteName(QString::fromUtf8(bad)).isEmpty(), bad);
+    }
+  }
+
+  // With no description at all -- rclone not asked yet, or a kind it does
+  // not describe -- nothing is shown. A name was not enough: a teldrive
+  // host, which rclone marks sensitive, went out under "api_host".
+  void withoutTheBackendNothingIsShown() {
     QJsonObject section;
-    section.insert(QStringLiteral("type"), QStringLiteral("drive"));
+    section.insert(QStringLiteral("type"), QStringLiteral("teldrive"));
     section.insert(QStringLiteral("token"), QStringLiteral("{\"access_token\":\"X\"}"));
-    section.insert(QStringLiteral("scope"), QStringLiteral("drive"));
-    const QString all = QString::fromUtf8(
-        QJsonDocument(DescribeSettings(section, nullptr)).toJson());
-    QVERIFY(!all.contains(QStringLiteral("access_token\\\":\\\"X")));
-    QVERIFY(!all.contains(QStringLiteral("\"X\"")));
-    QVERIFY(all.contains(QStringLiteral("\"drive\"")));
+    section.insert(QStringLiteral("api_host"), QStringLiteral("https://private.example"));
+    section.insert(QStringLiteral("chunk_size"), QStringLiteral("512M"));
+    const QJsonArray settings = DescribeSettings(section, nullptr);
+    QCOMPARE(settings.size(), 3);
+    for (const QJsonValue &value : settings) {
+      QVERIFY(value.toObject().value(QStringLiteral("secret")).toBool());
+      QVERIFY(!value.toObject().contains(QStringLiteral("value")));
+    }
+    const QString all = QString::fromUtf8(QJsonDocument(settings).toJson());
+    QVERIFY(!all.contains(QStringLiteral("private.example")));
+    QVERIFY(!all.contains(QStringLiteral("512M")));
     QVERIFY(LooksSecret(QStringLiteral("client_secret")));
     QVERIFY(LooksSecret(QStringLiteral("service_account_credentials")));
     QVERIFY(!LooksSecret(QStringLiteral("chunk_size")));

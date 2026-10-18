@@ -59,6 +59,21 @@ int main(int argc, char *argv[]) {
           "\"Hide\":0,\"Exclusive\":false,\"Examples\":null}]}]\n");
       return 0;
     }
+    // create and delete: succeed, and write down what they were given when
+    // FAKE_RCLONE_RECORD names a file, so a test can see the command.
+    if (std::strcmp(argv[2], "create") == 0 || std::strcmp(argv[2], "delete") == 0) {
+      if (const char *record = std::getenv("FAKE_RCLONE_RECORD")) {
+        if (FILE *file = std::fopen(record, "ab")) {
+          for (int i = 2; i < argc; ++i) {
+            std::fprintf(file, "%s%s", i > 2 ? "\x1f" : "", argv[i]);
+          }
+          std::fprintf(file, "\n");
+          std::fclose(file);
+        }
+      }
+      std::printf("{\"State\":\"\",\"Option\":null,\"Error\":\"\",\"Result\":\"\"}\n");
+      return 0;
+    }
     if (std::strcmp(argv[2], "dump") == 0) {
       std::printf("{\"fake\":{\"type\":\"fake\",\"access_token\":\"SECRET-TOKEN\","
                   "\"chunk_size\":\"1Gi\",\"pass\":\"OBSCURED-PASS\","

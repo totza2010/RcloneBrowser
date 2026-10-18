@@ -2427,7 +2427,49 @@ $("remote-settings").addEventListener("click", async () => {
     "<table><thead><tr><th>Setting</th><th>Value</th><th></th></tr></thead><tbody>" +
       (c.settings || []).map(row).join("") + "</tbody></table>" +
     '<p class="muted">Passwords, tokens and anything rclone marks sensitive are never sent to this page. ' +
-    "Changing a remote from here is not done yet; for now, rclone config.</p>";
+    "Changing its settings from here comes next; for now, rclone config.</p>" +
+    '<p><button id="remote-rename-config" class="ghost small">Rename this remote…</button> ' +
+    '<button id="remote-delete-config" class="danger small">Delete this remote…</button></p>' +
+    '<p id="remote-config-error" class="error"></p>';
+
+  $("remote-rename-config").addEventListener("click", async () => {
+    const to = prompt("New name for " + remote + ":\n\n" +
+      "Saved tasks on it are changed to the new name.", remote);
+    if (!to || to === remote) return;
+    const result = await api("PUT", "/remotes/" + encodeURIComponent(remote) + "/config", { name: to });
+    if (result.status !== 200) {
+      $("remote-config-error").textContent = reasonFrom(result);
+      return;
+    }
+    closeResult();
+    const moved = result.data.tasks || [];
+    toast(remote + ": is now " + to + ":" +
+          (moved.length ? " — " + moved.length + " task(s) changed with it" : ""));
+    browsing.remote = to;
+    refresh();
+    browse(to, "");
+  });
+
+  $("remote-delete-config").addEventListener("click", async () => {
+    if (!confirm("Delete the remote " + remote + ": from rclone.conf?\n\n" +
+                 "Its files are not touched — they are on the remote — but this program " +
+                 "and rclone will no longer know how to reach them.")) return;
+    let result = await api("DELETE", "/remotes/" + encodeURIComponent(remote));
+    if (result.status === 409 && result.data && result.data.code === "used_by_tasks") {
+      if (!confirm("These saved tasks use " + remote + ":\n\n  " +
+                   result.data.tasks.join("\n  ") +
+                   "\n\nDelete the remote anyway? The tasks are kept, and will not run until changed.")) return;
+      result = await api("DELETE", "/remotes/" + encodeURIComponent(remote) + "?force=1");
+    }
+    if (result.status !== 200) {
+      $("remote-config-error").textContent = reasonFrom(result);
+      return;
+    }
+    closeResult();
+    toast(remote + ": deleted from rclone.conf");
+    browsing.remote = "";
+    refresh();
+  });
 });
 
 // ---- streaming --------------------------------------------------------------

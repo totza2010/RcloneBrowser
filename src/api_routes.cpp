@@ -316,6 +316,23 @@ QList<Route> build() {
         "Read from rclone.conf each time.",
         "", "", "200: the settings; 404: no such remote; 502: rclone could "
                 "not read its configuration"),
+      r("PUT", "/api/v1/remotes/{name}/config", kRemotes, "Rename a remote",
+        "rclone has no rename, so it is made again under the new name with "
+        "exactly what it has, and the old one deleted. Saved tasks that name "
+        "it are changed to the new name. Refused while a job is using it. "
+        "Changing its settings comes later.",
+        "", R"({"name":"films-drive"})",
+        "200: renamed, with the tasks changed; 400: not a name, or a change "
+        "not offered yet; 404: no such remote; 409: the name is taken, or a "
+        "job is using it; 502: rclone refused"),
+      r("DELETE", "/api/v1/remotes/{name}", kRemotes,
+        "Delete a remote from the configuration",
+        "Its files are not touched: they are on the remote. Refused while a "
+        "job is using it, and while saved tasks name it unless force=1 -- "
+        "they would be left pointing at nothing.",
+        "force: 1 to delete it even though tasks name it", "",
+        "200: deleted; 404: no such remote; 409: a job is using it, or tasks "
+        "name it (with their names); 502: rclone refused"),
       r("GET", "/api/v1/providers", kRemotes, "The kinds of remote there are",
         "Every backend the rclone on this machine has, a fork's included. "
         "\"loaded\": false means rclone has not answered yet."),
@@ -405,7 +422,9 @@ QString scopeOf(const Route &route) {
       QStringLiteral("POST /api/v1/shutdown"),
       QStringLiteral("POST /api/v1/password"),
       QStringLiteral("POST /api/v1/keys"),
-      QStringLiteral("DELETE /api/v1/keys/{id}")};
+      QStringLiteral("DELETE /api/v1/keys/{id}"),
+      QStringLiteral("PUT /api/v1/remotes/{name}/config"),
+      QStringLiteral("DELETE /api/v1/remotes/{name}")};
 
   const QString key = route.method + QLatin1Char(' ') + route.path;
   if (admin.contains(key)) {
