@@ -12,6 +12,7 @@
 #include "utils.h"
 
 #include <QDateTime>
+#include <functional>
 #include <QEventLoop>
 #include <QProcess>
 #include <QStandardPaths>
@@ -24,7 +25,52 @@ AppCore &AppCore::instance() {
   return core;
 }
 
+namespace {
+
+// Writes what happened to a schedule's run onto the schedule in the store.
+//
+// This was the scheduler card's to do: the card heard how its run went and
+// the window wrote every card into the store. So with no window -- the
+// Docker image's web mode -- a schedule's last run, when it finished and how
+// were never written at all, and the page went on showing whatever the last
+// window had saved. The card still does its own; this is the record that
+// does not depend on there being one.
+void recordOn(const QString &requestId,
+              const std::function<void(Schedule &)> &change) {
+  if (requestId.isEmpty()) {
+    return;
+  }
+  for (const Schedule &schedule : SchedulerStore::instance().schedules()) {
+    if (schedule.requestId == requestId) {
+      Schedule updated = schedule;
+      change(updated);
+      SchedulerStore::instance().update(updated);
+      return;
+    }
+  }
+}
+
+} // namespace
+
 AppCore::AppCore(QObject *parent) : QObject(parent) {
+  // A queued run that comes to the front and starts.
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
+                   [](RunningJob *job) {
+                     recordOn(job->requestId(), [](Schedule &s) {
+                       s.lastStatus = QStringLiteral("running");
+                     });
+                   });
+  // And how it ended: "finished", "error" or "stopped", the card's words.
+  QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,
+                   [](RunningJob *job) {
+                     const QString how = job->finalStatus();
+                     recordOn(job->requestId(), [&how](Schedule &s) {
+                       s.lastStatus = how;
+                       s.lastFinished =
+                           ScheduleStamp(QDateTime::currentDateTime());
+                     });
+                   });
+
   // A schedule's run taken out of the queue before it ran is recorded on the
   // schedule, wherever it was taken out from. This was the window's to do,
   // card by card, so a run taken out through the API left the schedule
@@ -38,6 +84,8 @@ AppCore::AppCore(QObject *parent) : QObject(parent) {
                          Schedule updated = schedule;
                          updated.lastStatus =
                              QStringLiteral("removed from the queue");
+                         updated.lastFinished =
+                             ScheduleStamp(QDateTime::currentDateTime());
                          SchedulerStore::instance().update(updated);
                          return;
                        }
@@ -270,6 +318,17 @@ QString AppCore::fire(const Schedule &schedule, QString *reason) {
     if (reason != nullptr) {
       *reason = why;
     }
+    // Written down, so a run that did not happen says why to whoever looks
+    // later -- not only to a card that happened to be on screen. The run
+    // this schedule started before is kept: it may still be going.
+    if (const Schedule *stored = SchedulerStore::instance().find(schedule.id)) {
+      Schedule updated = *stored;
+      const QString now = ScheduleStamp(QDateTime::currentDateTime());
+      updated.lastRun = now;
+      updated.lastFinished = now;
+      updated.lastStatus = why;
+      SchedulerStore::instance().update(updated);
+    }
     emit scheduleHeld(schedule.id, why);
     return QString();
   };
@@ -322,6 +381,11 @@ QString AppCore::fire(const Schedule &schedule, QString *reason) {
   // last run is still going -- and so a window can find the card.
   Schedule updated = schedule;
   updated.requestId = requestId;
+  updated.lastRun = ScheduleStamp(QDateTime::currentDateTime());
+  updated.lastFinished.clear();
+  updated.lastStatus = schedule.executionMode == 1
+                           ? QStringLiteral("in the queue")
+                           : QStringLiteral("running");
   SchedulerStore::instance().update(updated);
 
   emit scheduleFired(schedule.id, requestId);

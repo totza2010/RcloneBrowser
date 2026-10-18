@@ -741,6 +741,49 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(task);
   }
 
+  // How a schedule's run went is written down by the core, with no window to
+  // do it: started, held, and how it ended.
+  void aScheduleRecordsHowItsRunWent() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "1500");
+    JobOptions *task = makeTask(QStringLiteral("run by a schedule"));
+    QJsonObject asked;
+    asked.insert(QStringLiteral("taskId"), task->uniqueId.toString());
+    asked.insert(QStringLiteral("runAs"), QStringLiteral("now"));
+    asked.insert(QStringLiteral("active"), false);
+    const QString id =
+        bodyOf(send("POST", "/api/v1/schedules", mToken,
+                    QJsonDocument(asked).toJson(QJsonDocument::Compact)))
+            .object().value(QStringLiteral("id")).toString();
+    const QByteArray target = "/api/v1/schedules/" + QUrl::toPercentEncoding(id);
+    const auto stored = [&id]() { return *SchedulerStore::instance().find(id); };
+
+    QCOMPARE(statusOf(ask("POST", target + "/run", mToken)), 202);
+    QCOMPARE(stored().lastStatus, QStringLiteral("running"));
+    QVERIFY(stored().lastRun.contains(QString::number(QDate::currentDate().year())));
+    QVERIFY(stored().lastFinished.isEmpty());
+
+    // Asked again while it runs: held, and the reason written down.
+    QCOMPARE(statusOf(ask("POST", target + "/run", mToken)), 409);
+    QCOMPARE(stored().lastStatus, QStringLiteral("its last run has not finished"));
+
+    // And when it ends, how.
+    QTRY_COMPARE_WITH_TIMEOUT(stored().lastStatus, QStringLiteral("finished"), 10000);
+    QVERIFY(!stored().lastFinished.isEmpty());
+
+    // The page reads the same.
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/schedules", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("id")).toString() == id) {
+        QCOMPARE(value.toObject().value(QStringLiteral("lastStatus")).toString(),
+                 QStringLiteral("finished"));
+      }
+    }
+
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aScheduleThatCouldNotRunIsRefused() {
     JobOptions *task = makeTask(QStringLiteral("for refusals"));
     const QString taskId = task->uniqueId.toString();

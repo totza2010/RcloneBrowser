@@ -1712,6 +1712,8 @@ marker: `src/schedule_json.*` · `MainWindow::followSchedulerStore` · `POST/PUT
 | 13 | **Delete** ตารางเวลา | หายทั้งหน้าเว็บและหน้าต่าง · task ยังอยู่ | 🟨 API ผ่าน · task ยังอยู่ | AI / 2026-10-12 |
 | 14 | task ชนิด mount | ไม่มีปุ่ม Schedule · ไม่อยู่ในตัวเลือกของฟอร์ม | 🟨 API 400 | AI / 2026-10-12 |
 | 15 | หน้าต่าง · เพิ่ม/แก้/ลบตารางเวลาแบบเดิม | ทำงานเหมือนเดิม | ⬜ | |
+| 16 | **Docker โหมด web (ไม่มีหน้าต่าง)** · ตารางเวลาถึงกำหนดและรันจบ | คอลัมน์ Last บนหน้าเว็บ: เวลา · finished / error | 🟨 `test_api_server` (ไม่มีหน้าต่างใน test) | AI / 2026-10-18 |
+| 17 | กด Run now ซ้ำขณะรอบก่อนยังรันอยู่ | Last: "its last run has not finished" · พอรอบเดิมจบเป็น finished | 🟨 `test_api_server` | AI / 2026-10-18 |
 
 ---
 

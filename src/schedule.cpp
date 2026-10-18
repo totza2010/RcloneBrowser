@@ -97,6 +97,10 @@ bool Schedule::isDue(const QDateTime &now) const {
          now.time().hour() == hour && now.time().minute() == minute;
 }
 
+QString ScheduleStamp(const QDateTime &when) {
+  return when.toString(QStringLiteral("ddd, dd/MMM/yyyy HH:mm:ss t"));
+}
+
 QDateTime Schedule::nextRun(const QDateTime &from) const {
   if (cronMode) {
     QString pattern = NormalizeCron(cron);

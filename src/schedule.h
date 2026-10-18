@@ -26,6 +26,12 @@
 // "when does this run".
 QString NormalizeCron(const QString &cron);
 
+// A moment as a schedule's "last run" and "finished" are written:
+// "Mon, 12/Oct/2026 21:13:32 GMT+7". The form the scheduler card has always
+// used and the stored schedules already hold, so the core writing it and the
+// card writing it write the same thing.
+QString ScheduleStamp(const QDateTime &when);
+
 struct Schedule {
   QString id;
   QString name;
