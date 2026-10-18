@@ -140,6 +140,16 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 รองรับ `Range` · หยุดด้วย `POST /jobs/{requestId}/stop` แล้ว path เดิมได้ `404` · `502` คือ rclone ยังไม่ขึ้น (ลองใหม่ในอึดใจ)
 งานที่เป็น stream มี `stream: {path}` ใน `GET /jobs`
 
+### serve — `POST /api/v1/remotes/{name}/serve` (ระดับ admin)
+
+`{"path":"films","protocol":"webdav","port":8081,"everyone":false,"readOnly":true,"user":"rb","password":"…"}` →
+`202` `{requestId, protocol, port, everyone, readOnly}`
+- `protocol`: `webdav` · `http` · `ftp` · `sftp` — รายชื่อพร้อมพอร์ตปกติอยู่ใน `GET /system` → `serveProtocols`
+- **พอร์ตของตัวเอง** (ไม่ผ่านพอร์ตของ API แบบ stream — FTP/SFTP ไม่ใช่ HTTP) · `everyone:false` = ฟังที่ 127.0.0.1 เท่านั้น
+- `everyone:true` **ต้องมี user และ password** · รหัสผ่านส่งให้ rclone ทาง environment (`RCLONE_PASS`) — ไม่อยู่ในคำสั่ง · log · ประวัติ · `/jobs`
+- `readOnly` เป็น true ถ้าไม่บอก · `400` เมื่อ protocol ไม่รู้จัก · พอร์ตถูกใช้ (รวมถึงโดย serve อื่นที่รันอยู่) · มี user ไม่มีรหัส · ไม่มีรหัสแต่ everyone
+- งานที่เป็น serve มี `serve: {protocol, port, everyone, readOnly, user}` ใน `GET /jobs` · หยุดด้วย `POST /jobs/{requestId}/stop`
+
 ### คำสั่งที่ถูกปฏิเสธ ไม่ใช่ที่ยังทำไม่เสร็จ
 
 | | |

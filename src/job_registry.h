@@ -49,9 +49,13 @@ public:
   // Creates the job, announces it, and starts rclone. Returns the job even
   // when rclone could not be started, so the failure is visible in the same
   // place as any other ending.
+  //
+  // `environment` is added to rclone's, for what must not be among its
+  // arguments. See RunningJob::setEnvironment().
   RunningJob *start(JobKind kind, const QStringList &args,
                     const JobDescription &description, const QString &taskId,
-                    const QString &transferMode, const QString &requestId);
+                    const QString &transferMode, const QString &requestId,
+                    const QMap<QString, QString> &environment = {});
 
   // Drops a finished job. Running jobs are left alone: forgetting one would
   // leave rclone running with nothing holding it.

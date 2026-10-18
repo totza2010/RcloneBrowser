@@ -7,6 +7,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QNetworkInterface>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTcpServer>
@@ -561,6 +562,25 @@ RunningJob *Download(const Item &what, const QString &localFolder, bool dryRun,
 
 const char *const kStreamPrefix = "/stream/";
 
+QStringList ServeUrls(const RunningJob::ServeAddress &address) {
+  const QString scheme = address.protocol == QLatin1String("webdav")
+                             ? QStringLiteral("http")
+                             : address.protocol;
+  const auto url = [&](const QString &host) {
+    return QStringLiteral("%1://%2:%3/").arg(scheme, host).arg(address.port);
+  };
+  QStringList urls{url(QStringLiteral("127.0.0.1"))};
+  if (address.everyone) {
+    for (const QHostAddress &host : QNetworkInterface::allAddresses()) {
+      if (host.protocol() == QAbstractSocket::IPv4Protocol &&
+          !host.isLoopback() && !host.isLinkLocal()) {
+        urls << url(host.toString());
+      }
+    }
+  }
+  return urls;
+}
+
 namespace {
 
 // A name, as a filter pattern that matches that name and nothing else. The
@@ -579,6 +599,131 @@ QString asPattern(const QString &name) {
 }
 
 } // namespace
+
+QStringList ServeProtocols() {
+  return {QStringLiteral("webdav"), QStringLiteral("http"),
+          QStringLiteral("ftp"), QStringLiteral("sftp")};
+}
+
+quint16 DefaultServePort(const QString &protocol) {
+  if (protocol == QLatin1String("webdav")) {
+    return 8081;
+  }
+  if (protocol == QLatin1String("ftp")) {
+    return 2121;
+  }
+  if (protocol == QLatin1String("sftp")) {
+    return 2022;
+  }
+  return 8080;
+}
+
+RunningJob *Serve(const QString &remote, const QString &path,
+                  const ServeOptions &options, QString *why) {
+  const auto refuse = [why](const QString &reason) -> RunningJob * {
+    if (why != nullptr) {
+      *why = reason;
+    }
+    return nullptr;
+  };
+
+  const QString protocol = options.protocol.trimmed().toLower();
+  if (!ServeProtocols().contains(protocol)) {
+    return refuse(QStringLiteral("serve it as one of: %1")
+                      .arg(ServeProtocols().join(QStringLiteral(", "))));
+  }
+  const QString user = options.user.trimmed();
+  if (user.isEmpty() != options.password.isEmpty()) {
+    return refuse(QStringLiteral("give both a user and a password, or "
+                                 "neither"));
+  }
+  if (options.everyone && options.password.isEmpty()) {
+    return refuse(QStringLiteral("other machines could reach it, so it needs "
+                                 "a user and a password"));
+  }
+  // A name rclone is handed as an argument, so nothing that could be taken
+  // for one of its own flags or split into two.
+  static const QRegularExpression plainUser(QStringLiteral("^[^\\s-][^\\s]*$"));
+  if (!user.isEmpty() && !plainUser.match(user).hasMatch()) {
+    return refuse(QStringLiteral("a user is one word, not starting with -"));
+  }
+
+  const quint16 port =
+      options.port != 0 ? options.port : DefaultServePort(protocol);
+  // One of ours first: rclone may not have taken the port yet, so asking
+  // the machine would say it is free.
+  for (RunningJob *other : JobRegistry::instance().jobs()) {
+    if (other->isRunning() && other->kind() == JobKind::Serve &&
+        other->serveAddress().port == port) {
+      return refuse(QStringLiteral("port %1 is already serving %2")
+                        .arg(port)
+                        .arg(other->description().source));
+    }
+  }
+  // Asked here, where the answer can be said plainly, rather than left to
+  // rclone, which would start, fail and leave a job in the history saying
+  // only "error".
+  {
+    QTcpServer probe;
+    if (!probe.listen(options.everyone ? QHostAddress::Any
+                                       : QHostAddress::LocalHost,
+                      port)) {
+      return refuse(QStringLiteral("port %1 is already in use").arg(port));
+    }
+  }
+
+  const QString source = Target(remote, trimSlashes(path));
+  QStringList command{QStringLiteral("serve"), protocol, source,
+                      QStringLiteral("--addr"),
+                      options.everyone
+                          ? QStringLiteral(":%1").arg(port)
+                          : QStringLiteral("127.0.0.1:%1").arg(port)};
+  if (options.readOnly) {
+    command << QStringLiteral("--read-only");
+  }
+  QMap<QString, QString> environment;
+  if (!user.isEmpty()) {
+    command << QStringLiteral("--user") << user;
+    // rclone reads any of its flags from RCLONE_<FLAG>: --pass from this.
+    environment.insert(QStringLiteral("RCLONE_PASS"), options.password);
+  } else if (protocol == QLatin1String("sftp")) {
+    // rclone will not serve SFTP to nobody in particular unless told to.
+    command << QStringLiteral("--no-auth");
+  }
+  command << GetRemoteModeRcloneOptions()
+          << GetDefaultOptionsList("defaultRcloneOptions");
+
+  const QString where =
+      QStringLiteral("%1://%2:%3")
+          .arg(protocol == QLatin1String("webdav") ? QStringLiteral("http")
+                                                   : protocol,
+               options.everyone ? QStringLiteral("0.0.0.0")
+                                : QStringLiteral("127.0.0.1"))
+          .arg(port);
+  qCDebug(rbRemote) << "serving" << source << "as" << protocol << "on"
+                    << where;
+
+  RunningJob *job = JobRegistry::instance().start(
+      JobKind::Serve, command,
+      JobDescription{QStringLiteral("%1 of %2").arg(
+                         protocol == QLatin1String("webdav")
+                             ? QStringLiteral("WebDAV")
+                             : protocol.toUpper(),
+                         source),
+                     source, where},
+      QString(), QStringLiteral("serve"), QUuid::createUuid().toString(),
+      environment);
+  if (job != nullptr) {
+    RunningJob::ServeAddress address;
+    address.protocol = protocol;
+    address.port = port;
+    address.everyone = options.everyone;
+    address.readOnly = options.readOnly;
+    address.user = user;
+    job->setServeAddress(address);
+  }
+  return job;
+}
 
 RunningJob *Stream(const Item &what, QString *why) {
   const QString path = trimSlashes(what.path);

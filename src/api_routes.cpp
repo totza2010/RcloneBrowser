@@ -326,6 +326,17 @@ QList<Route> build() {
         "202: received, and on its way up, with its requestId; 400: not a "
         "name; 404: no such remote; 411: no Content-Length; 507: no room to "
         "set it down"),
+      r("POST", "/api/v1/remotes/{name}/serve", kStreams,
+        "Offer a folder to other programs over WebDAV, HTTP, FTP or SFTP",
+        "rclone serves it on a port of its own until the job is stopped. "
+        "everyone: listen on every address of the machine, not only on the "
+        "machine itself -- which needs a user and a password. The password "
+        "reaches rclone through its environment, so it is in no command, "
+        "log or history. /system says the protocols and their usual ports.",
+        "",
+        R"({"path":"films","protocol":"webdav","port":8081,"everyone":false,"readOnly":true,"user":"","password":""})",
+        "202: started, with where; 400: refused (no such protocol, port in "
+        "use, no password for everyone); 404: no such remote"),
       r("POST", "/api/v1/remotes/{name}/stream", kStreams,
         "Serve a file or a folder for a player",
         "Gives back a path of this same server, under a part made at random "
@@ -477,6 +488,9 @@ QString scopeOf(const Route &route) {
       QStringLiteral("PUT /api/v1/remotes/{name}/config"),
       QStringLiteral("POST /api/v1/remotes"),
       QStringLiteral("POST /api/v1/remotes/{name}/answer"),
+      // Opens a remote to whoever can reach a port -- more than any key that
+      // is not the owner's should be able to give away.
+      QStringLiteral("POST /api/v1/remotes/{name}/serve"),
       QStringLiteral("DELETE /api/v1/remotes/{name}")};
 
   const QString key = route.method + QLatin1Char(' ') + route.path;

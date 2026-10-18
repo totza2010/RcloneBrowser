@@ -1,5 +1,6 @@
 #include "job_widget.h"
 #include "rc_client.h"
+#include "remote_ops.h"
 #include "utils.h"
 #include <QProgressBar>
 #include <QInputDialog>
@@ -189,6 +190,30 @@ JobWidget::JobWidget(RunningJob *job, QWidget *parent)
     clipboard->setText(mJob->displayCommand().join(" "));
   });
 
+  // A serve, or a stream the page asked for, runs until it is stopped and
+  // has no progress to show. What it has is where it can be reached.
+  const bool serving =
+      mJob->kind() == JobKind::Serve || mJob->kind() == JobKind::Stream;
+  if (serving) {
+    ui.overall->hide();
+    ui.progress_info->hide();
+    mStatus = "0_serve_running";
+  }
+  if (mJob->kind() == JobKind::Serve && mJob->serveAddress().port != 0) {
+    const RunningJob::ServeAddress &address = mJob->serveAddress();
+    const QStringList urls = RemoteOps::ServeUrls(address);
+    // The one others would use first, when there is one.
+    ui.dest->setText(urls.last());
+    ui.dest->setCursorPosition(0);
+    QStringList about{urls.join(QLatin1Char('\n'))};
+    about << (address.readOnly ? "read only" : "can be changed");
+    about << (address.user.isEmpty() ? "no log-in"
+                                     : QString("log in as %1").arg(address.user));
+    about << (address.everyone ? "other machines can reach it"
+                               : "this machine only");
+    ui.dest->setToolTip(about.join(QLatin1Char('\n')));
+  }
+
   // The same as the page's Speed… button, through the same job.
   if (mJob->kind() == JobKind::Transfer) {
     mSpeed = new QToolButton(this);
@@ -205,7 +230,7 @@ JobWidget::JobWidget(RunningJob *job, QWidget *parent)
 
   ui.showDetails->setStyleSheet(
       "QToolButton { border: 0; color: green; font-weight: bold;}");
-  ui.showDetails->setText("  Running");
+  ui.showDetails->setText(serving ? "  Serving" : "  Running");
 }
 
 void JobWidget::showBandwidth(const QString &rate) {
@@ -433,6 +458,10 @@ QString JobWidget::getUniqueID() { return mJob->taskId(); }
 QString JobWidget::getRequestId() { return mJob->requestId(); }
 
 QString JobWidget::getTransferMode() { return mJob->transferMode(); }
+
+bool JobWidget::isTransfer() const {
+  return mJob->kind() == JobKind::Transfer;
+}
 
 QDateTime JobWidget::getStartDateTime() { return mJob->startedAt(); }
 

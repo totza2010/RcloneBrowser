@@ -10,6 +10,7 @@
 #include "item_model.h"
 #include "list_of_job_options.h"
 #include "mount_dialog.h"
+#include "serve_dialog.h"
 #include "progress_dialog.h"
 #include "remote_folder_dialog.h"
 #include "transfer_dialog.h"
@@ -346,7 +347,42 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
   ui.cleanup->setStatusTip("Clean up the remote if possible. Empty the trash "
                            "or delete old file versions - rclone cleanup");
 
+  // What the page's Serve button does: a folder offered to other programs.
+  QAction *serveAction = new QAction("Serve…", this);
+  serveAction->setStatusTip("Offer a folder to other programs over WebDAV, "
+                            "HTTP, FTP or SFTP - rclone serve");
+  serveAction->setVisible(!isLocal);
+  QObject::connect(serveAction, &QAction::triggered, this, [=]() {
+    QString path;
+    const QModelIndexList chosen = ui.tree->selectionModel()->selectedRows();
+    if (!chosen.isEmpty()) {
+      const QModelIndex index = chosen.front();
+      // A file is served by the folder it is in.
+      path = model->isFolder(index) && !model->isLoading(index)
+                 ? model->path(index).path()
+                 : model->path(model->parent(index)).path();
+    }
+    const QString what = remote + ":" + path;
+    ServeDialog dialog(what, this);
+    if (dialog.exec() != QDialog::Accepted) {
+      return;
+    }
+    QString why;
+    RunningJob *job = RemoteOps::Serve(remote, path, dialog.options(), &why);
+    if (job == nullptr) {
+      QMessageBox::warning(this, "Serve", why);
+      return;
+    }
+    QMessageBox::information(
+        this, "Serve",
+        QString("%1 is being served at:\n\n%2\n\nIts card in Jobs has the "
+                "address, and Stop there ends it.")
+            .arg(what, RemoteOps::ServeUrls(job->serveAddress())
+                           .join(QLatin1Char('\n'))));
+  });
+
   QMenu *menuMode = new QMenu(this);
+  menuMode->addAction(serveAction);
   menuMode->addAction(ui.getTree);
   menuMode->addAction(ui.link);
   menuMode->addAction(ui.export_);
@@ -1691,6 +1727,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                      menu.addSeparator();
                      menu.addAction(ui.actionNewMount);
                      menu.addAction(ui.stream);
+                     menu.addAction(serveAction);
                      menu.addAction(ui.upload);
                      menu.addAction(ui.download);
                      menu.addSeparator();

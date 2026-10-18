@@ -17,6 +17,8 @@
 // Moved over one at a time. What is here is what has been moved; the rest
 // still lives in remote_widget.cpp and is listed in the plan.
 
+#include "running_job.h"
+
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -233,6 +235,44 @@ struct MountOptions {
 RunningJob *Mount(const QString &remote, const QString &path,
                   const QString &mountPoint, const MountOptions &options,
                   QString *why = nullptr);
+
+// ---- serving ------------------------------------------------------------------
+//
+// A remote, or a folder of one, offered to other programs -- a file manager,
+// a TV, another machine's backup tool -- the way rclone serves it: "rclone
+// serve http|webdav|ftp|sftp". Unlike a stream it is not passed through the
+// API's port: FTP and SFTP are not HTTP, and the programs that speak WebDAV
+// expect a server of their own. So it has a port of its own, and who can
+// reach that port is the owner's choice.
+
+struct ServeOptions {
+  QString protocol;      // "http" | "webdav" | "ftp" | "sftp"
+  quint16 port = 0;      // 0: DefaultServePort(protocol)
+  bool everyone = false; // every address of this machine, not only itself
+  bool readOnly = true;
+  QString user;     // with a password, who has to log in
+  QString password; // handed to rclone in its environment, never its arguments
+};
+
+// The protocols Serve() takes, in the order they are offered.
+QStringList ServeProtocols();
+
+// The port a protocol is offered on when none is named. Not the protocol's
+// own (80, 21, 22): those need more rights than this program has, and are
+// often taken.
+quint16 DefaultServePort(const QString &protocol);
+
+// Offers a folder of a remote over `options.protocol` until the job is
+// stopped. Refused when the protocol is not one of ServeProtocols(), the port
+// is in use, or other machines could reach it without a password -- a remote
+// served to a network with nobody asked to log in is everything in it given
+// to whoever is on that network.
+RunningJob *Serve(const QString &remote, const QString &path,
+                  const ServeOptions &options, QString *why = nullptr);
+
+// The addresses a running serve can be opened at from this machine and, when
+// it is for everyone, from others: one per address this machine has.
+QStringList ServeUrls(const RunningJob::ServeAddress &address);
 
 // ---- between this machine and a remote --------------------------------------
 //

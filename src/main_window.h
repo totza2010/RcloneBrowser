@@ -176,6 +176,7 @@ private:
   // function that started the job, so a job started anywhere else appeared
   // nowhere. See docs/QUEUE-MOVE.md block C.
   void addJobCard(RunningJob *job);
+  void addServingCard(RunningJob *job);
 
   // Draws the queue tab from JobQueue: rows, tab text, buttons. Fifteen
   // places used to write that tab text; this is the one left.

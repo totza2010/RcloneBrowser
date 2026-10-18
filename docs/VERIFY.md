@@ -1879,6 +1879,23 @@ marker: `RcClient::setBandwidth` · `POST /api/v1/jobs/{id}/bandwidth` · `POST 
 | 7 | หน้าต่าง · ใส่ `fast` | บอกว่าไม่ใช่ความเร็ว · ไม่ส่งให้ rclone | ⬜ | |
 | 8 | งานจบ | ปุ่ม Speed… หายไป | ⬜ | |
 
+### V-52 · serve โฟลเดอร์ให้โปรแกรมอื่น
+
+marker: `RemoteOps::Serve` · `POST /api/v1/remotes/{name}/serve` · `ServeDialog`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: serve webdav · 127.0.0.1 · read only · user/password | ไม่ login 401 · login 207 · เขียนไม่ได้ | ✅ **PASS** (gdrive · MKCOL 405) | AI / 2026-10-19 |
+| 2 | ดู command line ของ rclone และ `/jobs` | ไม่มีรหัสผ่าน | ✅ **PASS** | AI / 2026-10-19 |
+| 3 | Stop | พอร์ตปิด · ไม่มี rclone ค้าง | ✅ **PASS** | AI / 2026-10-19 |
+| 4 | everyone ไม่มีรหัส · protocol แปลก · พอร์ตซ้ำ · user ขึ้นต้น `-` · key ระดับ write | ปฏิเสธพร้อมเหตุผล · 403 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 5 | หน้าเว็บ · **Serve** · webdav | การ์ดใน Jobs มีที่อยู่ · **Copy address** | ⬜ | |
+| 6 | เปิดที่อยู่ใน Explorer / Finder / แอปมือถือ (everyone + รหัส) | เห็นไฟล์ · ถามรหัส | ⬜ | |
+| 7 | FTP และ SFTP (FileZilla) | เข้าได้ด้วย user/password | ⬜ | |
+| 8 | หน้าต่าง · คลิกขวาโฟลเดอร์ · **Serve…** | กล่องบอกที่อยู่ · การ์ด "Serving" ใน Jobs | ⬜ | |
+| 9 | หน้าเว็บสั่ง stream ขณะเปิดหน้าต่าง | การ์ด stream ขึ้นในหน้าต่าง · Stop ได้ | ⬜ | |
+| 10 | หน้าต่าง · **Stop all transfers** ขณะมี serve | serve ยังทำงาน | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

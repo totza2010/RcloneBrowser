@@ -418,7 +418,7 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 1. **ตั้งค่ารีโหมดจากหน้าเว็บ** — แผน R1–R5 ใน [`REMOTE-CONFIG-UI.md`](REMOTE-CONFIG-UI.md) ← **กำลังทำ** (R1–R5 เสร็จ 2026-10-19 ทั้งหน้าเว็บและหน้าต่าง — หน้าต่างยังไม่ได้ดูด้วยตา V-49)
 2. ~~อัปโหลดจากเครื่องที่เปิด browser~~ — **ทำแล้ว 2026-10-19** ดู "อัปโหลดจากเครื่องที่เปิด browser"
 3. ~~dashboard ความเร็วรวม · ปรับ bandwidth ขณะรัน~~ — **ทำแล้ว 2026-10-19** ดู "ความเร็วรวมและปรับความเร็วขณะรัน"
-4. serve ทั้งรีโหมดเป็น WebDAV / SFTP / FTP / HTTP
+4. ~~serve ทั้งรีโหมดเป็น WebDAV / SFTP / FTP / HTTP~~ — **ทำแล้ว 2026-10-19** ดู "serve โฟลเดอร์ให้โปรแกรมอื่น"
 5. ดูไฟล์ในตัว (ภาพ · PDF · ข้อความ)
 6. การแจ้งเตือนเมื่องานจบ/ล้ม · webhook (A6)
 7. sync สองทาง (bisync) · ตัวช่วยสำรองข้อมูล
@@ -446,6 +446,28 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test
 - `docs/VERIFY.md` มี 164 แถวที่ยังไม่มีใครลอง
+
+## serve โฟลเดอร์ให้โปรแกรมอื่น (2026-10-19)
+
+- **core**: `RemoteOps::Serve(remote, path, ServeOptions)` → `rclone serve webdav|http|ftp|sftp` เป็นงานชนิดใหม่ `JobKind::Serve` ("serve")
+  ทำงานจนกว่าจะหยุด · `ServeProtocols()` · `DefaultServePort()` (webdav 8081 · http 8080 · ftp 2121 · sftp 2022 — ไม่ใช้ 80/21/22 ที่ต้องมีสิทธิ์สูง) ·
+  `ServeUrls()` ที่อยู่ที่เปิดได้ (127.0.0.1 + IPv4 ของเครื่องเมื่อ everyone)
+- **พอร์ตของตัวเอง** ไม่ relay ผ่าน API แบบ stream: FTP/SFTP ไม่ใช่ HTTP และโปรแกรม WebDAV คาดหวัง server ของมันเอง
+- **ความปลอดภัย**: ค่าเริ่มต้นฟังที่ 127.0.0.1 และ read only · ให้เครื่องอื่นเข้าได้ (`everyone`) **ต้องมี user + password** ·
+  รหัสผ่านส่งทาง environment `RCLONE_PASS` (ใหม่: `RunningJob::setEnvironment` · `JobRegistry::start(..., environment)`) — ไม่อยู่ใน argv
+  ที่ทุกคนบนเครื่องอ่านได้ ไม่อยู่ใน log/ประวัติ/`/jobs` · ชื่อ user ห้ามขึ้นต้นด้วย `-` · พอร์ตถูกใช้ → ปฏิเสธพร้อมเหตุผล
+  (ตรวจทั้งเครื่องและ serve ของเราที่ rclone อาจยังไม่ได้จับพอร์ต) · sftp ไม่มี user → `--no-auth` (เฉพาะเครื่องนี้)
+- **API**: `POST /remotes/{name}/serve` **ระดับ admin** (เปิดรีโหมดให้ใครก็ได้ที่เข้าถึงพอร์ต — มากกว่าที่ key ใดควรให้ได้) ·
+  `/jobs` มี `serve` · `/system` มี `serveProtocols`
+- **หน้าเว็บ**: ปุ่ม **Serve** ในแถบรีโหมด (โฟลเดอร์ที่เลือก หรือโฟลเดอร์ที่เปิดอยู่) · ฟอร์ม protocol/พอร์ต/อื่นเข้าได้/read only/user/password ·
+  การ์ดงานแสดงที่อยู่ (host ของหน้าเว็บเองเมื่อ everyone) · ปุ่ม **Copy address**
+- **หน้าต่าง**: **Serve…** ในเมนู Tools และเมนูคลิกขวา (`ServeDialog` ถามเหมือนหน้าเว็บ) · บอกที่อยู่หลังเริ่ม ·
+  **การ์ดในแท็บ Jobs สำหรับ serve และ stream ที่หน้าเว็บสั่ง** (ก่อนหน้านี้ stream จากหน้าเว็บไม่ขึ้นในหน้าต่าง) — แสดงที่อยู่ แทนแถบความคืบหน้า ·
+  "Stop all transfers" ไม่หยุด serve/stream (เหมือนที่ไม่หยุด mount)
+- **ตรวจกับของจริง**: serve gdrive เป็น WebDAV ที่ 127.0.0.1:18082 read only + user/password → ไม่ login 401 · login ถูก 207 ·
+  MKCOL 405 · รหัสไม่อยู่ใน command line ของ rclone และไม่อยู่ใน `/jobs` · Stop แล้วพอร์ตปิด ไม่มี rclone ค้าง ·
+  ก่อนหน้านั้นยืนยันกับ rclone v1.73.1 ว่า `RCLONE_PASS` ใช้แทน `--pass` ได้จริง
+- ยังไม่ได้: ลอง FTP/SFTP/everyone กับของจริง · ดูการ์ดและกล่อง Serve ในหน้าต่างด้วยตา · ค่า serve เก็บเป็น task ไม่ได้ · ใบรับรอง HTTPS (`--cert`)
 
 ## ความเร็วรวมและปรับความเร็วขณะรัน (2026-10-19)
 

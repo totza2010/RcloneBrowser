@@ -439,6 +439,16 @@ function draw() {
   drawHistory();
 }
 
+// Where a serve can be reached. The daemon does not know by what name this
+// browser reached it, so the host is the page's own -- or the machine itself,
+// when nothing else may reach it.
+function serveAddress(job) {
+  const serve = job.serve;
+  const host = serve.everyone ? location.hostname : "127.0.0.1";
+  const scheme = serve.protocol === "webdav" ? "http" : serve.protocol;
+  return scheme + "://" + (host.includes(":") ? "[" + host + "]" : host) + ":" + serve.port + "/";
+}
+
 function jobCard(job) {
   const stats = job.stats || {};
   const done = stats.totalBytes ? (stats.bytes / stats.totalBytes) * 100 : 0;
@@ -456,6 +466,11 @@ function jobCard(job) {
   if (job.running && stats.speed) figures.push(bytes(stats.speed) + "/s");
   if (job.running && stats.etaSeconds > 0) figures.push(seconds(stats.etaSeconds) + " left");
   if (job.bandwidth) figures.push("limited to " + esc(job.bandwidth) + (job.bandwidth === "off" ? "" : "/s"));
+  if (job.serve) {
+    figures.push(job.serve.readOnly ? "read only" : "can be changed");
+    figures.push(job.serve.user ? "log in as " + esc(job.serve.user) : "no log-in");
+    figures.push(job.serve.everyone ? "other machines can reach it" : "this machine only");
+  }
   figures.push("started by " + esc(job.startedBy || "?"));
 
   return (
@@ -472,13 +487,17 @@ function jobCard(job) {
           (job.running && job.kind === "transfer"
             ? '<button class="ghost small" data-speed="' + esc(job.requestId) + '">Speed…</button>'
             : "") +
+          (job.running && job.serve
+            ? '<button class="ghost small" data-copy-text="' + esc(serveAddress(job)) + '">Copy address</button>'
+            : "") +
           (job.running
             ? '<button class="danger small" data-stop="' + esc(job.requestId) + '">' +
               (job.kind === "mount" ? "Unmount" : "Stop") + "</button>"
             : "") +
         "</div>" +
       "</div>" +
-      '<div class="path">' + esc(job.source) + " → " + esc(job.dest) + "</div>" +
+      '<div class="path">' + esc(job.source) + " → " +
+        esc(job.serve ? serveAddress(job) : job.dest) + "</div>" +
       (job.running && stats.totalBytes
         ? '<div class="bar"><span style="width:' + done.toFixed(1) + '%"></span></div>'
         : "") +
@@ -2412,6 +2431,67 @@ $("remote-mount").addEventListener("click", () => {
   });
 });
 
+// ---- serving ---------------------------------------------------------------
+
+// A folder offered to other programs -- a file manager, a TV, another
+// machine -- on a port of its own, for as long as the job runs.
+$("remote-serve").addEventListener("click", () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  const path = entry && entry.isDir ? entry.path : browsing.path;
+  const what = browsing.remote + ":" + path;
+  const protocols = (state.system.serveProtocols || []).length
+    ? state.system.serveProtocols
+    : [{ protocol: "webdav", defaultPort: 8081 }];
+  const label = { webdav: "WebDAV — file managers, Windows, macOS, phones",
+                  http: "HTTP — a browser, read only by nature",
+                  ftp: "FTP", sftp: "SFTP" };
+
+  showResult("Serve " + what,
+    '<p class="muted">Offers this folder to other programs on a port of its own, ' +
+    "from the machine the program runs on, until you stop it in Jobs.</p>" +
+    '<p><label>As<select id="serve-protocol">' +
+      protocols.map((p) => '<option value="' + esc(p.protocol) + '" data-port="' + p.defaultPort + '">' +
+        esc(label[p.protocol] || p.protocol) + "</option>").join("") +
+    "</select></label></p>" +
+    '<p><label>Port<input id="serve-port" type="number" min="1" max="65535" value="' +
+      protocols[0].defaultPort + '"></label></p>' +
+    '<p><label class="check"><input type="checkbox" id="serve-everyone"> ' +
+      "Other machines may reach it too — needs a user and a password</label></p>" +
+    '<p><label class="check"><input type="checkbox" id="serve-ro" checked> Read only</label></p>' +
+    '<p><label>User<input id="serve-user" type="text" autocomplete="off"></label></p>' +
+    '<p><label>Password<input id="serve-pass" type="password" autocomplete="new-password"></label></p>' +
+    '<p><button id="serve-go" class="small">Serve</button> ' +
+    '<span id="serve-state" class="error"></span></p>');
+
+  $("serve-protocol").addEventListener("change", (e) => {
+    $("serve-port").value = e.target.selectedOptions[0].dataset.port;
+  });
+  $("serve-go").addEventListener("click", async () => {
+    let answer;
+    try {
+      answer = await api("POST", remoteUrl("serve"), {
+        path: path,
+        protocol: $("serve-protocol").value,
+        port: Number($("serve-port").value) || 0,
+        everyone: $("serve-everyone").checked,
+        readOnly: $("serve-ro").checked,
+        user: $("serve-user").value,
+        password: $("serve-pass").value,
+      });
+    } catch (e) {
+      $("serve-state").textContent = "could not reach the daemon";
+      return;
+    }
+    if (answer.status !== 202) {
+      $("serve-state").textContent = reasonFrom(answer);
+      return;
+    }
+    $("resultbox").classList.add("hidden");
+    toast("serving on port " + answer.data.port + " — the address is on its card in Jobs");
+    refresh();
+  });
+});
+
 // ---- how a remote is set up -------------------------------------------------
 //
 // Read-only for now: what the remote is set up with, from rclone.conf, with
@@ -3340,6 +3420,16 @@ document.addEventListener("click", async (event) => {
 
   if (d.log) return openLog(d.log);
   if (d.stream) return reopenStream(d.stream);
+  if (d.copyText !== undefined) {
+    try {
+      await navigator.clipboard.writeText(d.copyText);
+      toast("copied " + d.copyText);
+    } catch (e) {
+      // No clipboard without HTTPS on anything but this machine itself.
+      prompt("Copy it from here:", d.copyText);
+    }
+    return;
+  }
   if (d.speed) {
     const job = state.jobs.find((j) => j.requestId === d.speed);
     const rate = askRate(job ? '"' + job.info + '"' : "this transfer");

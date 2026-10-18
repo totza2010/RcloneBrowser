@@ -14,6 +14,7 @@
 #include "rc_client.h"
 
 #include <QDateTime>
+#include <QMap>
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
@@ -52,6 +53,9 @@ enum class JobKind {
   Mkdir,
   Rename,
   Delete,
+  // A remote, or a folder of one, offered to other programs over HTTP,
+  // WebDAV, FTP or SFTP for as long as the job runs.
+  Serve,
 };
 
 enum class JobState {
@@ -115,6 +119,25 @@ public:
   }
   quint16 streamPort() const { return mStreamPort; }
   QString streamPath() const { return mStreamPath; }
+
+  // Where a serve is listening, kept with the job for whoever shows it.
+  // Never the password: that went to rclone and nowhere else.
+  struct ServeAddress {
+    QString protocol; // "http" | "webdav" | "ftp" | "sftp"
+    quint16 port = 0;
+    bool everyone = false; // every address of this machine, not just its own
+    bool readOnly = true;
+    QString user; // empty when nobody has to log in
+  };
+  void setServeAddress(const ServeAddress &address) { mServe = address; }
+  const ServeAddress &serveAddress() const { return mServe; }
+
+  // Added to rclone's environment, for what must not be among its
+  // arguments: those can be read by anyone on the machine while it runs,
+  // and are written to the log and the history. Set before start().
+  void setEnvironment(const QMap<QString, QString> &extra) {
+    mEnvironment = extra;
+  }
 
   // How fast it may go, changed while it runs. Only a transfer can be
   // asked, and only once its remote control is up. `done` gets whether
@@ -234,6 +257,8 @@ private:
   QString mBandwidth;
   quint16 mStreamPort = 0;
   QString mStreamPath;
+  ServeAddress mServe;
+  QMap<QString, QString> mEnvironment;
   QProcess *mScriptProcess = nullptr;
   QString mRcPort;
 

@@ -155,7 +155,8 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
                                const JobDescription &description,
                                const QString &taskId,
                                const QString &transferMode,
-                               const QString &requestId) {
+                               const QString &requestId,
+                               const QMap<QString, QString> &environment) {
   // A run with no id leaves no history: RunHistory refuses a record without
   // one, because the id is what an ending is matched back to a beginning by.
   //
@@ -225,6 +226,7 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
 
   // Announced before it is started, so a listener sees the job in its
   // Running state and cannot miss a transfer that fails immediately.
+  job->setEnvironment(environment);
   emit jobStarted(job);
   job->start();
 

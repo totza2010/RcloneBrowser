@@ -143,6 +143,20 @@ int main(int argc, char *argv[]) {
   if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
       std::strcmp(command, "move") == 0 || std::strcmp(command, "mount") == 0 ||
       std::strcmp(command, "serve") == 0) {
+    // What a serve was given, and the password it found in its environment
+    // -- which is where it has to come from, never the arguments.
+    if (std::strcmp(command, "serve") == 0) {
+      if (const char *record = std::getenv("FAKE_RCLONE_RECORD")) {
+        if (FILE *file = std::fopen(record, "ab")) {
+          for (int i = 1; i < argc; ++i) {
+            std::fprintf(file, "%s%s", i > 1 ? "\x1f" : "", argv[i]);
+          }
+          const char *pass = std::getenv("RCLONE_PASS");
+          std::fprintf(file, "\x1fRCLONE_PASS=%s\n", pass != nullptr ? pass : "");
+          std::fclose(file);
+        }
+      }
+    }
     // A remote control to talk to, when a test stands one up: the line rclone
     // prints when it is serving one.
     if (const char *port = std::getenv("FAKE_RCLONE_RC_PORT")) {

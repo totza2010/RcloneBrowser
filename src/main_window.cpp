@@ -1156,7 +1156,7 @@ MainWindow::MainWindow() {
         for (int i = widgetsCount - 2; i >= 0; i = i - 2) {
           QWidget *widget = ui.jobs->itemAt(i)->widget();
           if (auto transfer = qobject_cast<JobWidget *>(widget)) {
-            if ((transfer->isRunning)) {
+            if (transfer->isRunning && transfer->isTransfer()) {
               emit transfer->cancel();
             }
           }
@@ -1959,6 +1959,18 @@ MainWindow::MainWindow() {
                      if (job->kind() == JobKind::Transfer) {
                        addJobCard(job);
                      }
+                     // A serve, or a stream for the page: on the next turn,
+                     // because whoever started it says where it listens
+                     // just after starting it.
+                     if (job->kind() == JobKind::Serve ||
+                         job->kind() == JobKind::Stream) {
+                       QPointer<RunningJob> guarded(job);
+                       QTimer::singleShot(0, this, [this, guarded]() {
+                         if (guarded) {
+                           addServingCard(guarded);
+                         }
+                       });
+                     }
                      // A mount this window is not in the middle of starting
                      // itself. On the next turn of the event loop, because
                      // whoever started it sets its script just after
@@ -1988,6 +2000,10 @@ MainWindow::MainWindow() {
   for (RunningJob *job : JobRegistry::instance().jobs()) {
     if (job->isRunning() && job->kind() == JobKind::Transfer) {
       addJobCard(job);
+    }
+    if (job->isRunning() &&
+        (job->kind() == JobKind::Serve || job->kind() == JobKind::Stream)) {
+      addServingCard(job);
     }
   }
 
@@ -4405,6 +4421,57 @@ void MainWindow::addNewMount(const QString &remote, const QString &folder,
 // API, a schedule -- gets one too. It used to be made only here, so such a
 // mount was up and running with nothing in the window to show it or take it
 // down.
+// A serve or a stream: a job that runs until it is stopped, like a mount,
+// and has nothing to do with the queue, the tasks or keeping the machine
+// awake for a transfer.
+void MainWindow::addServingCard(RunningJob *job) {
+  if (ui.jobs->count() == 2) {
+    ui.noJobsAvailable->hide();
+  }
+  ui.tabs->setTabText(1, QString("Jobs (%1)").arg(++mJobCount));
+
+  auto widget = new JobWidget(job);
+  auto line = new QFrame();
+  line->setFrameShape(QFrame::HLine);
+  line->setFrameShadow(QFrame::Sunken);
+  ui.jobs->insertWidget(0, widget);
+  ui.jobs->insertWidget(1, line);
+
+  const auto counted = [this]() {
+    const int jobsCount = (ui.jobs->count() - 2) / 2;
+    ui.buttonSortByTime->setEnabled(jobsCount > 1);
+    ui.buttonSortByStatus->setEnabled(jobsCount > 1);
+    ui.buttonStopAllJobs->setEnabled(mTransferJobCount != 0);
+    ui.buttonCleanNotRunning->setEnabled(mJobCount != jobsCount);
+  };
+  counted();
+
+  QObject::connect(widget, &JobWidget::finished, this, [this, counted]() {
+    if (--mJobCount == 0) {
+      ui.tabs->setTabText(1, "Jobs");
+    } else {
+      ui.tabs->setTabText(1, QString("Jobs (%1)").arg(mJobCount));
+    }
+    counted();
+    sortJobs();
+  });
+
+  QObject::connect(widget, &JobWidget::closed, this, [=]() {
+    ui.jobs->removeWidget(widget);
+    ui.jobs->removeWidget(line);
+    widget->deleteLater();
+    delete line;
+    // The job outlives the card; closing the card says it is not wanted.
+    JobRegistry::instance().forget(job);
+    if (ui.jobs->count() == 2) {
+      ui.noJobsAvailable->show();
+    }
+    counted();
+  });
+
+  sortJobs();
+}
+
 void MainWindow::addMountCard(RunningJob *job, const QString &remote,
                               const QString &folder, const QString &script) {
   if (ui.jobs->count() == 2) {

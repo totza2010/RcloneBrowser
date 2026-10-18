@@ -22,6 +22,9 @@ public slots:
   QString getUniqueID();
   QString getRequestId();
   QString getTransferMode();
+  // False for a serve or a stream, which "stop all transfers" leaves alone
+  // as it leaves mounts.
+  bool isTransfer() const;
 
 signals:
   void finished(const QString &info, const QString &jobFinalStatus);

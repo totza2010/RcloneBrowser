@@ -181,6 +181,7 @@ set(MOC
   remote_folder_dialog.h
   script_editor_dialog.h
   remote_settings_dialog.h
+  serve_dialog.h
 )
 
 set(OTHER
@@ -218,6 +219,7 @@ set(SOURCE
   remote_folder_dialog.cpp
   script_editor_dialog.cpp
   remote_settings_dialog.cpp
+  serve_dialog.cpp
 )
 
 if(WIN32)

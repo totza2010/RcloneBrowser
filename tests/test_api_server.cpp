@@ -2738,6 +2738,101 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(task);
   }
 
+  // A folder offered to other programs on a port of its own. The password
+  // reaches rclone in its environment and appears nowhere else.
+  void aFolderCanBeServedAndItsPasswordStaysOutOfSight() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir scratch;
+    const QString record = scratch.filePath(QStringLiteral("said.txt"));
+    qputenv("FAKE_RCLONE_RECORD", record.toLocal8Bit());
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+
+    // A port nothing is on, as the program would choose one.
+    quint16 port = 0;
+    {
+      QTcpServer probe;
+      QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+      port = probe.serverPort();
+    }
+    const QByteArray served = send(
+        "POST", "/api/v1/remotes/fake/serve", mToken,
+        "{\"path\":\"films\",\"protocol\":\"webdav\",\"port\":" + QByteArray::number(port) +
+            ",\"user\":\"rb\",\"password\":\"sekret\"}");
+    QCOMPARE(statusOf(served), 202);
+    const QJsonObject started = bodyOf(served).object();
+    QCOMPARE(started.value(QStringLiteral("protocol")).toString(), QStringLiteral("webdav"));
+    QCOMPARE(started.value(QStringLiteral("port")).toInt(), int(port));
+    QCOMPARE(started.value(QStringLiteral("readOnly")).toBool(), true); // unless asked
+    const QString id = started.value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr);
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(record), 5000);
+    QFile file(record);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QList<QByteArray> said = file.readAll().trimmed().split('\x1f');
+    QCOMPARE(said.mid(0, 3), (QList<QByteArray>{"serve", "webdav", "fake:films"}));
+    QVERIFY(said.contains("127.0.0.1:" + QByteArray::number(port))); // this machine only
+    QVERIFY(said.contains("--read-only"));
+    QVERIFY(said.contains("rb"));
+    QCOMPARE(said.last(), QByteArray("RCLONE_PASS=sekret"));
+    QVERIFY(!said.mid(0, said.size() - 1).contains("sekret"));
+
+    // Said by the job -- and the password by nothing.
+    const QByteArray jobs = ask("GET", "/api/v1/jobs", mToken);
+    QVERIFY(!jobs.contains("sekret"));
+    for (const QJsonValue &value : bodyOf(jobs).array()) {
+      if (value.toObject().value(QStringLiteral("requestId")).toString() == id) {
+        const QJsonObject serve = value.toObject().value(QStringLiteral("serve")).toObject();
+        QCOMPARE(serve.value(QStringLiteral("port")).toInt(), int(port));
+        QCOMPARE(serve.value(QStringLiteral("user")).toString(), QStringLiteral("rb"));
+        QCOMPARE(serve.value(QStringLiteral("everyone")).toBool(), false);
+      }
+    }
+    QVERIFY(!job->displayCommand().join(' ').contains(QStringLiteral("sekret")));
+    // The protocols, for a page to offer.
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/system", mToken)).object()
+                 .value(QStringLiteral("serveProtocols")).toArray().size(), 4);
+
+    // The same port again is in use while it runs. Said plainly.
+    const QByteArray again = send(
+        "POST", "/api/v1/remotes/fake/serve", mToken,
+        "{\"protocol\":\"webdav\",\"port\":" + QByteArray::number(port) + "}");
+    QCOMPARE(statusOf(again), 400);
+    job->stop();
+
+    // Every machine that can reach it, and nobody asked to log in: no.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/serve", mToken,
+                           "{\"protocol\":\"ftp\",\"everyone\":true}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/serve", mToken,
+                           "{\"protocol\":\"gopher\"}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/serve", mToken,
+                           "{\"protocol\":\"http\",\"user\":\"rb\"}")),
+             400); // a user and no password
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/serve", mToken,
+                           "{\"protocol\":\"http\",\"user\":\"--config\",\"password\":\"x\"}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/nothing/serve", mToken,
+                           "{\"protocol\":\"http\"}")),
+             404);
+
+    // Only the owner gives a remote away.
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray writer =
+        bodyOf(send("POST", "/api/v1/keys", mToken,
+                    "{\"name\":\"sonarr\",\"scope\":\"write\"}"))
+            .object().value(QStringLiteral("key")).toString().toUtf8();
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/serve", writer,
+                           "{\"protocol\":\"http\"}")),
+             403);
+    ApiAuth::Keys::instance().forgetAll();
+
+    qunsetenv("FAKE_RCLONE_RECORD");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

@@ -73,6 +73,8 @@ QString JobKindToString(JobKind kind) {
     return QStringLiteral("rename");
   case JobKind::Delete:
     return QStringLiteral("delete");
+  case JobKind::Serve:
+    return QStringLiteral("serve");
   }
   return QStringLiteral("transfer");
 }
@@ -167,6 +169,13 @@ bool RunningJob::start() {
   // missing executable reports FailedToStart from inside start() itself -- so
   // mProcess can already be null by the time start() returns.
   QProcess *process = mProcess;
+  if (!mEnvironment.isEmpty()) {
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    for (auto it = mEnvironment.cbegin(); it != mEnvironment.cend(); ++it) {
+      environment.insert(it.key(), it.value());
+    }
+    process->setProcessEnvironment(environment);
+  }
   process->start(GetRclone(), mArgs + GetRcloneConf(), QIODevice::ReadOnly);
   mEverStarted = isRunning();
 

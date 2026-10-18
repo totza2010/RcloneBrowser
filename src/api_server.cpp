@@ -178,6 +178,19 @@ QJsonObject describe(const RunningJob &job) {
     object.insert(QStringLiteral("stream"), stream);
   }
 
+  // Where a serve listens. The host is not here for the same reason as a
+  // stream's: whoever asks knows by what name they reached this machine.
+  if (job.kind() == JobKind::Serve && job.serveAddress().port != 0) {
+    const RunningJob::ServeAddress &address = job.serveAddress();
+    QJsonObject serve;
+    serve.insert(QStringLiteral("protocol"), address.protocol);
+    serve.insert(QStringLiteral("port"), int(address.port));
+    serve.insert(QStringLiteral("everyone"), address.everyone);
+    serve.insert(QStringLiteral("readOnly"), address.readOnly);
+    serve.insert(QStringLiteral("user"), address.user);
+    object.insert(QStringLiteral("serve"), serve);
+  }
+
   const JobStats &stats = job.stats();
   if (stats.valid) {
     QJsonObject figures;
@@ -1136,6 +1149,44 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     started.insert(QStringLiteral("started"), QStringLiteral("mount"));
     started.insert(QStringLiteral("source"), job->description().source);
     started.insert(QStringLiteral("mountPoint"), job->description().dest);
+    socket->write(FormatHttpResponse(202, toJson(started)));
+    return;
+  }
+
+  if (operation == QLatin1String("serve")) {
+    RemoteOps::ServeOptions options;
+    options.protocol = given.value(QStringLiteral("protocol")).toString();
+    const int port = given.value(QStringLiteral("port")).toInt(0);
+    if (port < 0 || port > 65535) {
+      refuse(400, QStringLiteral("refused"),
+             QStringLiteral("a port is a number from 1 to 65535"));
+      return;
+    }
+    options.port = quint16(port);
+    options.everyone = given.value(QStringLiteral("everyone")).toBool(false);
+    options.readOnly = given.value(QStringLiteral("readOnly")).toBool(true);
+    options.user = given.value(QStringLiteral("user")).toString();
+    options.password = given.value(QStringLiteral("password")).toString();
+
+    QString why;
+    RunningJob *job = RemoteOps::Serve(remote, path, options, &why);
+    if (job == nullptr) {
+      refuse(400, QStringLiteral("refused"), why);
+      return;
+    }
+    qCDebug(rbApp) << "API serving" << remote << path << "as"
+                   << job->serveAddress().protocol << "on port"
+                   << job->serveAddress().port;
+
+    // Answered now, like a mount: it runs until it is stopped.
+    QJsonObject started;
+    started.insert(QStringLiteral("requestId"), job->requestId());
+    started.insert(QStringLiteral("started"), QStringLiteral("serve"));
+    started.insert(QStringLiteral("source"), job->description().source);
+    started.insert(QStringLiteral("protocol"), job->serveAddress().protocol);
+    started.insert(QStringLiteral("port"), int(job->serveAddress().port));
+    started.insert(QStringLiteral("everyone"), job->serveAddress().everyone);
+    started.insert(QStringLiteral("readOnly"), job->serveAddress().readOnly);
     socket->write(FormatHttpResponse(202, toJson(started)));
     return;
   }
@@ -2340,7 +2391,8 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         QStringLiteral("cleanup"), QStringLiteral("dedupe"),
         QStringLiteral("copy"),    QStringLiteral("move"),
         QStringLiteral("mount"),   QStringLiteral("upload"),
-        QStringLiteral("download"), QStringLiteral("stream")};
+        QStringLiteral("download"), QStringLiteral("stream"),
+        QStringLiteral("serve")};
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         operations.contains(parts.at(2))) {
@@ -3221,6 +3273,16 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
                   AppCore::instance().isStarted());
     object.insert(QStringLiteral("transferring"), transferring);
     object.insert(QStringLiteral("speed"), speed); // bytes per second, all together
+    // What POST /remotes/{name}/serve takes, so a page need not know.
+    QJsonArray protocols;
+    for (const QString &protocol : RemoteOps::ServeProtocols()) {
+      QJsonObject one;
+      one.insert(QStringLiteral("protocol"), protocol);
+      one.insert(QStringLiteral("defaultPort"),
+                 int(RemoteOps::DefaultServePort(protocol)));
+      protocols.append(one);
+    }
+    object.insert(QStringLiteral("serveProtocols"), protocols);
     *body = toJson(object);
     return 200;
   }
