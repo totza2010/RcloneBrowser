@@ -1726,10 +1726,6 @@ MainWindow::MainWindow() {
           JobOptionsListWidgetItem *item_queue =
               static_cast<JobOptionsListWidgetItem *>(
                   ui.queueListWidget->item(first));
-          const QString requestId = item_queue->GetRequestId();
-
-          notifySchedulers(requestId, "removed from the queue", -1);
-
           ui.queueListWidget->takeItem(first);
         }
 
@@ -1759,8 +1755,8 @@ MainWindow::MainWindow() {
 
         QString requestId = item_queue->GetRequestId();
 
-        notifySchedulers(requestId, "removed from the queue", -1);
-
+        // The schedule whose run this was hears it from the queue -- see
+        // JobQueue::removed, connected in watchAppCore().
         // The queue is told which run is leaving, not which row: rows are
         // what shows it. It refuses to drop the one that is running,
         // which is the same thing the greyed-out button has said.
@@ -1794,8 +1790,6 @@ MainWindow::MainWindow() {
               ui.queueListWidget->item(ui.queueListWidget->currentRow()));
 
       QString requestId = item_queue->GetRequestId();
-
-      notifySchedulers(requestId, "removed from the queue", -1);
 
       // Only the queue is told. The row goes when the view redraws --
       // taking it out here as well took the next one with it.
@@ -3381,6 +3375,15 @@ void MainWindow::refreshSchedulerView() {
 // Two clocks would each start the schedule that came due, so this window no
 // longer looks for itself. See docs/LAYER-SPLIT.md.
 void MainWindow::watchAppCore() {
+  // A run taken out of the queue, from here or from anywhere else, is news
+  // for the schedule card it belongs to. It was told here, at each of the
+  // window's three buttons, so a run taken out through the API was news to
+  // nobody.
+  QObject::connect(&JobQueue::instance(), &JobQueue::removed, this,
+                   [this](const QString &requestId) {
+                     notifySchedulers(requestId, "removed from the queue", -1);
+                   });
+
   mSchedulerShownRunning = SchedulerStore::instance().isRunning();
   QObject::connect(&SchedulerStore::instance(), &SchedulerStore::changed, this,
                    [this]() {

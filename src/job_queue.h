@@ -110,6 +110,13 @@ signals:
   // a view that rebuilds is a view that cannot drift.
   void changed();
 
+  // An entry was taken out before it ran -- by remove() or clear(), from the
+  // window, the API or anything else -- as opposed to running and finishing.
+  // Whoever put it there may want to know: a schedule whose run this was
+  // otherwise goes on saying "in the queue" about a run that will never
+  // happen.
+  void removed(const QString &requestId);
+
   // The last entry finished and the queue is now empty. This is what the
   // "run a script when the queue empties" setting hangs off.
   void emptied();

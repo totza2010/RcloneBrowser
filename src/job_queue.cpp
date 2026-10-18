@@ -81,6 +81,7 @@ void JobQueue::remove(const QString &requestId) {
   if (mEntries.size() != before) {
     save();
     emit changed();
+    emit removed(requestId);
   }
 }
 
@@ -103,9 +104,12 @@ bool JobQueue::move(int from, int to) {
 
 void JobQueue::clear() {
   QList<QueueEntry> kept;
+  QStringList gone;
   for (const QueueEntry &entry : mEntries) {
     if (entry.requestId == mRunningRequestId) {
       kept.append(entry);
+    } else {
+      gone.append(entry.requestId);
     }
   }
   if (kept.size() == mEntries.size()) {
@@ -115,6 +119,9 @@ void JobQueue::clear() {
   mEntries = kept;
   save();
   emit changed();
+  for (const QString &requestId : gone) {
+    emit removed(requestId);
+  }
 }
 
 void JobQueue::start() {

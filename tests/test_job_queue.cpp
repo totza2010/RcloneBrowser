@@ -82,6 +82,34 @@ private:
   QString mRclone;
 
 private slots:
+  // Taken out before it ran -- one at a time, or everything waiting -- is
+  // said, with which run it was. Running and finishing is not.
+  void anEntryTakenOutIsSaidToBeTakenOut() {
+    JobQueue &queue = JobQueue::instance();
+    queue.pause();
+    queue.clear();
+    QSignalSpy removed(&queue, &JobQueue::removed);
+
+    const QString a = queue.enqueue(QStringLiteral("{task-a}"));
+    const QString b = queue.enqueue(QStringLiteral("{task-b}"));
+    const QString c = queue.enqueue(QStringLiteral("{task-c}"));
+
+    queue.remove(b);
+    QCOMPARE(removed.size(), 1);
+    QCOMPARE(removed.at(0).at(0).toString(), b);
+
+    queue.remove(QStringLiteral("{not-there}"));
+    QCOMPARE(removed.size(), 1);
+
+    queue.clear();
+    QCOMPARE(removed.size(), 3);
+    QStringList said{removed.at(1).at(0).toString(), removed.at(2).at(0).toString()};
+    said.sort();
+    QStringList expected{a, c};
+    expected.sort();
+    QCOMPARE(said, expected);
+  }
+
   void initTestCase() {
     mRclone = QStandardPaths::findExecutable(QStringLiteral("rclone"));
     if (mRclone.isEmpty()) {

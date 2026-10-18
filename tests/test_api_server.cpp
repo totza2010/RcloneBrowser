@@ -709,6 +709,38 @@ private slots:
     QCOMPARE(statusOf(ask("DELETE", taskTarget, mToken)), 200);
   }
 
+  // A schedule's run taken out of the queue before it ran is recorded on the
+  // schedule, wherever it was taken out from -- here, through the API.
+  void aScheduleHearsItsRunWasTakenOutOfTheQueue() {
+    JobQueue::instance().pause();
+    JobOptions *task = makeTask(QStringLiteral("queued by a schedule"));
+    QJsonObject asked;
+    asked.insert(QStringLiteral("taskId"), task->uniqueId.toString());
+    asked.insert(QStringLiteral("runAs"), QStringLiteral("queue"));
+    asked.insert(QStringLiteral("active"), false);
+    const QString id =
+        bodyOf(send("POST", "/api/v1/schedules", mToken,
+                    QJsonDocument(asked).toJson(QJsonDocument::Compact)))
+            .object().value(QStringLiteral("id")).toString();
+    const QByteArray target = "/api/v1/schedules/" + QUrl::toPercentEncoding(id);
+
+    const QByteArray fired = ask("POST", target + "/run", mToken);
+    QCOMPARE(statusOf(fired), 202);
+    const QString requestId =
+        bodyOf(fired).object().value(QStringLiteral("requestId")).toString();
+    QCOMPARE(SchedulerStore::instance().find(id)->requestId, requestId);
+
+    QCOMPARE(statusOf(ask("DELETE",
+                          "/api/v1/queue/" + QUrl::toPercentEncoding(requestId),
+                          mToken)),
+             204);
+    QCOMPARE(SchedulerStore::instance().find(id)->lastStatus,
+             QStringLiteral("removed from the queue"));
+
+    QCOMPARE(statusOf(ask("DELETE", target, mToken)), 200);
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aScheduleThatCouldNotRunIsRefused() {
     JobOptions *task = makeTask(QStringLiteral("for refusals"));
     const QString taskId = task->uniqueId.toString();

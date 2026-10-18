@@ -24,7 +24,26 @@ AppCore &AppCore::instance() {
   return core;
 }
 
-AppCore::AppCore(QObject *parent) : QObject(parent) {}
+AppCore::AppCore(QObject *parent) : QObject(parent) {
+  // A schedule's run taken out of the queue before it ran is recorded on the
+  // schedule, wherever it was taken out from. This was the window's to do,
+  // card by card, so a run taken out through the API left the schedule
+  // saying "in the queue" about a run that would never happen.
+  QObject::connect(&JobQueue::instance(), &JobQueue::removed, this,
+                   [](const QString &requestId) {
+                     for (const Schedule &schedule :
+                          SchedulerStore::instance().schedules()) {
+                       if (!requestId.isEmpty() &&
+                           schedule.requestId == requestId) {
+                         Schedule updated = schedule;
+                         updated.lastStatus =
+                             QStringLiteral("removed from the queue");
+                         SchedulerStore::instance().update(updated);
+                         return;
+                       }
+                     }
+                   });
+}
 
 void AppCore::start() {
   if (mStarted) {
