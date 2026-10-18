@@ -185,6 +185,8 @@ signals:
   void outputLine(const QString &line);
 
   void finished(JobState state);
+  // rclone took a new speed limit, from whichever view asked for it.
+  void bandwidthChanged(const QString &rate);
 
   // The remote control is up. For a mount this is when the script can run
   // and when unmounting becomes possible at all.

@@ -1,7 +1,10 @@
 #include "job_widget.h"
+#include "rc_client.h"
 #include "utils.h"
 #include <QProgressBar>
+#include <QInputDialog>
 #include <QLabel>
+#include <QPointer>
 
 namespace {
 
@@ -186,9 +189,74 @@ JobWidget::JobWidget(RunningJob *job, QWidget *parent)
     clipboard->setText(mJob->displayCommand().join(" "));
   });
 
+  // The same as the page's Speed… button, through the same job.
+  if (mJob->kind() == JobKind::Transfer) {
+    mSpeed = new QToolButton(this);
+    mSpeed->setAutoRaise(true);
+    mSpeed->setStatusTip("Change how fast this transfer may go");
+    showBandwidth(mJob->bandwidth());
+    ui.horizontalLayout->insertWidget(ui.horizontalLayout->indexOf(ui.copy),
+                                      mSpeed);
+    QObject::connect(mSpeed, &QToolButton::clicked, this,
+                     &JobWidget::askForSpeed);
+    QObject::connect(mJob, &RunningJob::bandwidthChanged, this,
+                     &JobWidget::showBandwidth);
+  }
+
   ui.showDetails->setStyleSheet(
       "QToolButton { border: 0; color: green; font-weight: bold;}");
   ui.showDetails->setText("  Running");
+}
+
+void JobWidget::showBandwidth(const QString &rate) {
+  if (mSpeed == nullptr) {
+    return;
+  }
+  const bool limited = !rate.isEmpty() && rate != QLatin1String("off");
+  mSpeed->setText(limited ? QString("≤ %1/s").arg(rate) : QString("Speed…"));
+  mSpeed->setToolTip(
+      limited ? QString("Limited to %1/s while it runs. Click to change.")
+                    .arg(rate)
+              : QString("Not limited. Click to set a limit while it runs."));
+}
+
+void JobWidget::askForSpeed() {
+  if (!isRunning) {
+    return;
+  }
+  bool ok = false;
+  const QString current =
+      mJob->bandwidth().isEmpty() ? QString("off") : mJob->bandwidth();
+  const QString rate =
+      QInputDialog::getText(this, "Transfer speed",
+                            "How fast may it go?\n\nA speed per second such "
+                            "as 500k, 2M or 1.5G, or off for no limit.",
+                            QLineEdit::Normal, current, &ok)
+          .trimmed();
+  if (!ok || rate.isEmpty()) {
+    return;
+  }
+  if (!RcClient::IsRate(rate)) { // what the API takes too
+    QMessageBox::warning(this, "Transfer speed",
+                         QString("\"%1\" is not a speed. Use something like "
+                                 "500k, 2M or 1.5G, or off.")
+                             .arg(rate));
+    return;
+  }
+  QPointer<JobWidget> self(this);
+  mSpeed->setEnabled(false);
+  mJob->setBandwidth(rate, [self](bool done, const QString &) {
+    if (!self) {
+      return;
+    }
+    self->mSpeed->setEnabled(true);
+    if (!done) {
+      QMessageBox::warning(self, "Transfer speed",
+                           "rclone did not take the new speed. Its remote "
+                           "control may not be up yet, or the transfer has "
+                           "ended.");
+    }
+  });
 }
 
 void JobWidget::applyFinished(JobState state) {
@@ -225,6 +293,9 @@ void JobWidget::applyFinished(JobState state) {
 
   updateFinishInfo();
 
+  if (mSpeed != nullptr) {
+    mSpeed->hide(); // a limit set while it ran ends with it
+  }
   ui.cancel->setToolTip("Close");
   ui.cancel->setStatusTip("Close");
   emit finished(ui.info->text(), mJob->finalStatus());

@@ -36,6 +36,11 @@ private:
   void updateTransferBars(const JobStats &stats);
   void applyFinished(JobState state);
 
+  // Changes how fast a running transfer may go. Only transfers have one.
+  QToolButton *mSpeed = nullptr;
+  void askForSpeed();
+  void showBandwidth(const QString &rate);
+
   QHash<QString, QLabel *> mActive;
 
   // The sort key the jobs tab uses. Kept in the widget because the leading

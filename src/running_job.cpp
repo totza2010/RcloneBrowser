@@ -416,6 +416,7 @@ void RunningJob::setBandwidth(const QString &rate,
   mRc->setBandwidth(rate, [self, done](bool ok, const QString &now) {
     if (self && ok) {
       self->mBandwidth = now;
+      emit self->bandwidthChanged(now);
     }
     done(ok, now);
   });

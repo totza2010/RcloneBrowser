@@ -35,6 +35,11 @@ public:
   // so in-flight writes get a chance to finish.
   void requestQuit();
 
+  // Whether `rate` is one rclone takes while it runs: a number with an
+  // optional unit, an upload and download pair ("10M:1M"), or "off". A
+  // timetable of rates is rclone's too, but is set before a job, not during.
+  static bool IsRate(const QString &rate);
+
   // Changes how fast this rclone may go while it runs: "core/bwlimit" with
   // a rate such as "2M", "512k" or "off". `done` gets whether rclone took
   // it and the rate it says it now has.

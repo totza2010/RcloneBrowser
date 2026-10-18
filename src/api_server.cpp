@@ -1789,13 +1789,8 @@ void ApiServer::changeBandwidth(QTcpSocket *socket, const HttpRequest &request,
     answer(status, object);
   };
 
-  // What rclone takes for a rate: a number with an optional unit, an upload
-  // and download pair ("10M:1M"), or "off". A timetable of rates is
-  // rclone's too, but is a thing to set before a job, not while it runs.
-  static const QRegularExpression rate(
-      QStringLiteral("^(off|[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?(:[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?)?)$"));
   const QString asked = options(request).value(QStringLiteral("rate")).toString().trimmed();
-  if (!rate.match(asked).hasMatch()) {
+  if (!RcClient::IsRate(asked)) {
     refuse(400, QStringLiteral("bad_rate"),
            QStringLiteral("\"rate\" has to be a speed such as 500k, 2M or 1.5G, "
                           "or off"));

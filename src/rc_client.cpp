@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 
 #include <QNetworkReply>
+#include <QRegularExpression>
 #include <QUrl>
 
 namespace {
@@ -85,6 +86,12 @@ void RcClient::poll() {
     mConsecutiveFailures = 0;
     emit statsReceived(stats);
   });
+}
+
+bool RcClient::IsRate(const QString &rate) {
+  static const QRegularExpression valid(QStringLiteral(
+      "^(off|[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?(:[0-9]+(\\.[0-9]+)?[bBkKmMgGtTpP]?)?)$"));
+  return valid.match(rate).hasMatch();
 }
 
 void RcClient::setBandwidth(const QString &rate,
