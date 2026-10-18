@@ -22,6 +22,7 @@
 #include "job_stats.h"
 #include "rclone_flags.h"
 #include "remote_widget.h"
+#include "remote_settings_dialog.h"
 #include "scheduler_widget.h"
 #include "stream_widget.h"
 #include "transfer_dialog.h"
@@ -837,6 +838,60 @@ MainWindow::MainWindow() {
 
   QObject::connect(ui.config, &QPushButton::clicked, this,
                    &MainWindow::rcloneConfig);
+
+  // A remote's settings, in the window as on the page: made, seen, changed,
+  // renamed and deleted through the same core (RemoteSettingsDialog). The
+  // Config button still opens "rclone config" in a terminal when clicked;
+  // its menu, and a right-click on the remotes, offer the rest.
+  const auto openSettings = [this](const QString &remote) {
+    RemoteSettingsDialog dialog(remote, this);
+    dialog.exec();
+  };
+  const auto chosenRemote = [this]() {
+    const QList<QListWidgetItem *> items = ui.remotes->selectedItems();
+    return items.isEmpty() ? QString()
+                           : items.front()->data(Qt::UserRole + 1).toString();
+  };
+  {
+    auto *configMenu = new QMenu(ui.config);
+    configMenu->addAction(QStringLiteral("New remote…"), this,
+                          [openSettings]() { openSettings(QString()); });
+    QAction *settingsOf = configMenu->addAction(
+        QStringLiteral("Settings of the chosen remote…"), this,
+        [openSettings, chosenRemote]() {
+          if (!chosenRemote().isEmpty()) {
+            openSettings(chosenRemote());
+          }
+        });
+    configMenu->addSeparator();
+    configMenu->addAction(QStringLiteral("rclone config in a terminal"), this,
+                          &MainWindow::rcloneConfig);
+    QObject::connect(configMenu, &QMenu::aboutToShow, this,
+                     [settingsOf, chosenRemote]() {
+                       settingsOf->setEnabled(!chosenRemote().isEmpty());
+                     });
+    ui.config->setMenu(configMenu);
+    ui.config->setPopupMode(QToolButton::MenuButtonPopup);
+  }
+  ui.remotes->setContextMenuPolicy(Qt::CustomContextMenu);
+  QObject::connect(
+      ui.remotes, &QWidget::customContextMenuRequested, this,
+      [this, openSettings](const QPoint &pos) {
+        QListWidgetItem *item = ui.remotes->itemAt(pos);
+        QMenu menu;
+        QAction *settings = nullptr;
+        if (item != nullptr) {
+          ui.remotes->setCurrentItem(item);
+          settings = menu.addAction(QStringLiteral("Settings…"));
+        }
+        QAction *create = menu.addAction(QStringLiteral("New remote…"));
+        QAction *chosen = menu.exec(ui.remotes->viewport()->mapToGlobal(pos));
+        if (chosen == create) {
+          openSettings(QString());
+        } else if (chosen != nullptr && chosen == settings) {
+          openSettings(item->data(Qt::UserRole + 1).toString());
+        }
+      });
 
   QObject::connect(ui.refresh, &QPushButton::clicked, this,
                    &MainWindow::rcloneListRemotes);

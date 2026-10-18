@@ -1832,6 +1832,23 @@ marker: `TokenFrom` · `ContinueRemote` · `POST /api/v1/remotes/{name}/answer` 
 
 ---
 
+### V-49 · ตั้งค่ารีโหมดในหน้าต่าง
+
+marker: `src/remote_settings_dialog.*` · เมนูคลิกขวาที่รายการรีโหมด · เมนูของปุ่ม Config
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | คลิกขวาที่รีโหมด teldrive · **Settings…** | กล่องขึ้น: ค่าทั้งหมด · access_token กับ api_host เป็นช่องรหัสว่าง ("set — type to replace it") | ⬜ | |
+| 2 | เปลี่ยน chunk_size · Save | ค่าเปลี่ยน · access_token คงเดิม · หน้าเว็บเห็นค่าใหม่ | ⬜ | |
+| 3 | คลิกขวาที่ว่าง · **New remote…** · เลือก sftp · กรอก · Save | รีโหมดใหม่ขึ้นในรายการของหน้าต่างและหน้าเว็บ | ⬜ | |
+| 4 | New remote · drive | กล่อง Sign in · คำสั่ง authorize · วาง token · Save · คำถาม team drive · Answer | ⬜ | |
+| 5 | Settings · เปลี่ยนชื่อ · Save | ชื่อเปลี่ยน · บอกว่า task ไหนเปลี่ยนตาม | ⬜ | |
+| 6 | Settings · **Delete this remote…** | ถามยืนยัน · ถ้ามี task ใช้อยู่ถามอีกครั้งพร้อมรายชื่อ · หายจากรายการ | ⬜ | |
+| 7 | ปุ่ม Config (กดตรงๆ) | ยังเปิด rclone config ในเทอร์มินัลเหมือนเดิม | ⬜ | |
+| 8 | ลูกศรของปุ่ม Config | เมนู New remote… · Settings of the chosen remote… (กดไม่ได้ถ้าไม่ได้เลือก) · rclone config in a terminal | ⬜ | |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:
