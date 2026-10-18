@@ -221,6 +221,19 @@ QJsonValue describeRun(const JobRunRecord &run) {
   return object;
 }
 
+// A key as it may be shown: everything but the secret, which is not kept.
+QJsonObject describeKey(const ApiAuth::Key &key) {
+  QJsonObject object;
+  object.insert(QStringLiteral("id"), key.id);
+  object.insert(QStringLiteral("name"), key.name);
+  object.insert(QStringLiteral("scope"), ApiAuth::ScopeName(key.scope));
+  object.insert(QStringLiteral("created"), key.created.toString(Qt::ISODate));
+  object.insert(QStringLiteral("lastUsed"),
+                key.lastUsed.isValid() ? key.lastUsed.toString(Qt::ISODate)
+                                       : QString());
+  return object;
+}
+
 // The whole schedule, in words. See schedule_json.h.
 QJsonObject describe(const Schedule &schedule) {
   return ScheduleJson::Write(schedule, QDateTime::currentDateTime());
@@ -366,26 +379,42 @@ QString ApiServer::ensureToken() {
 }
 
 bool ApiServer::mayAsk(const HttpRequest &request) {
+  return callerOf(request).known;
+}
+
+ApiServer::Caller ApiServer::callerOf(const HttpRequest &request) {
+  Caller caller;
   const QString offered = request.header(QStringLiteral("authorization"));
   if (!offered.startsWith(QLatin1String("Bearer "))) {
-    return false;
+    return caller;
   }
 
   const QString presented = offered.mid(7);
   if (presented.isEmpty()) {
-    return false;
+    return caller;
   }
 
   // The token, for anything unattended. Compared against the stored one, and
   // an empty stored token is refused rather than matched: "none set" must
   // never come out as "none required".
   const QString expected = token();
-  if (!expected.isEmpty() && presented == expected) {
-    return true;
+  if ((!expected.isEmpty() && presented == expected) ||
+      // Or a session, for a person who signed in.
+      ApiAuth::Sessions::instance().accepts(presented)) {
+    caller.known = true;
+    caller.scope = int(ApiAuth::Scope::Admin);
+    caller.who = QStringLiteral("api");
+    return caller;
   }
 
-  // Or a session, for a person who signed in.
-  return ApiAuth::Sessions::instance().accepts(presented);
+  // Or a key, for another program, which may do as much as it was given.
+  ApiAuth::Key key;
+  if (ApiAuth::Keys::instance().accepts(presented, &key)) {
+    caller.known = true;
+    caller.scope = int(key.scope);
+    caller.who = QStringLiteral("api:") + key.name;
+  }
+  return caller;
 }
 
 bool ApiServer::isListening() const {
@@ -1596,13 +1625,41 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
     ApiRoutes::NoteUnlisted(request.method, asked.path);
   }
 
-  if (!open.contains(asked.path) && !mayAsk(asked)) {
+  const Caller caller = callerOf(asked);
+  if (!open.contains(asked.path) && !caller.known) {
     qCDebug(rbApp) << "refused an API request from somebody not signed in"
                    << request.method << asked.path;
     const QString why = QStringLiteral("a token or a session is required");
     reply(FormatHttpResponse(401, problem(why)));
     return;
   }
+
+  // As much as the caller may do. The level each route needs is in the same
+  // list the documentation is made from. A route that is not in that list
+  // needs everything: what is not described is not handed to a key, so a
+  // route added to the code and forgotten in the list fails closed.
+  if (!open.contains(asked.path)) {
+    const ApiRoutes::Route *route = ApiRoutes::Match(request.method, asked.path);
+    const int needs = route != nullptr
+                          ? int(ApiAuth::ScopeNamed(route->scope))
+                          : int(ApiAuth::Scope::Admin);
+    if (caller.scope < needs) {
+      qCDebug(rbApp) << "refused" << caller.who << request.method << asked.path
+                     << "which needs" << ApiAuth::ScopeName(ApiAuth::Scope(needs));
+      QJsonObject object;
+      object.insert(QStringLiteral("error"),
+                    QStringLiteral("this key may %1; that needs %2")
+                        .arg(ApiAuth::ScopeName(ApiAuth::Scope(caller.scope)),
+                             ApiAuth::ScopeName(ApiAuth::Scope(needs))));
+      object.insert(QStringLiteral("code"), QStringLiteral("insufficient_scope"));
+      object.insert(QStringLiteral("needs"),
+                    ApiAuth::ScopeName(ApiAuth::Scope(needs)));
+      reply(FormatHttpResponse(403, toJson(object)));
+      return;
+    }
+  }
+  // Who asked, for the history: "api:sonarr" rather than "api".
+  mCallerName = caller.who;
 
   // Not a route either: this one has to run rclone and wait for it.
   {
@@ -2051,7 +2108,8 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
 
       const QString requestId = QUuid::createUuid().toString();
       qCDebug(rbApp) << "API running task" << id << "request=" << requestId;
-      StartTask(task, QStringLiteral("api"), requestId, wantsDryRun(request));
+      StartTask(task, mCallerName.isEmpty() ? QStringLiteral("api") : mCallerName,
+                requestId, wantsDryRun(request));
       *body = startedJob(requestId, QStringLiteral("now"));
       return 202;
     }
@@ -2063,6 +2121,41 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
   // no command of its own, so unlike a task there is nothing in one that
   // could be turned into running something else: the worst a schedule can
   // do is run a task that is already there, at a bad time.
+
+  // ---- keys ---------------------------------------------------------------
+
+  // keys -- make one. The key is in this answer and nowhere else.
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("keys")) {
+    const QJsonObject given = options(request);
+    ApiAuth::Key made;
+    QString why;
+    const QString key = ApiAuth::Keys::instance().create(
+        given.value(QStringLiteral("name")).toString(),
+        ApiAuth::ScopeNamed(given.value(QStringLiteral("scope")).toString()),
+        &made, &why);
+    if (key.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    qCDebug(rbApp) << "API made a key" << made.id << made.name
+                   << ApiAuth::ScopeName(made.scope);
+    QJsonObject object = describeKey(made);
+    object.insert(QStringLiteral("key"), key);
+    *body = toJson(object);
+    return 201;
+  }
+
+  // keys/{id} -- take one back
+  if (del && parts.size() == 2 && parts.at(0) == QLatin1String("keys")) {
+    if (!ApiAuth::Keys::instance().remove(parts.at(1))) {
+      return refuseTask(404, QStringLiteral("no_such_key"),
+                        QStringLiteral("there is no such key"));
+    }
+    qCDebug(rbApp) << "API took back key" << parts.at(1);
+    QJsonObject object;
+    object.insert(QStringLiteral("deleted"), parts.at(1));
+    *body = toJson(object);
+    return 200;
+  }
 
   // scheduler/start, scheduler/pause -- the whole scheduler, as the window's
   // two buttons do. Paused, it keeps its schedules and starts nothing.
@@ -2365,6 +2458,15 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     QJsonObject object;
     object.insert(QStringLiteral("ok"), true);
     *body = toJson(object);
+    return 200;
+  }
+
+  if (path == QLatin1String("/api/v1/keys")) {
+    QJsonArray array;
+    for (const ApiAuth::Key &key : ApiAuth::Keys::instance().list()) {
+      array.append(describeKey(key));
+    }
+    *body = toJson(array);
     return 200;
   }
 

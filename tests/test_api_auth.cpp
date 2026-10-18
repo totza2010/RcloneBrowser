@@ -55,6 +55,70 @@ private slots:
 
   void cleanupTestCase() { QFile::remove(iniPath()); }
 
+  // ---- keys -----------------------------------------------------------------
+
+  void aKeyOpensOnlyAsItself() {
+    ApiAuth::Keys::instance().forgetAll();
+    ApiAuth::Key made;
+    QString why;
+    const QString key = ApiAuth::Keys::instance().create(
+        QStringLiteral("sonarr"), ApiAuth::Scope::Control, &made, &why);
+    QVERIFY2(!key.isEmpty(), qPrintable(why));
+    QVERIFY(key.startsWith(QStringLiteral("rbk_") + made.id + QLatin1Char('_')));
+    QVERIFY(key.size() > 50);
+
+    ApiAuth::Key found;
+    QVERIFY(ApiAuth::Keys::instance().accepts(key, &found));
+    QCOMPARE(found.name, QStringLiteral("sonarr"));
+    QCOMPARE(found.scope, ApiAuth::Scope::Control);
+    QVERIFY(found.lastUsed.isValid());
+
+    // One character different, the right id with nothing after it, an id
+    // that is not one: none of them.
+    QString wrong = key;
+    wrong[wrong.size() - 1] = wrong.at(wrong.size() - 1) == QLatin1Char('A')
+                                  ? QLatin1Char('B')
+                                  : QLatin1Char('A');
+    QVERIFY(!ApiAuth::Keys::instance().accepts(wrong, nullptr));
+    QVERIFY(!ApiAuth::Keys::instance().accepts(key.left(13), nullptr));
+    QVERIFY(!ApiAuth::Keys::instance().accepts(
+        QStringLiteral("rbk_00000000_") + key.mid(13), nullptr));
+    QVERIFY(!ApiAuth::Keys::instance().accepts(QString(), nullptr));
+
+    // The secret is not what is kept.
+    const QString stored =
+        GetSettings()->value("Settings/apiKeys").toString();
+    QVERIFY(stored.contains(QStringLiteral("sonarr")));
+    QVERIFY(!stored.contains(key.mid(13)));
+
+    // Taken back, it opens nothing.
+    QVERIFY(ApiAuth::Keys::instance().remove(made.id));
+    QVERIFY(!ApiAuth::Keys::instance().accepts(key, nullptr));
+    QVERIFY(!ApiAuth::Keys::instance().remove(made.id));
+  }
+
+  void aKeyNeedsANameOfItsOwnAndALevel() {
+    ApiAuth::Keys::instance().forgetAll();
+    QString why;
+    QVERIFY(ApiAuth::Keys::instance()
+                .create(QStringLiteral("  "), ApiAuth::Scope::Read, nullptr, &why)
+                .isEmpty());
+    QVERIFY(ApiAuth::Keys::instance()
+                .create(QStringLiteral("x"), ApiAuth::Scope::None, nullptr, &why)
+                .isEmpty());
+    QVERIFY(!ApiAuth::Keys::instance()
+                 .create(QStringLiteral("home"), ApiAuth::Scope::Read, nullptr, &why)
+                 .isEmpty());
+    // The history says which key started a run, so one name is one key.
+    QVERIFY(ApiAuth::Keys::instance()
+                .create(QStringLiteral("HOME"), ApiAuth::Scope::Write, nullptr, &why)
+                .isEmpty());
+    QVERIFY2(why.contains(QStringLiteral("already")), qPrintable(why));
+    QCOMPARE(ApiAuth::ScopeNamed(QStringLiteral("write")), ApiAuth::Scope::Write);
+    QCOMPARE(ApiAuth::ScopeNamed(QStringLiteral("root")), ApiAuth::Scope::None);
+    ApiAuth::Keys::instance().forgetAll();
+  }
+
   void init() {
     ApiAuth::SetPassword(QString());
     ApiAuth::Attempts::instance().forget();

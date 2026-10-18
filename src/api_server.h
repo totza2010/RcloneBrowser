@@ -57,6 +57,19 @@ public:
   // rather than a check per route, for the reason given in answer().
   static bool mayAsk(const HttpRequest &request);
 
+  // Who is asking, and how much they may do: the token and a signed-in
+  // administrator may do everything, a key as much as its level.
+  struct Caller {
+    bool known = false;
+    int scope = 0;  // ApiAuth::Scope
+    QString who;    // "api" for the token and sessions, "api:<key name>"
+  };
+  static Caller callerOf(const HttpRequest &request);
+
+  // Who the request being answered came from. One request is answered at a
+  // time, on this thread, so this is the one being answered.
+  QString mCallerName;
+
   // Whether POST /shutdown is honoured. Off unless something says so: a
   // window is closed by whoever is sitting at it, and a page being able to
   // close it from somewhere else would be a surprise. The daemon switches it

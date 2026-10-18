@@ -1744,6 +1744,23 @@ marker: `src/api_routes.*` · `GET /api/v1/openapi.json` · แท็บ API
 
 ---
 
+### V-44 · API key แบบจำกัดสิทธิ์
+
+marker: `ApiAuth::Keys` · `ApiRoutes` scope · `/api/v1/keys` · กล่อง Keys ในแท็บ API
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | แท็บ API · Make a key ชื่อ "test" ระดับ read | key ขึ้นครั้งเดียวพร้อมปุ่ม Copy · แถวขึ้นในรายการ | ⬜ | |
+| 2 | เปิดหน้าเว็บใน private window · sign in ด้วย key นั้นในช่อง Token | ดูได้ทุกแท็บ · กด Run / Start queue ได้ข้อความว่า key นี้ทำได้แค่ read | 🟨 API: GET 200 · POST 403 `needs: control` | AI / 2026-10-18 |
+| 3 | กลับมาหน้าเดิม · refresh | Last used ของ key มีเวลา | ✅ **PASS** (API) | AI / 2026-10-18 |
+| 4 | **Take back** | หน้า private ใช้ต่อไม่ได้ (ต้อง sign in ใหม่) | ✅ **PASS** (API 401 ทันที) | AI / 2026-10-18 · โปรแกรมจริง |
+| 5 | key ระดับ control · รัน task | ประวัติ/การ์ดงานบอก started by `api:<ชื่อ>` | 🟨 `test_api_server` | AI / 2026-10-18 |
+| 6 | key ระดับ write · ลอง shutdown / สร้าง key | 403 | ✅ **PASS** | AI / 2026-10-18 · `test_api_server` |
+| 7 | ตัว key ในที่เก็บ settings | ไม่มี (มีแต่ hash) | ✅ **PASS** | AI / 2026-10-18 · registry จริง |
+| 8 | ตั้งชื่อซ้ำ (ตัวพิมพ์ต่าง) | ถูกปฏิเสธพร้อมเหตุผล | ✅ **PASS** | AI / 2026-10-18 · `test_api_auth` |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

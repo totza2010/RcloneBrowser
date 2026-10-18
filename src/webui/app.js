@@ -1313,6 +1313,7 @@ async function drawApi() {
       '<p><a href="/api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a> ' +
       '<span class="muted">— OpenAPI ' + esc(apiSpec.openapi || "") +
       ", for Swagger, Postman, a generated client · " + esc(origin) + "</span></p>" +
+      '<div id="api-keys" class="api-keys"></div>' +
       '<input id="api-filter" type="text" placeholder="filter: tasks, schedule, stream…" autocomplete="off">' +
     "</div>",
   ];
@@ -1336,7 +1337,9 @@ async function drawApi() {
             '<span class="verb ' + method.toLowerCase() + '">' + method + "</span>" +
             "<code>" + esc(path) + "</code>" +
             '<span class="api-summary">' + esc(op.summary || "") + "</span>" +
-            (op.security && !op.security.length ? '<span class="tag">open</span>' : "") +
+            (op.security && !op.security.length
+              ? '<span class="tag">open</span>'
+              : '<span class="tag scope">' + esc(op["x-scope"] || "") + "</span>") +
           "</summary>" +
           (op.description ? "<p>" + esc(op.description) + "</p>" : "") +
           (params.length
@@ -1354,6 +1357,7 @@ async function drawApi() {
     }
   }
   box.innerHTML = parts.join("");
+  drawKeys();
 
   $("api-filter").addEventListener("input", () => {
     const words = $("api-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -1372,7 +1376,84 @@ async function drawApi() {
   });
 }
 
+// ---- keys for other programs ---------------------------------------------------
+
+async function drawKeys(made) {
+  const box = $("api-keys");
+  if (!box) return;
+  let answer;
+  try {
+    answer = await api("GET", "/keys");
+  } catch (e) {
+    return;
+  }
+  if (answer.status === 403) {
+    box.innerHTML = '<p class="muted">Keys are managed by an administrator.</p>';
+    return;
+  }
+  if (answer.status !== 200) return;
+
+  const rows = (answer.data || []).map((k) =>
+    "<tr><td>" + esc(k.name) + '</td><td><span class="tag scope">' + esc(k.scope) + "</span></td>" +
+    "<td>" + esc(when(k.created)) + "</td>" +
+    "<td>" + (k.lastUsed ? esc(when(k.lastUsed)) : '<span class="muted">never</span>') + "</td>" +
+    '<td style="text-align:right"><button class="danger small" data-key-drop="' + esc(k.id) +
+      '" data-key-name="' + esc(k.name) + '">Take back</button></td></tr>');
+
+  box.innerHTML =
+    "<h3>Keys for other programs</h3>" +
+    '<p class="muted">Give a program a key of its own instead of the token: it can do only as much as ' +
+    "its level, and it can be taken back without changing anything for anyone else. " +
+    "<b>read</b> looks · <b>control</b> and runs, queues, stops · <b>write</b> and changes tasks, " +
+    "schedules and files · <b>admin</b> everything.</p>" +
+    (made
+      ? '<div class="key-made"><p><b>' + esc(made.name) + "</b> — copy it now: it is not kept, and cannot be shown again.</p>" +
+        '<p><input id="key-made" type="text" readonly value="' + esc(made.key) + '"> ' +
+        '<button type="button" class="small" id="key-copy">Copy</button></p></div>'
+      : "") +
+    (rows.length
+      ? "<table><thead><tr><th>Name</th><th>Level</th><th>Made</th><th>Last used</th><th></th></tr></thead><tbody>" +
+        rows.join("") + "</tbody></table>"
+      : '<p class="muted">No keys yet.</p>') +
+    '<form id="key-form" class="key-form">' +
+      '<input id="key-name" type="text" placeholder="what it is for: home assistant, sonarr…" maxlength="40">' +
+      '<select id="key-scope"><option value="read">read</option><option value="control" selected>control</option>' +
+        '<option value="write">write</option><option value="admin">admin</option></select>' +
+      '<button type="submit" class="small">Make a key</button>' +
+    "</form>" +
+    '<p id="key-error" class="error"></p>';
+
+  if (made) {
+    $("key-made").addEventListener("focus", (e) => e.target.select());
+    $("key-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(made.key);
+        toast("key copied");
+      } catch (e) {
+        $("key-made").focus();
+        toast("select the key and copy it");
+      }
+    });
+  }
+  $("key-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const result = await api("POST", "/keys", { name: $("key-name").value, scope: $("key-scope").value });
+    if (result.status !== 201) {
+      $("key-error").textContent = reasonFrom(result);
+      return;
+    }
+    drawKeys(result.data);
+  });
+}
+
 $("tab-api").addEventListener("click", async (event) => {
+  const drop = event.target.closest("button[data-key-drop]");
+  if (drop) {
+    if (!confirm("Take back the key \"" + drop.dataset.keyName + "\"?\n\n" +
+                 "Whatever uses it is refused from its next request.")) return;
+    if (await command("DELETE", "/keys/" + encodeURIComponent(drop.dataset.keyDrop))) drawKeys();
+    return;
+  }
   const button = event.target.closest("button[data-api-try]");
   if (!button) return;
   const path = button.dataset.apiTry;

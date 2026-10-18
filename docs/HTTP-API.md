@@ -48,6 +48,24 @@ token: 0be7e386-a839-426d-a7d7-c6370d15983c
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19999/api/v1/system
 ```
 
+## API key สำหรับระบบอื่น
+
+ให้ระบบอื่นใช้ key ของมันเองแทน token: ทำได้เท่าระดับของมัน และเพิกถอนได้โดยไม่กระทบใคร
+
+| ระดับ | ทำอะไรได้ |
+|---|---|
+| `read` | ดูทุกอย่าง · events · log |
+| `control` | + รัน · เข้าคิว · หยุด · เปิดปิดคิวและตารางเวลา · stream · mount |
+| `write` | + สร้าง/แก้/ลบ task และตารางเวลา · เปลี่ยนไฟล์บนรีโหมด |
+| `admin` | ทุกอย่าง — token และ session ของ admin คือระดับนี้ |
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -d '{"name":"home assistant","scope":"control"}'      http://127.0.0.1:19999/api/v1/keys
+```
+
+ใช้แบบเดียวกับ token: `Authorization: Bearer rbk_…` · ต่ำกว่าระดับที่ต้องการ → `403` `insufficient_scope` พร้อม `needs`
+ระดับที่แต่ละเส้นทางต้องการอยู่ใน openapi.json (`x-scope`) · key แสดงครั้งเดียวตอนสร้าง เก็บไว้เป็น hash
+
 ## รหัสผ่านแบบ admin
 
 token เหมาะกับสคริปต์ **แต่ไม่เหมาะกับคน** — จำไม่ได้ เลือกเองไม่ได้ และเปลี่ยนไม่ได้

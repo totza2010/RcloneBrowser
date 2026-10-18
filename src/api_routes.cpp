@@ -330,11 +330,84 @@ QList<Route> build() {
         "200: the file; 206: part of it; 404: no such stream, or it has "
         "stopped; 502: it is still starting",
         true),
+
+      // ---- keys ------------------------------------------------------------
+      r("GET", "/api/v1/keys", kSignIn, "The API keys there are",
+        "Names, levels, when made and when last used. Never the keys "
+        "themselves."),
+      r("POST", "/api/v1/keys", kSignIn, "Make an API key",
+        "For another program. The key is in the answer and nowhere else: it "
+        "is stored only as a hash, so it cannot be shown again. Levels: "
+        "read, control (and run, queue, stop), write (and change tasks, "
+        "schedules and files), admin (everything).",
+        "", R"({"name":"home assistant","scope":"control"})",
+        "201: the key, once; 400: no name, a name already taken, or no such "
+        "level"),
+      r("DELETE", "/api/v1/keys/{id}", kSignIn, "Take a key back",
+        "From the next request on, it opens nothing.", "", "",
+        "200: taken back; 404: no such key"),
   };
 }
 
+// How much each route asks of a key. Looking is "read"; changing anything
+// is "write" unless it is listed below as only setting things going or
+// stopping them ("control"), as harmless ("read"), or as the owner's
+// business ("admin").
+QString scopeOf(const Route &route) {
+  if (route.open) {
+    return QString();
+  }
+  if (route.method == QLatin1String("GET")) {
+    return route.path.startsWith(QLatin1String("/api/v1/keys"))
+               ? QStringLiteral("admin")
+               : QStringLiteral("read");
+  }
+  static const QStringList control = {
+      QStringLiteral("POST /api/v1/tasks/{id}/run"),
+      QStringLiteral("POST /api/v1/tasks/{id}/enqueue"),
+      QStringLiteral("POST /api/v1/queue/start"),
+      QStringLiteral("POST /api/v1/queue/pause"),
+      QStringLiteral("POST /api/v1/queue/clear"),
+      QStringLiteral("POST /api/v1/queue/{requestId}/move"),
+      QStringLiteral("DELETE /api/v1/queue/{requestId}"),
+      QStringLiteral("POST /api/v1/jobs/{requestId}/stop"),
+      QStringLiteral("POST /api/v1/schedules/{id}/enable"),
+      QStringLiteral("POST /api/v1/schedules/{id}/disable"),
+      QStringLiteral("POST /api/v1/schedules/{id}/run"),
+      QStringLiteral("POST /api/v1/scheduler/start"),
+      QStringLiteral("POST /api/v1/scheduler/pause"),
+      QStringLiteral("POST /api/v1/remotes/{name}/stream"),
+      QStringLiteral("POST /api/v1/remotes/{name}/mount")};
+  static const QStringList read = {
+      QStringLiteral("POST /api/v1/tasks/preview"),
+      QStringLiteral("POST /api/v1/logout")};
+  static const QStringList admin = {
+      QStringLiteral("POST /api/v1/shutdown"),
+      QStringLiteral("POST /api/v1/password"),
+      QStringLiteral("POST /api/v1/keys"),
+      QStringLiteral("DELETE /api/v1/keys/{id}")};
+
+  const QString key = route.method + QLatin1Char(' ') + route.path;
+  if (admin.contains(key)) {
+    return QStringLiteral("admin");
+  }
+  if (control.contains(key)) {
+    return QStringLiteral("control");
+  }
+  if (read.contains(key)) {
+    return QStringLiteral("read");
+  }
+  return QStringLiteral("write");
+}
+
 const QList<Route> &routes() {
-  static const QList<Route> all = build();
+  static const QList<Route> all = []() {
+    QList<Route> list = build();
+    for (Route &route : list) {
+      route.scope = scopeOf(route);
+    }
+    return list;
+  }();
   return all;
 }
 
@@ -412,6 +485,10 @@ QJsonObject OpenApi(const QString &version) {
     operation.insert(QStringLiteral("operationId"), id);
     if (route.open) {
       operation.insert(QStringLiteral("security"), QJsonArray());
+    } else {
+      // Not part of OpenAPI itself: the level a key needs, for whoever reads
+      // this to decide what to give a program.
+      operation.insert(QStringLiteral("x-scope"), route.scope);
     }
 
     QJsonArray parameters;
@@ -457,6 +534,11 @@ QJsonObject OpenApi(const QString &version) {
                        QJsonObject{{QStringLiteral("description"), answer.second}});
     }
     if (!route.open) {
+      responses.insert(QStringLiteral("403"),
+                       QJsonObject{{QStringLiteral("description"),
+                                    QStringLiteral("a key whose level is "
+                                                   "below ") +
+                                        route.scope}});
       responses.insert(QStringLiteral("401"),
                        QJsonObject{{QStringLiteral("description"),
                                     QStringLiteral("no token or session, or a "
@@ -476,9 +558,11 @@ QJsonObject OpenApi(const QString &version) {
               QStringLiteral(
                   "Controls Rclone Browser: its tasks, queue, schedules, jobs "
                   "and remotes. Every route but the few marked otherwise "
-                  "needs Authorization: Bearer <token or session>. The token "
-                  "is printed when the daemon starts; a session comes from "
-                  "POST /api/v1/login."));
+                  "needs Authorization: Bearer <token, session or key>. The "
+                  "token is printed when the daemon starts; a session comes "
+                  "from POST /api/v1/login; a key, from POST /api/v1/keys, "
+                  "and may do only as much as its level (x-scope on each "
+                  "route): read, control, write or admin."));
 
   QJsonObject bearer;
   bearer.insert(QStringLiteral("type"), QStringLiteral("http"));

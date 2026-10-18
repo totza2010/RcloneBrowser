@@ -926,6 +926,106 @@ private slots:
     }
   }
 
+  // ---- keys -------------------------------------------------------------------
+
+  // A key for another program may do as much as it was given and no more,
+  // and the history says which key started a run.
+  void aKeyMayDoAsMuchAsItWasGiven() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ApiAuth::Keys::instance().forgetAll();
+
+    const auto makeKey = [this](const char *name, const char *scope) {
+      const QByteArray reply = send(
+          "POST", "/api/v1/keys", mToken,
+          QByteArray("{\"name\":\"") + name + "\",\"scope\":\"" + scope + "\"}");
+      return bodyOf(reply).object();
+    };
+    const QJsonObject readOne = makeKey("dashboard", "read");
+    const QJsonObject controlOne = makeKey("home assistant", "control");
+    const QJsonObject writeOne = makeKey("sonarr", "write");
+    const QByteArray reader = readOne.value(QStringLiteral("key")).toString().toUtf8();
+    const QByteArray controller = controlOne.value(QStringLiteral("key")).toString().toUtf8();
+    const QByteArray writer = writeOne.value(QStringLiteral("key")).toString().toUtf8();
+    QVERIFY(reader.startsWith("rbk_"));
+
+    JobOptions *task = makeTask(QStringLiteral("for keys"));
+    const QByteArray taskPath =
+        "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString());
+
+    // read: looks, and that is all.
+    QCOMPARE(statusOf(ask("GET", "/api/v1/tasks", reader)), 200);
+    const QByteArray refused = ask("POST", taskPath + "/enqueue", reader);
+    QCOMPARE(statusOf(refused), 403);
+    QCOMPARE(bodyOf(refused).object().value(QStringLiteral("needs")).toString(),
+             QStringLiteral("control"));
+    QCOMPARE(statusOf(ask("GET", "/api/v1/keys", reader)), 403);
+    // What is not described is not handed to a key.
+    QCOMPARE(statusOf(ask("GET", "/api/v1/nothing", reader)), 403);
+
+    // control: sets things going and stops them, changes nothing.
+    const QByteArray queued = ask("POST", taskPath + "/enqueue", controller);
+    QCOMPARE(statusOf(queued), 202);
+    QCOMPARE(statusOf(ask("DELETE",
+                          "/api/v1/queue/" +
+                              bodyOf(queued).object().value(QStringLiteral("requestId"))
+                                  .toString().toUtf8(),
+                          controller)),
+             204);
+    const QByteArray run = ask("POST", taskPath + "/run", controller);
+    QCOMPARE(statusOf(run), 202);
+    RunningJob *job = JobRegistry::instance().find(
+        bodyOf(run).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    QCOMPARE(job->transferMode(), QStringLiteral("api:home assistant"));
+    job->stop();
+    QCOMPARE(statusOf(send("PUT", taskPath, controller, "{\"name\":\"x\"}")), 403);
+
+    // write: changes tasks and schedules, but is not the owner.
+    QCOMPARE(statusOf(send("PUT", taskPath, writer, "{\"name\":\"renamed by a key\"}")),
+             200);
+    QCOMPARE(statusOf(ask("POST", "/api/v1/shutdown", writer)), 403);
+    QCOMPARE(statusOf(send("POST", "/api/v1/keys", writer,
+                           "{\"name\":\"another\",\"scope\":\"admin\"}")),
+             403);
+    QCOMPARE(statusOf(send("POST", "/api/v1/password", writer,
+                           "{\"current\":\"\",\"new\":\"12345678\"}")),
+             403);
+
+    // The list says who they are and when they were used, never the key.
+    const QByteArray listed = ask("GET", "/api/v1/keys", mToken);
+    QCOMPARE(statusOf(listed), 200);
+    QCOMPARE(bodyOf(listed).array().size(), 3);
+    QVERIFY(!listed.contains(reader.mid(13)));
+    for (const QJsonValue &value : bodyOf(listed).array()) {
+      QVERIFY(!value.toObject().contains(QStringLiteral("key")));
+      if (value.toObject().value(QStringLiteral("name")).toString() ==
+          QLatin1String("dashboard")) {
+        QVERIFY(!value.toObject().value(QStringLiteral("lastUsed")).toString().isEmpty());
+      }
+    }
+
+    // A name is one key; a level is one of four.
+    QCOMPARE(statusOf(send("POST", "/api/v1/keys", mToken,
+                           "{\"name\":\"Sonarr\",\"scope\":\"read\"}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/keys", mToken,
+                           "{\"name\":\"x\",\"scope\":\"root\"}")),
+             400);
+
+    // Taken back, it opens nothing -- from the very next request.
+    QCOMPARE(statusOf(ask("DELETE",
+                          "/api/v1/keys/" +
+                              readOne.value(QStringLiteral("id")).toString().toUtf8(),
+                          mToken)),
+             200);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/tasks", reader)), 401);
+    QCOMPARE(statusOf(ask("DELETE", "/api/v1/keys/nothing", mToken)), 404);
+
+    ListOfJobOptions::getInstance()->Forget(task);
+    ApiAuth::Keys::instance().forgetAll();
+  }
+
   // The API describes itself, from the same list every request is checked
   // against, and a tool can read the description before it has a key.
   void theApiDescribesItself() {

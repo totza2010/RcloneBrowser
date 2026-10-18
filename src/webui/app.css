@@ -509,6 +509,15 @@ input.bad, select.bad { border-color: var(--bad); }
 .verb.put { background: rgba(200, 140, 30, .2); color: #c88c1e; }
 .verb.delete { background: rgba(210, 60, 60, .18); color: #d23c3c; }
 
+.api-keys { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0 14px; padding: 4px 14px 10px; }
+.api-keys h3 { font-size: 14px; margin: 10px 0 6px; }
+.key-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.key-form input { flex: 1; margin-top: 0; min-width: 200px; }
+.key-form select { width: auto; }
+.key-made { background: var(--panel-2); border-radius: 4px; margin: 8px 0; padding: 4px 10px 8px; }
+.key-made input { font-family: Consolas, "Courier New", monospace; width: calc(100% - 80px); }
+.tag.scope { color: var(--muted); }
+
 /* ---- schedules --------------------------------------------------------- */
 
 .sched-daily { align-items: center; display: flex; flex-wrap: wrap; gap: 10px 16px; padding-left: 22px; }

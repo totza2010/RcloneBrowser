@@ -18,6 +18,7 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QList>
 #include <QString>
 
 namespace ApiAuth {
@@ -84,6 +85,73 @@ public:
 private:
   int mFailures = 0;
   QDateTime mLockedUntil;
+};
+
+// ---- keys -------------------------------------------------------------------
+//
+// The token can do everything, which is right for the person who owns the
+// machine and wrong to hand to another program: giving it away is giving
+// away the house key, and taking it back means changing it for everybody.
+//
+// A key has a name, says how much it may do, and can be taken back on its
+// own. The levels go up in steps, each including the one before:
+//
+//   read     look at everything, follow events, read logs
+//   control  and run, queue, stop, switch the queue and schedules on and off
+//   write    and make, change and delete tasks and schedules, and change
+//            files on remotes
+//   admin    and stop the program, change the password, manage keys --
+//            what the token and a signed-in administrator can do
+//
+// Which level each route needs is in ApiRoutes, beside the route.
+enum class Scope { None = 0, Read = 1, Control = 2, Write = 3, Admin = 4 };
+
+QString ScopeName(Scope scope);
+// None for a word that is not one of the four.
+Scope ScopeNamed(const QString &name);
+
+struct Key {
+  QString id;   // eight hex characters, also the start of the key itself
+  QString name; // what it is for: "sonarr", "home assistant"
+  Scope scope = Scope::Read;
+  QDateTime created;
+  QDateTime lastUsed; // invalid until it has been
+};
+
+// The keys there are. Kept in the settings as their names, levels and a
+// hash of the secret -- never the secret itself, which is shown once, when
+// the key is made, and then exists only wherever it was pasted.
+//
+// The secret is 32 random bytes, so it is hashed with a plain SHA-256 rather
+// than the slow derivation a password gets: slowness defends a guessable
+// secret, and this one is not guessable, while every request has to check
+// it.
+class Keys {
+public:
+  static Keys &instance();
+
+  QList<Key> list();
+
+  // Makes a key. Returns the key as it is to be used --
+  // "rbk_<id>_<secret>" -- or an empty string with *why when the name is
+  // empty, too long or taken, or the level is not one.
+  QString create(const QString &name, Scope scope, Key *made, QString *why);
+
+  bool remove(const QString &id);
+
+  // The key this is, or false. A key that is used is noted as used.
+  bool accepts(const QString &presented, Key *key);
+
+  void forgetAll(); // for tests
+
+private:
+  void load();
+  void save();
+
+  bool mLoaded = false;
+  QList<Key> mKeys;
+  QHash<QString, QByteArray> mHashes; // id -> hash of the secret
+  QDateTime mLastSaved;
 };
 
 } // namespace ApiAuth

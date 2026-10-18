@@ -41,6 +41,9 @@ struct Route {
   QString body;
   // "200: what it means; 404: what it means"
   QString answers;
+  // How much a key has to be allowed to ask this: "read", "control",
+  // "write" or "admin" -- see ApiAuth::Scope. Empty for an open route.
+  QString scope;
 };
 
 const QList<Route> &All();
