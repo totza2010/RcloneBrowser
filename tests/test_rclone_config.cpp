@@ -88,6 +88,33 @@ private slots:
     }
   }
 
+  // rclone takes any key and writes it into the file, and does not insist
+  // on what a backend calls required, so both are checked here.
+  void settingsAreHeldToWhatTheBackendHas() {
+    const QList<Provider> list = ParseProviders(providers());
+    const Provider *sftp = FindProvider(list, QStringLiteral("sftp"));
+    QJsonObject good;
+    good.insert(QStringLiteral("host"), QStringLiteral("nas.local"));
+    good.insert(QStringLiteral("pass"), QStringLiteral("typed"));
+    QCOMPARE(WhyNotSettings(*sftp, good, true), QString());
+
+    QJsonObject unknown = good;
+    unknown.insert(QStringLiteral("--config"), QStringLiteral("x"));
+    QVERIFY(WhyNotSettings(*sftp, unknown, true).contains(QStringLiteral("--config")));
+
+    QJsonObject twoLines = good;
+    twoLines.insert(QStringLiteral("host"), QStringLiteral("a\nb"));
+    QVERIFY(!WhyNotSettings(*sftp, twoLines, true).isEmpty());
+
+    QJsonObject noHost;
+    noHost.insert(QStringLiteral("pass"), QStringLiteral("typed"));
+    QVERIFY(WhyNotSettings(*sftp, noHost, true).contains(QStringLiteral("host")));
+    // Changing, the required ones need not be given again.
+    QCOMPARE(WhyNotSettings(*sftp, noHost, false), QString());
+
+    QVERIFY(!SignsInWithBrowser(*sftp));
+  }
+
   void aRemoteNameIsHeldToRclonesRule() {
     for (const char *good : {"gdrive", "films drive", "a.b-c_d+e@f", "ไดรฟ์"}) {
       QVERIFY2(WhyNotARemoteName(QString::fromUtf8(good)).isEmpty(), good);

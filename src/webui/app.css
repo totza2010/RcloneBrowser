@@ -236,6 +236,7 @@ tbody tr:hover { background: var(--panel); }
 }
 
 .remote-list button { align-items: center; display: flex; gap: 12px; }
+.remote-list .new-remote { border-style: dashed; color: var(--muted); justify-content: center; min-width: 140px; }
 .remote-icon { flex: none; height: 36px; object-fit: contain; width: 36px; }
 .remote-text { display: block; min-width: 0; }
 .remote-list button.on { border-color: var(--accent); color: var(--accent); }
@@ -519,6 +520,19 @@ input.bad, select.bad { border-color: var(--bad); }
 .tag.scope { color: var(--muted); }
 
 #result-body tr.advanced td:first-child code { color: var(--muted); }
+
+/* ---- the remote form --------------------------------------------------- */
+
+.remote-form { max-height: 92vh; }
+.remote-form > * { flex: none; }
+.remote-head { display: grid; gap: 12px; grid-template-columns: 1fr 1.4fr; }
+.remote-head select { margin-top: 4px; }
+.remote-fields { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); overflow: auto; }
+.remote-form > .remote-fields { flex: 0 1 auto; max-height: 42vh; }
+.remote-fields label .muted { display: block; font-size: 11px; margin-top: 2px; }
+.remote-fields input[type="checkbox"] { width: auto; }
+.remote-fields .need::after { color: var(--bad); content: " *"; }
+@media (max-width: 640px) { .remote-head { grid-template-columns: 1fr; } }
 
 /* ---- schedules --------------------------------------------------------- */
 

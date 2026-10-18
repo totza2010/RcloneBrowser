@@ -350,6 +350,32 @@
     </form>
   </div>
 
+  <!-- A remote: made, or its settings changed. The fields are made from
+       what rclone says the backend has, so a fork's backend gets a form too. -->
+  <div id="remotebox" class="modal hidden">
+    <form id="remote-form" class="modal-box wide remote-form" autocomplete="off">
+      <h2 id="remote-form-title"></h2>
+      <div class="remote-head">
+        <label>Name
+          <input id="remote-form-name" type="text" spellcheck="false" placeholder="films, backup, nas…">
+        </label>
+        <label id="remote-form-type-wrap">Kind
+          <input id="remote-form-filter" type="text" placeholder="search: sftp, s3, teldrive…">
+          <select id="remote-form-type" size="6"></select>
+        </label>
+      </div>
+      <p id="remote-form-about" class="muted"></p>
+      <div id="remote-form-fields" class="remote-fields"></div>
+      <p><button type="button" id="remote-form-advanced" class="link hidden"></button></p>
+      <div id="remote-form-more" class="remote-fields hidden"></div>
+      <p id="remote-form-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" id="remote-form-cancel" class="ghost">Cancel</button>
+        <button type="submit" id="remote-form-save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <!-- A schedule: which task, and when. -->
   <div id="schedbox" class="modal hidden">
     <form id="sched-form" class="modal-box wide">

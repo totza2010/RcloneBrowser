@@ -779,7 +779,9 @@ function drawRemotes() {
           "</span>" +
         "</button>"
       )).join("")
-    : '<p class="empty">No remotes. They are configured with rclone itself.</p>';
+    : '<p class="empty">No remotes yet.</p>';
+  $("remote-list").innerHTML +=
+    '<button type="button" class="new-remote" data-remote-new="">+ New remote</button>';
 
   $("browser").classList.toggle("hidden", !browsing.remote);
   if (!browsing.remote) return;
@@ -2428,9 +2430,15 @@ $("remote-settings").addEventListener("click", async () => {
       (c.settings || []).map(row).join("") + "</tbody></table>" +
     '<p class="muted">Passwords, tokens and anything rclone marks sensitive are never sent to this page. ' +
     "Changing its settings from here comes next; for now, rclone config.</p>" +
-    '<p><button id="remote-rename-config" class="ghost small">Rename this remote…</button> ' +
+    '<p><button id="remote-edit-config" class="small">Edit settings…</button> ' +
+    '<button id="remote-rename-config" class="ghost small">Rename this remote…</button> ' +
     '<button id="remote-delete-config" class="danger small">Delete this remote…</button></p>' +
     '<p id="remote-config-error" class="error"></p>';
+
+  $("remote-edit-config").addEventListener("click", () => {
+    closeResult();
+    openRemoteForm(c);
+  });
 
   $("remote-rename-config").addEventListener("click", async () => {
     const to = prompt("New name for " + remote + ":\n\n" +
@@ -2470,6 +2478,206 @@ $("remote-settings").addEventListener("click", async () => {
     browsing.remote = "";
     refresh();
   });
+});
+
+// ---- making a remote, or changing one --------------------------------------
+//
+// The fields come from GET /providers/{type}: rclone's own description of
+// the backend. Options rclone marks advanced are behind a link, ones it hides
+// are not offered, and anything that is a password or sensitive is a
+// password field that is sent only if something is typed into it.
+
+const remoteForm = { editing: null, provider: null, shown: {}, providers: [] };
+
+async function loadProviderList() {
+  if (remoteForm.providers.length) return remoteForm.providers;
+  const answer = await api("GET", "/providers");
+  if (answer.status === 200) remoteForm.providers = answer.data.providers || [];
+  return remoteForm.providers;
+}
+
+function drawProviderList() {
+  const typed = $("remote-form-filter").value.trim().toLowerCase();
+  const select = $("remote-form-type");
+  const was = select.value;
+  select.innerHTML = remoteForm.providers
+    .filter((p) => !typed || p.name.includes(typed) || (p.description || "").toLowerCase().includes(typed))
+    .map((p) => '<option value="' + esc(p.name) + '">' + esc(p.name) +
+      (p.description ? " — " + esc(p.description) : "") + "</option>").join("");
+  if (was) select.value = was;
+}
+
+// One field, made from one option.
+function remoteField(option, current, isSet) {
+  const id = "rf-" + option.name;
+  const first = (option.help || "").split("\n")[0];
+  const label = '<span class="' + (option.required ? "need" : "") + '"><code>' + esc(option.name) + "</code></span>" +
+    '<span class="muted" title="' + esc(option.help || "") + '">' + esc(first) +
+    (option.default ? " · default " + esc(option.default) : "") + "</span>";
+  const value = current === undefined || current === null ? "" : String(current);
+  const secret = option.password || option.sensitive;
+
+  let input;
+  if (option.type === "bool") {
+    const on = value ? value === "true" : option.default === "true";
+    input = '<input type="checkbox" id="' + id + '"' + (on ? " checked" : "") + ">";
+    return '<label class="check">' + input + " " + label + "</label>";
+  }
+  if (option.exclusive && option.examples && option.examples.length) {
+    input = '<select id="' + id + '">' +
+      (option.required ? "" : '<option value="">' + (option.default ? "default (" + esc(option.default) + ")" : "not set") + "</option>") +
+      option.examples.map((e) => '<option value="' + esc(e.value) + '"' + (e.value === value ? " selected" : "") + ">" +
+        esc(e.value) + (e.help ? " — " + esc(e.help.split("\n")[0]) : "") + "</option>").join("") + "</select>";
+  } else if (secret) {
+    input = '<input id="' + id + '" type="password" autocomplete="new-password" placeholder="' +
+      (isSet ? "set — type to replace it" : "") + '">';
+  } else {
+    const list = option.examples && option.examples.length ? id + "-list" : "";
+    input = '<input id="' + id + '" type="' + (option.type === "int" ? "number" : "text") +
+      '" spellcheck="false" value="' + esc(value) + '" placeholder="' + esc(option.default || "") + '"' +
+      (list ? ' list="' + list + '"' : "") + ">" +
+      (list ? '<datalist id="' + list + '">' + option.examples.map((e) =>
+        '<option value="' + esc(e.value) + '">' + esc((e.help || "").split("\n")[0]) + "</option>").join("") + "</datalist>" : "");
+  }
+  return "<label>" + label + input + "</label>";
+}
+
+async function drawRemoteFields() {
+  const type = remoteForm.editing ? remoteForm.editing.type : $("remote-form-type").value;
+  remoteForm.provider = null;
+  $("remote-form-fields").innerHTML = "";
+  $("remote-form-more").innerHTML = "";
+  $("remote-form-advanced").classList.add("hidden");
+  $("remote-form-about").textContent = "";
+  if (!type) return;
+
+  const answer = await api("GET", "/providers/" + encodeURIComponent(type));
+  if (answer.status !== 200) {
+    $("remote-form-about").textContent = reasonFrom(answer);
+    return;
+  }
+  const provider = answer.data;
+  remoteForm.provider = provider;
+  const signsIn = provider.options.some((o) => o.name === "token");
+  $("remote-form-about").textContent = (provider.description || provider.name) +
+    (signsIn && !remoteForm.editing
+      ? " — signs in through a web browser, which cannot be done from here yet. Make it with rclone config; once it exists, its settings can be changed here."
+      : "");
+  $("remote-form-save").disabled = signsIn && !remoteForm.editing;
+
+  const now = {};
+  const set = {};
+  for (const s of (remoteForm.editing && remoteForm.editing.settings) || []) {
+    now[s.name] = s.secret ? undefined : s.value;
+    set[s.name] = true;
+  }
+  remoteForm.shown = now;
+  const offered = provider.options.filter((o) => !o.hidden);
+  const plain = offered.filter((o) => !o.advanced);
+  const more = offered.filter((o) => o.advanced);
+  $("remote-form-fields").innerHTML = plain.map((o) => remoteField(o, now[o.name], set[o.name])).join("");
+  $("remote-form-more").innerHTML = more.map((o) => remoteField(o, now[o.name], set[o.name])).join("");
+  if (more.length) {
+    // Shown at once when one of them is already set: hiding a setting the
+    // remote has would make the form lie about it.
+    const anySet = more.some((o) => set[o.name]);
+    $("remote-form-more").classList.toggle("hidden", !anySet);
+    $("remote-form-advanced").textContent = (anySet ? "Hide" : "Show") + " " + more.length + " advanced options";
+    $("remote-form-advanced").classList.remove("hidden");
+  }
+}
+
+// What is sent: for a new remote, everything filled in; for a change, only
+// what differs from what it has -- and a secret only if something was typed.
+function readRemoteFields() {
+  const settings = {};
+  for (const option of remoteForm.provider.options) {
+    const el = $("rf-" + option.name);
+    if (!el) continue;
+    const before = remoteForm.shown[option.name];
+    let value;
+    if (el.type === "checkbox") {
+      value = el.checked ? "true" : "false";
+      const was = before !== undefined && before !== "" ? before : option.default || "false";
+      if (value === was) continue;
+    } else {
+      value = el.value;
+      if (option.password || option.sensitive) {
+        if (!value) continue; // left alone: kept as it is
+      } else if (remoteForm.editing ? value === (before || "") : value === "") {
+        continue;
+      }
+    }
+    settings[option.name] = value;
+  }
+  return settings;
+}
+
+async function openRemoteForm(editing) {
+  remoteForm.editing = editing || null;
+  $("remote-form-title").textContent = editing ? "Settings of " + editing.name + ":" : "New remote";
+  $("remote-form-name").value = editing ? editing.name : "";
+  $("remote-form-type-wrap").classList.toggle("hidden", !!editing);
+  $("remote-form-error").textContent = "";
+  $("remote-form-save").disabled = false;
+  $("remote-form-filter").value = "";
+  $("remotebox").classList.remove("hidden");
+  if (!editing) {
+    $("remote-form-type").innerHTML = "<option>reading…</option>";
+    await loadProviderList();
+    drawProviderList();
+    $("remote-form-type").value = "";
+  }
+  drawRemoteFields();
+}
+
+$("remote-form-filter").addEventListener("input", drawProviderList);
+$("remote-form-type").addEventListener("change", drawRemoteFields);
+$("remote-form-advanced").addEventListener("click", () => {
+  const more = $("remote-form-more");
+  more.classList.toggle("hidden");
+  $("remote-form-advanced").textContent = $("remote-form-advanced").textContent
+    .replace(/^(Show|Hide)/, more.classList.contains("hidden") ? "Show" : "Hide");
+});
+$("remote-form-cancel").addEventListener("click", () => $("remotebox").classList.add("hidden"));
+$("remote-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("remote-form-error").textContent = "";
+  if (!remoteForm.provider) {
+    $("remote-form-error").textContent = "choose a kind of remote first";
+    return;
+  }
+  const name = $("remote-form-name").value.trim();
+  const settings = readRemoteFields();
+  const editing = remoteForm.editing;
+  const body = editing
+    ? Object.assign({ settings: settings }, name !== editing.name ? { name: name } : {})
+    : { name: name, type: remoteForm.provider.name, settings: settings };
+  if (editing && !Object.keys(settings).length && name === editing.name) {
+    $("remotebox").classList.add("hidden");
+    return; // nothing changed
+  }
+
+  $("remote-form-save").disabled = true;
+  let answer;
+  try {
+    answer = editing
+      ? await api("PUT", "/remotes/" + encodeURIComponent(editing.name) + "/config", body)
+      : await api("POST", "/remotes", body);
+  } catch (e) {
+    answer = { status: 0, data: { error: "could not reach the daemon" } };
+  }
+  $("remote-form-save").disabled = false;
+  if (answer.status !== 200 && answer.status !== 201) {
+    $("remote-form-error").textContent = reasonFrom(answer);
+    return;
+  }
+  $("remotebox").classList.add("hidden");
+  const now = name || (editing && editing.name);
+  toast((editing ? "Saved " : "Made ") + now + ":" +
+        (answer.data.asks ? " — rclone would also ask about " + answer.data.asks + "; that part is rclone config's" : ""));
+  refresh();
+  if (!editing || now !== editing.name) browse(now, "");
 });
 
 // ---- streaming --------------------------------------------------------------
@@ -2871,6 +3079,7 @@ document.addEventListener("click", async (event) => {
 
   if (d.log) return openLog(d.log);
   if (d.stream) return reopenStream(d.stream);
+  if (d.remoteNew !== undefined) return openRemoteForm(null);
   if (d.remote) return browse(d.remote, "");
   if (d.go !== undefined) return browse(browsing.remote, d.go);
 

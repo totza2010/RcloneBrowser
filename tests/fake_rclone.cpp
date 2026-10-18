@@ -61,7 +61,8 @@ int main(int argc, char *argv[]) {
     }
     // create and delete: succeed, and write down what they were given when
     // FAKE_RCLONE_RECORD names a file, so a test can see the command.
-    if (std::strcmp(argv[2], "create") == 0 || std::strcmp(argv[2], "delete") == 0) {
+    if (std::strcmp(argv[2], "create") == 0 || std::strcmp(argv[2], "delete") == 0 ||
+        std::strcmp(argv[2], "update") == 0) {
       if (const char *record = std::getenv("FAKE_RCLONE_RECORD")) {
         if (FILE *file = std::fopen(record, "ab")) {
           for (int i = 2; i < argc; ++i) {

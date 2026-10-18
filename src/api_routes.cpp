@@ -316,15 +316,27 @@ QList<Route> build() {
         "Read from rclone.conf each time.",
         "", "", "200: the settings; 404: no such remote; 502: rclone could "
                 "not read its configuration"),
-      r("PUT", "/api/v1/remotes/{name}/config", kRemotes, "Rename a remote",
-        "rclone has no rename, so it is made again under the new name with "
-        "exactly what it has, and the old one deleted. Saved tasks that name "
-        "it are changed to the new name. Refused while a job is using it. "
-        "Changing its settings comes later.",
-        "", R"({"name":"films-drive"})",
-        "200: renamed, with the tasks changed; 400: not a name, or a change "
-        "not offered yet; 404: no such remote; 409: the name is taken, or a "
-        "job is using it; 502: rclone refused"),
+      r("POST", "/api/v1/remotes", kRemotes, "Make a remote",
+        "settings are the backend's own options (GET /providers/{type}); a "
+        "password is given as typed and rclone obscures it. Every option the "
+        "backend calls required has to be there. A kind that signs in through "
+        "a web browser (drive, onedrive...) cannot be made here yet.",
+        "",
+        R"({"name":"films","type":"sftp","settings":{"host":"nas.local","user":"me","pass":"..."}})",
+        "201: made; 400: not a name, no such kind, or a setting that cannot be; "
+        "409: the name is taken, or the kind signs in with a browser; 502: "
+        "rclone refused"),
+      r("PUT", "/api/v1/remotes/{name}/config", kRemotes,
+        "Change a remote's settings, or its name",
+        "settings: only what is given changes, and a secret that is not "
+        "given is kept. name: rclone has no rename, so it is made again under "
+        "the new name with exactly what it has and the old one deleted; saved "
+        "tasks that name it follow. Both may be given; the settings go first. "
+        "Refused while a job is using it.",
+        "", R"({"settings":{"chunk_size":"1Gi"},"name":"films-drive"})",
+        "200: done, with the tasks changed; 400: not a name, or a setting that "
+        "cannot be; 404: no such remote; 409: the name is taken, or a job is "
+        "using it; 502: rclone refused"),
       r("DELETE", "/api/v1/remotes/{name}", kRemotes,
         "Delete a remote from the configuration",
         "Its files are not touched: they are on the remote. Refused while a "
@@ -424,6 +436,7 @@ QString scopeOf(const Route &route) {
       QStringLiteral("POST /api/v1/keys"),
       QStringLiteral("DELETE /api/v1/keys/{id}"),
       QStringLiteral("PUT /api/v1/remotes/{name}/config"),
+      QStringLiteral("POST /api/v1/remotes"),
       QStringLiteral("DELETE /api/v1/remotes/{name}")};
 
   const QString key = route.method + QLatin1Char(' ') + route.path;

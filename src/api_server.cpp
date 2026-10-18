@@ -1399,20 +1399,13 @@ void ApiServer::remoteConfig(QTcpSocket *socket, const QString &remote) {
   // at most: an rclone that cannot answer that still gets an answer, with
   // every value left out.
   if (!config.isLoaded() && !socket->property("configWaited").toBool()) {
-    config.ensureLoaded();
     QPointer<QTcpSocket> waiting(socket);
-    auto asked = QSharedPointer<bool>::create(false);
-    const auto again = [this, waiting, remote, asked]() {
-      if (*asked || !waiting) {
-        return;
+    afterBackendsAreKnown(socket, [this, waiting, remote]() {
+      if (waiting) {
+        waiting->setProperty("configWaited", true);
+        remoteConfig(waiting, remote);
       }
-      *asked = true;
-      waiting->setProperty("configWaited", true);
-      remoteConfig(waiting, remote);
-    };
-    QObject::connect(&config, &RcloneConfigRegistry::providersLoaded, socket,
-                     again, Qt::SingleShotConnection);
-    QTimer::singleShot(15000, socket, again);
+    });
     return;
   }
 
@@ -1463,6 +1456,27 @@ void ApiServer::remoteConfig(QTcpSocket *socket, const QString &remote) {
   });
 }
 
+void ApiServer::afterBackendsAreKnown(QTcpSocket *socket,
+                                      std::function<void()> then) {
+  RcloneConfigRegistry &config = RcloneConfigRegistry::instance();
+  if (config.isLoaded()) {
+    then();
+    return;
+  }
+  config.ensureLoaded();
+  auto ran = QSharedPointer<bool>::create(false);
+  const auto once = [ran, then]() {
+    if (*ran) {
+      return;
+    }
+    *ran = true;
+    then();
+  };
+  QObject::connect(&config, &RcloneConfigRegistry::providersLoaded, socket,
+                   once, Qt::SingleShotConnection);
+  QTimer::singleShot(15000, socket, once);
+}
+
 void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
                              const QString &remote) {
   socket->setProperty("stream", true);
@@ -1480,12 +1494,21 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
       object.insert(QStringLiteral("code"), change.code);
       status = change.code == QLatin1String("no_such_remote") ? 404
                : change.code == QLatin1String("bad_name")     ? 400
+               : change.code == QLatin1String("signs_in_with_browser") ? 409
                : change.code == QLatin1String("rclone_refused") ||
                        change.code == QLatin1String("config_unreadable")
                    ? 502
                    : 409;
     }
     object.insert(QStringLiteral("tasks"), QJsonArray::fromStringList(change.tasks));
+    if (!change.asks.isEmpty()) {
+      // Done; rclone would have gone on to ask this. Said, so a person who
+      // wanted it answered knows to use rclone config for that part.
+      object.insert(QStringLiteral("asks"), change.asks);
+    }
+    if (change.ok && held->property("made").toBool()) {
+      status = 201;
+    }
     held->write(FormatHttpResponse(status, toJson(object)));
     held->flush();
     held->disconnectFromHost();
@@ -1502,21 +1525,65 @@ void ApiServer::changeRemote(QTcpSocket *socket, const HttpRequest &request,
 
   const QJsonObject given = options(request);
   for (const QString &key : given.keys()) {
-    if (key != QLatin1String("name")) {
-      // Said rather than ignored: a settings change that silently did
-      // nothing is worse than one refused.
+    if (key != QLatin1String("name") && key != QLatin1String("settings") &&
+        !(remote.isEmpty() && key == QLatin1String("type"))) {
+      // Said rather than ignored: a change that silently did nothing is
+      // worse than one refused.
       RemoteChange change;
       change.code = QStringLiteral("bad_name");
-      change.why = QStringLiteral("only the name can be changed here yet; "
-                                  "\"%1\" cannot")
+      change.why = QStringLiteral("\"%1\" is not something a remote is "
+                                  "given; its options go in \"settings\"")
                        .arg(key);
       answer(change);
       return;
     }
   }
-  qCDebug(rbApp) << "API renaming remote" << remote;
-  RenameRemote(socket, remote, given.value(QStringLiteral("name")).toString(),
-               answer);
+  const QJsonObject settings = given.value(QStringLiteral("settings")).toObject();
+  const QString name = given.value(QStringLiteral("name")).toString().trimmed();
+  if ((given.contains(QStringLiteral("name")) && name.isEmpty()) ||
+      (!remote.isEmpty() && settings.isEmpty() && name.isEmpty())) {
+    RemoteChange change;
+    change.code = QStringLiteral("bad_name");
+    change.why = given.contains(QStringLiteral("name"))
+                     ? QStringLiteral("a remote needs a name")
+                     : QStringLiteral("nothing to change: give \"settings\" "
+                                      "or a new \"name\"");
+    answer(change);
+    return;
+  }
+
+  afterBackendsAreKnown(socket, [this, held, remote, settings, name, given, answer]() {
+    if (!held) {
+      return;
+    }
+    if (remote.isEmpty()) {
+      held->setProperty("made", true);
+      qCDebug(rbApp) << "API making remote" << name;
+      CreateRemote(held, name, given.value(QStringLiteral("type")).toString(),
+                   settings, answer);
+      return;
+    }
+    // The settings first, then the name, so the settings are checked
+    // against the remote while it still has the name it is known by.
+    qCDebug(rbApp) << "API changing remote" << remote;
+    UpdateRemote(held, remote, settings,
+                 [held, remote, name, answer](const RemoteChange &changed) {
+                   if (!held) {
+                     return;
+                   }
+                   if (!changed.ok || name.isEmpty() || name == remote) {
+                     answer(changed);
+                     return;
+                   }
+                   RenameRemote(held, remote, name,
+                                [changed, answer](RemoteChange renamed) {
+                                  if (renamed.asks.isEmpty()) {
+                                    renamed.asks = changed.asks;
+                                  }
+                                  answer(renamed);
+                                });
+                 });
+  });
 }
 
 void ApiServer::openEventStream(QTcpSocket *socket) {
@@ -1927,6 +1994,11 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
         (asked.method == QLatin1String("DELETE") && parts.size() == 2 &&
          parts.at(0) == QLatin1String("remotes"))) {
       changeRemote(socket, asked, parts.at(1));
+      return;
+    }
+    if (asked.method == QLatin1String("POST") && parts.size() == 1 &&
+        parts.at(0) == QLatin1String("remotes")) {
+      changeRemote(socket, asked, QString());
       return;
     }
   }

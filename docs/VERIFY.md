@@ -1798,6 +1798,24 @@ marker: `RenameRemote` · `DeleteRemote` · `PUT /api/v1/remotes/{name}/config` 
 
 ---
 
+### V-47 · สร้างและแก้รีโหมดจากหน้าเว็บ (R4)
+
+marker: `CreateRemote` · `UpdateRemote` · `WhyNotSettings` · การ์ด + New remote · Edit settings…
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | Remotes · **+ New remote** · ค้น `sftp` · เลือก | ฟอร์มขึ้น: host (มี *) · user · port · pass (ช่องรหัส) · ลิงก์ Show N advanced options | ⬜ | |
+| 2 | กด Save โดยไม่ใส่ host | ไม่บันทึก บอกว่าต้องมี host | ✅ **PASS** (API) | AI / 2026-10-19 · โปรแกรมจริง |
+| 3 | ใส่ครบ · Save | รีโหมดใหม่ขึ้นในรายการ · หน้าต่างเห็นด้วย · รหัสผ่านใน rclone.conf ถูก obscure | ✅ **PASS** (API) | AI / 2026-10-19 |
+| 4 | เลือกชนิด drive | บอกว่าต้อง sign in ผ่าน browser · ปุ่ม Save กดไม่ได้ | 🟨 API 409 | AI / 2026-10-19 |
+| 5 | สร้าง teldrive: access_token · api_host | ใช้งานได้ (Refresh เห็นไฟล์) | ⬜ | |
+| 6 | รีโหมดเดิม · Settings · **Edit settings…** · เปลี่ยน chunk_size · Save | ค่าเปลี่ยน · access_token คงเดิม (ไม่ได้พิมพ์) | 🟨 API: แก้ port แล้วรหัสคงเดิม | AI / 2026-10-19 |
+| 7 | Edit settings ของ drive · เปลี่ยน scope | บันทึกได้ · token ไม่หาย · มีข้อความว่า rclone จะถามเรื่อง refresh token | 🟨 ลองบนสำเนา config: token คงเดิม | AI / 2026-10-19 |
+| 8 | Edit settings · เปลี่ยนชื่อด้วย | ค่าเปลี่ยนแล้วเปลี่ยนชื่อ · task ตาม | ⬜ | |
+| 9 | ส่ง key แปลก (`--config`) ผ่าน API | 400 ไม่มีอะไรถูกเขียน | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

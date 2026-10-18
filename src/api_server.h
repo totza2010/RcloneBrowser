@@ -25,6 +25,8 @@
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
+
+#include <functional>
 #include <QString>
 
 class QTcpServer;
@@ -165,9 +167,14 @@ private:
   // How one remote is set up, with its secrets taken out. Held open like a
   // question: rclone has to be asked. See rclone_config.h.
   void remoteConfig(QTcpSocket *socket, const QString &remote);
-  // Renaming and deleting a remote, which run rclone and answer after.
+  // Making, changing, renaming and deleting a remote, which run rclone and
+  // answer after. `remote` is empty when one is being made.
   void changeRemote(QTcpSocket *socket, const HttpRequest &request,
                     const QString &remote);
+
+  // Runs `then` once rclone has described its backends, or after fifteen
+  // seconds without -- what the settings of a remote are judged by.
+  void afterBackendsAreKnown(QTcpSocket *socket, std::function<void()> then);
 
   // Passes a request for a stream on to the rclone that is serving it, and
   // what rclone says back to whoever asked. See RemoteOps::Stream().

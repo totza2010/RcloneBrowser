@@ -1254,7 +1254,9 @@ private slots:
     // Refused: no name, a bad one, one taken, a setting not offered yet.
     QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"\"}")), 400);
     QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"a:b\"}")), 400);
-    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"fake\"}")), 409);
+    // Its own name is no change at all. (A name another remote has is
+    // refused: see aRemoteCanBeMadeAndChanged.)
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken, "{\"name\":\"fake\"}")), 200);
     QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken,
                            "{\"name\":\"x\",\"chunk_size\":\"1Gi\"}")), 400);
     QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/nothing/config", mToken,
@@ -1262,6 +1264,68 @@ private slots:
 
     qunsetenv("FAKE_RCLONE_RECORD");
     ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  // A remote made, and its settings changed, through rclone and nothing else.
+  void aRemoteCanBeMadeAndChanged() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir scratch;
+    const QString record = scratch.filePath(QStringLiteral("said.txt"));
+    qputenv("FAKE_RCLONE_RECORD", record.toLocal8Bit());
+    const auto said = [&record]() {
+      QFile file(record);
+      file.open(QIODevice::ReadOnly);
+      return file.readAll().split('\n');
+    };
+
+    const QByteArray made = send(
+        "POST", "/api/v1/remotes", mToken,
+        "{\"name\":\"fresh\",\"type\":\"fake\",\"settings\":{\"access_token\":\"T\","
+        "\"chunk_size\":\"2Gi\",\"pass\":\"typed\"}}");
+    QCOMPARE(statusOf(made), 201);
+    QList<QByteArray> create = said().at(0).split('\x1f');
+    QCOMPARE(create.mid(0, 3), (QList<QByteArray>{"create", "fresh", "fake"}));
+    QVERIFY(create.contains("pass=typed"));
+    // Obscured by rclone, as typed.
+    QVERIFY(create.contains("--obscure"));
+    QVERIFY(create.contains("--non-interactive"));
+
+    // What the backend has, and nothing else; what it requires.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"x\",\"type\":\"fake\",\"settings\":{\"access_token\":\"T\","
+                           "\"--config\":\"/etc/x\"}}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"x\",\"type\":\"fake\",\"settings\":{\"chunk_size\":\"1Gi\"}}")),
+             400); // access_token is required
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"x\",\"type\":\"nothing\",\"settings\":{}}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"fake\",\"type\":\"fake\",\"settings\":{\"access_token\":\"T\"}}")),
+             409); // taken
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", mToken,
+                           "{\"name\":\"x\",\"type\":\"fake\",\"color\":\"red\"}")),
+             400);
+
+    // Changed: only what is given, through rclone config update.
+    const QByteArray changed = send("PUT", "/api/v1/remotes/fake/config", mToken,
+                                    "{\"settings\":{\"page_size\":\"50\"}}");
+    QCOMPARE(statusOf(changed), 200);
+    const QList<QByteArray> update = said().last().isEmpty()
+                                         ? said().at(said().size() - 2).split('\x1f')
+                                         : said().last().split('\x1f');
+    QCOMPARE(update.mid(0, 3), (QList<QByteArray>{"update", "fake", "page_size=50"}));
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/fake/config", mToken,
+                           "{\"settings\":{\"nonsense\":\"1\"}}")),
+             400);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/remotes/nothing/config", mToken,
+                           "{\"settings\":{\"page_size\":\"1\"}}")),
+             404);
+
+    // Not without being the owner.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes", QByteArray(), "{}")), 401);
+    qunsetenv("FAKE_RCLONE_RECORD");
   }
 
   void aRemoteIsNotDeletedFromUnderItsTasks() {

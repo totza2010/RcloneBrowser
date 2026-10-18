@@ -90,7 +90,39 @@ struct RemoteChange {
   QString code;
   QString why;
   QStringList tasks; // the tasks it concerns: changed, or in the way
+  // Done, but rclone would have gone on to ask this: an option's name.
+  // rclone asks a remote that signs in with a browser whether to refresh
+  // its token after a change, and that is not something to answer here.
+  QString asks;
 };
+
+// Whether a kind of remote signs in through a web browser (OAuth): it has a
+// "token" that rclone gets by sending somebody to a sign-in page. Making
+// one of these needs that step, which is R5; changing one does not.
+bool SignsInWithBrowser(const Provider &provider);
+
+// What is wrong with a set of settings for this backend, or empty. Only
+// options the backend has, because rclone itself takes any key and writes
+// it into the file; no new lines in a value, because the file is lines; true
+// or false for a yes-or-no option; and, when `creating`, every option the
+// backend calls required.
+QString WhyNotSettings(const Provider &provider, const QJsonObject &settings,
+                       bool creating);
+
+// Makes a remote: "rclone config create <name> <type> k=v ...
+// --non-interactive --obscure", passwords given as typed and obscured by
+// rclone. Refused for a name that is taken or not a name, a kind rclone does
+// not have, one that signs in with a browser, or settings that cannot be.
+// The backends must have been read (RcloneConfigRegistry::isLoaded).
+void CreateRemote(QObject *context, const QString &name, const QString &type,
+                  const QJsonObject &settings,
+                  std::function<void(const RemoteChange &)> done);
+
+// Changes some of a remote's settings: "rclone config update". Only what is
+// given changes; a secret that is not given is kept as it is.
+void UpdateRemote(QObject *context, const QString &name,
+                  const QJsonObject &settings,
+                  std::function<void(const RemoteChange &)> done);
 
 // Renames a remote. rclone has no command for it, so it is made again under
 // the new name with exactly what it has -- passwords passed as they are

@@ -318,6 +318,253 @@ void RenameRemote(QObject *context, const QString &from, const QString &to,
       });
 }
 
+bool SignsInWithBrowser(const Provider &provider) {
+  for (const ProviderOption &option : provider.options) {
+    if (option.name == QLatin1String("token")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+
+QString settingText(const QJsonValue &value) {
+  if (value.isBool()) {
+    return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+  }
+  if (value.isDouble()) {
+    return QString::number(value.toDouble(), 'g', 15);
+  }
+  return value.toString();
+}
+
+QStringList settingArgs(const QJsonObject &settings) {
+  QStringList args;
+  for (auto it = settings.begin(); it != settings.end(); ++it) {
+    args << it.key() + QLatin1Char('=') + settingText(it.value());
+  }
+  return args;
+}
+
+// What rclone said back to a non-interactive create or update: a question
+// it would have gone on to ask, if any.
+QString questionIn(const QString &said) {
+  const QJsonObject answer = QJsonDocument::fromJson(said.toUtf8()).object();
+  if (answer.value(QStringLiteral("State")).toString().isEmpty()) {
+    return QString();
+  }
+  return answer.value(QStringLiteral("Option")).toObject()
+      .value(QStringLiteral("Name")).toString();
+}
+
+void runConfigWhole(QObject *context, const QStringList &args,
+                    std::function<void(bool ok, const QString &said)> done) {
+  auto *process = new QProcess(context);
+  process->setProcessChannelMode(QProcess::SeparateChannels);
+  UseRclonePassword(process);
+  QObject::connect(
+      process,
+      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
+          &QProcess::finished),
+      context, [process, done](int status, QProcess::ExitStatus) {
+        process->deleteLater();
+        const QString out = QString::fromUtf8(process->readAllStandardOutput());
+        const QString err = QString::fromUtf8(process->readAllStandardError())
+                                .trimmed().section(QLatin1Char('\n'), -1);
+        done(status == 0, status == 0 ? out : err);
+      });
+  QObject::connect(process, &QProcess::errorOccurred, context,
+                   [process, done](QProcess::ProcessError error) {
+                     if (error != QProcess::FailedToStart) {
+                       return;
+                     }
+                     process->deleteLater();
+                     done(false, QStringLiteral("rclone could not be started"));
+                   });
+  process->start(GetRclone(), QStringList{QStringLiteral("config")} + args +
+                                  GetRcloneConf(),
+                 QIODevice::ReadOnly);
+}
+
+} // namespace
+
+QString WhyNotSettings(const Provider &provider, const QJsonObject &settings,
+                       bool creating) {
+  for (auto it = settings.begin(); it != settings.end(); ++it) {
+    const ProviderOption *option = nullptr;
+    for (const ProviderOption &each : provider.options) {
+      if (each.name == it.key()) {
+        option = &each;
+      }
+    }
+    if (option == nullptr) {
+      return QStringLiteral("\"%1\" is not a setting a %2 remote has")
+          .arg(it.key(), provider.name);
+    }
+    const QJsonValue value = it.value();
+    if (!value.isString() && !value.isBool() && !value.isDouble()) {
+      return QStringLiteral("\"%1\" has to be text, a number, or true or false")
+          .arg(it.key());
+    }
+    const QString text = settingText(value);
+    if (text.contains(QLatin1Char('\n')) || text.contains(QLatin1Char('\r'))) {
+      return QStringLiteral("\"%1\" cannot be more than one line").arg(it.key());
+    }
+    if (option->type == QLatin1String("bool") && text != QLatin1String("true") &&
+        text != QLatin1String("false") && !text.isEmpty()) {
+      return QStringLiteral("\"%1\" has to be true or false").arg(it.key());
+    }
+    if (option->exclusive && !text.isEmpty()) {
+      bool listed = false;
+      for (const auto &example : option->examples) {
+        listed = listed || example.first == text;
+      }
+      if (!listed) {
+        return QStringLiteral("\"%1\" has to be one of the values listed for it")
+            .arg(it.key());
+      }
+    }
+  }
+  if (creating) {
+    for (const ProviderOption &option : provider.options) {
+      if (option.required && option.hide == 0 &&
+          settingText(settings.value(option.name)).isEmpty()) {
+        return QStringLiteral("\"%1\" is needed for a %2 remote")
+            .arg(option.name, provider.name);
+      }
+    }
+  }
+  return QString();
+}
+
+void CreateRemote(QObject *context, const QString &name, const QString &type,
+                  const QJsonObject &settings,
+                  std::function<void(const RemoteChange &)> done) {
+  const QString bad = WhyNotARemoteName(name);
+  if (!bad.isEmpty()) {
+    done(refused(QStringLiteral("bad_name"), bad));
+    return;
+  }
+  const Provider *provider =
+      FindProvider(RcloneConfigRegistry::instance().providers(), type);
+  if (provider == nullptr) {
+    done(refused(QStringLiteral("bad_name"),
+                 QStringLiteral("this rclone has no kind of remote called \"%1\"")
+                     .arg(type)));
+    return;
+  }
+  if (SignsInWithBrowser(*provider)) {
+    done(refused(QStringLiteral("signs_in_with_browser"),
+                 QStringLiteral("a %1 remote signs in through a web browser, "
+                                "which cannot be done from here yet; make it "
+                                "with rclone config")
+                     .arg(provider->description.isEmpty() ? type
+                                                          : provider->description)));
+    return;
+  }
+  const QString wrong = WhyNotSettings(*provider, settings, true);
+  if (!wrong.isEmpty()) {
+    done(refused(QStringLiteral("bad_name"), wrong));
+    return;
+  }
+
+  RcloneConfigRegistry::instance().readDump(
+      context, [context, name, type, settings, done](bool ok, const QJsonObject &dump,
+                                                     const QString &why) {
+        if (!ok) {
+          done(refused(QStringLiteral("config_unreadable"), why));
+          return;
+        }
+        if (dump.contains(name)) {
+          done(refused(QStringLiteral("taken"),
+                       QStringLiteral("there is already a remote called %1").arg(name)));
+          return;
+        }
+        qCDebug(rbRemote) << "making remote" << name << "of type" << type;
+        runConfigWhole(context,
+                       QStringList{QStringLiteral("create"), name, type} +
+                           settingArgs(settings) +
+                           QStringList{QStringLiteral("--non-interactive"),
+                                       QStringLiteral("--obscure")},
+                       [done](bool made, const QString &said) {
+                         if (!made) {
+                           done(refused(QStringLiteral("rclone_refused"), said));
+                           return;
+                         }
+                         RemoteChange change;
+                         change.ok = true;
+                         change.asks = questionIn(said);
+                         RemoteRegistry::instance().refresh();
+                         done(change);
+                       });
+      });
+}
+
+void UpdateRemote(QObject *context, const QString &name,
+                  const QJsonObject &settings,
+                  std::function<void(const RemoteChange &)> done) {
+  if (settings.isEmpty()) {
+    RemoteChange nothing;
+    nothing.ok = true;
+    done(nothing);
+    return;
+  }
+  if (aJobIsUsing(name)) {
+    done(refused(QStringLiteral("in_use"),
+                 QStringLiteral("a job is using %1: right now; let it finish "
+                                "or stop it first")
+                     .arg(name)));
+    return;
+  }
+  RcloneConfigRegistry::instance().readDump(
+      context, [context, name, settings, done](bool ok, const QJsonObject &dump,
+                                               const QString &why) {
+        if (!ok) {
+          done(refused(QStringLiteral("config_unreadable"), why));
+          return;
+        }
+        if (!dump.contains(name)) {
+          done(refused(QStringLiteral("no_such_remote"),
+                       QStringLiteral("there is no remote called %1").arg(name)));
+          return;
+        }
+        const QString type =
+            dump.value(name).toObject().value(QStringLiteral("type")).toString();
+        const Provider *provider =
+            FindProvider(RcloneConfigRegistry::instance().providers(), type);
+        if (provider == nullptr) {
+          done(refused(QStringLiteral("bad_name"),
+                       QStringLiteral("this rclone does not describe %1 remotes, "
+                                      "so their settings cannot be checked; use "
+                                      "rclone config")
+                           .arg(type)));
+          return;
+        }
+        const QString wrong = WhyNotSettings(*provider, settings, false);
+        if (!wrong.isEmpty()) {
+          done(refused(QStringLiteral("bad_name"), wrong));
+          return;
+        }
+        qCDebug(rbRemote) << "changing remote" << name << settings.keys();
+        runConfigWhole(context,
+                       QStringList{QStringLiteral("update"), name} +
+                           settingArgs(settings) +
+                           QStringList{QStringLiteral("--non-interactive"),
+                                       QStringLiteral("--obscure")},
+                       [done](bool changed, const QString &said) {
+                         if (!changed) {
+                           done(refused(QStringLiteral("rclone_refused"), said));
+                           return;
+                         }
+                         RemoteChange change;
+                         change.ok = true;
+                         change.asks = questionIn(said);
+                         done(change);
+                       });
+      });
+}
+
 void DeleteRemote(QObject *context, const QString &name, bool evenIfTasksUseIt,
                   std::function<void(const RemoteChange &)> done) {
   if (aJobIsUsing(name)) {

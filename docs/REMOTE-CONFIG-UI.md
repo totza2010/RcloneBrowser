@@ -126,7 +126,29 @@ rclone config providers      # JSON ของทุก backend และทุ�
 แก้สองชั้น: (1) **API รอให้ rclone อธิบาย backend ก่อนตอบ** (สูงสุด 15 วินาที) · (2) **ถ้าไม่มีคำอธิบายของ backend เลย
 ซ่อนทุกค่า** — ชื่ออย่างเดียวไม่พอจะบอกว่าอะไรเป็นความลับ · test ใหม่ถามเป็นอย่างแรกหลังเริ่ม และโปรแกรมจริงตอบใน 0.8 วินาทีโดยซ่อน api_host
 
-**ขั้นต่อไป**: R4 สร้าง/แก้ backend ที่ไม่ต้อง OAuth (ฟอร์มจาก `/providers/{name}`) → R5 OAuth
+## ทำแล้ว (2026-10-19) — R4 สร้าง · แก้
+
+ลองกับไฟล์ config ทิ้งได้ก่อน: **rclone รับ key อะไรก็ได้แล้วเขียนลงไฟล์** (`nonsense=1` ถูกบันทึก) และ**ไม่บังคับช่อง required**
+— จึงต้องตรวจเอง · drive แบบ `--non-interactive` ถูกบันทึกทั้งที่ยังไม่มี token แล้วถามต่อว่าจะเปิด browser ไหม ·
+`config update` ของ drive ไม่ทำให้ token หาย (เทียบ hash ก่อน/หลังบนสำเนา config จริง) แต่ตอบเป็นคำถาม `config_refresh_token`
+
+- **`CreateRemote`** — `config create <ชื่อ> <type> k=v… --non-interactive --obscure` (รหัสผ่านส่งตามที่พิมพ์ rclone obscure ให้)
+- **`UpdateRemote`** — `config update <ชื่อ> k=v… --non-interactive --obscure` เฉพาะค่าที่ส่งมา · ค่าลับที่ไม่ได้ส่ง = คงเดิม
+- **`WhyNotSettings`** — เฉพาะ option ที่ backend มี (กันการยัด key แปลกหรือ `--config` ลงไฟล์) · ห้ามขึ้นบรรทัดใหม่ ·
+  bool ต้อง true/false · ตัวเลือกแบบ exclusive ต้องอยู่ในรายการ · สร้างใหม่ต้องมีทุกช่อง required
+- **ชนิดที่ sign in ผ่าน browser (มี option `token`) สร้างไม่ได้จนกว่า R5** — 409 `signs_in_with_browser` · แต่**แก้ได้**
+- คำถามที่ rclone จะถามต่อ (เช่น refresh token หลังแก้ drive) ถูกบอกในคำตอบเป็น `asks` ไม่ถือเป็นความล้มเหลว
+- **API**: `POST /remotes {name, type, settings}` → 201 · `PUT /remotes/{name}/config {settings?, name?}` (settings ก่อน แล้วเปลี่ยนชื่อ) · admin
+  ทั้งคู่รอให้ rclone อธิบาย backend ก่อน (`afterBackendsAreKnown`) เหมือนการอ่าน
+- **หน้าเว็บ**: การ์ด **+ New remote** ท้ายรายการรีโหมด → เลือกชนิด (ค้นหาได้) · ตั้งชื่อ · ฟอร์มสร้างจาก `/providers/{type}`:
+  bool = checkbox · ตัวเลือก exclusive = รายการ · มีตัวอย่าง = ช่องที่มีคำแนะนำ · รหัสผ่าน/sensitive = ช่องรหัส (เว้นว่าง = คงเดิม) ·
+  advanced ซ่อนหลังลิงก์ (เปิดเองถ้ารีโหมดตั้งค่า advanced ไว้) · กล่อง Settings มีปุ่ม **Edit settings…** · ส่งเฉพาะค่าที่เปลี่ยน
+- **ตรวจกับโปรแกรมจริง** (สำรอง config ไว้ก่อน): sftp ที่ขาด host → 400 · drive → 409 · sftp ครบ → 201 รหัสผ่านถูก obscure ·
+  แก้ port → รหัสผ่านคงเดิม · ลบ → **รีโหมดของผู้ใช้เหมือนเดิมทุกค่า**
+- ⚠ ยังไม่ได้ดูฟอร์มบนหน้าเว็บด้วยตา · ค่าลับอยู่ในบรรทัดคำสั่งของ rclone ชั่วครู่ (เหมือน R3)
+
+**ขั้นต่อไป**: R5 OAuth — ทางที่ใช้ได้ทั้งบนเครื่องและใน Docker คือให้ผู้ใช้รัน `rclone authorize <type>` บนเครื่องที่มี browser
+แล้ววาง token ที่ได้ลงในหน้าเว็บ (rclone รองรับอยู่แล้ว) · ทางที่สะดวกกว่า (เปิด browser ให้เอง) ใช้ได้เฉพาะเมื่อ browser อยู่เครื่องเดียวกับโปรแกรม
 
 **ตัดสินแล้วระหว่างทาง**: การเขียนจะเรียก `rclone config create/update/delete` เสมอ ไม่เขียนไฟล์เอง
 (rclone รู้เรื่อง obscure และรหัสผ่านของ config ที่เข้ารหัส)
