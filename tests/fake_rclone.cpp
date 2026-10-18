@@ -32,6 +32,42 @@
 int main(int argc, char *argv[]) {
   const char *command = argc > 1 ? argv[1] : "";
 
+  // config providers  one backend, "fake", with a sensitive option, a
+  //                   password, an ordinary one and an advanced one
+  // config dump       the one remote, secrets and all, as rclone gives it
+  if (std::strcmp(command, "config") == 0 && argc > 2) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "Failed to load config file: not this time\n");
+      return 1;
+    }
+    if (std::strcmp(argv[2], "providers") == 0) {
+      std::printf(
+          "[{\"Name\":\"fake\",\"Description\":\"A stand-in\",\"Prefix\":\"fake\","
+          "\"Options\":["
+          "{\"Name\":\"access_token\",\"Help\":\"Access Token Cookie\",\"Type\":\"string\","
+          "\"DefaultStr\":\"\",\"Required\":true,\"IsPassword\":false,\"Sensitive\":true,"
+          "\"Advanced\":false,\"Hide\":0,\"Exclusive\":false,\"Examples\":null},"
+          "{\"Name\":\"chunk_size\",\"Help\":\"Chunk Size\\nLonger words.\",\"Type\":\"SizeSuffix\","
+          "\"DefaultStr\":\"512Mi\",\"Required\":false,\"IsPassword\":false,\"Sensitive\":false,"
+          "\"Advanced\":false,\"Hide\":0,\"Exclusive\":false,"
+          "\"Examples\":[{\"Value\":\"1Gi\",\"Help\":\"bigger\"}]},"
+          "{\"Name\":\"pass\",\"Help\":\"Password\",\"Type\":\"string\",\"DefaultStr\":\"\","
+          "\"Required\":false,\"IsPassword\":true,\"Sensitive\":false,\"Advanced\":false,"
+          "\"Hide\":0,\"Exclusive\":false,\"Examples\":null},"
+          "{\"Name\":\"page_size\",\"Help\":\"Page size\",\"Type\":\"int\",\"DefaultStr\":\"500\","
+          "\"Required\":false,\"IsPassword\":false,\"Sensitive\":false,\"Advanced\":true,"
+          "\"Hide\":0,\"Exclusive\":false,\"Examples\":null}]}]\n");
+      return 0;
+    }
+    if (std::strcmp(argv[2], "dump") == 0) {
+      std::printf("{\"fake\":{\"type\":\"fake\",\"access_token\":\"SECRET-TOKEN\","
+                  "\"chunk_size\":\"1Gi\",\"pass\":\"OBSCURED-PASS\","
+                  "\"page_size\":\"10\",\"client_secret\":\"ALSO-SECRET\","
+                  "\"region\":\"home\"}}\n");
+      return 0;
+    }
+  }
+
   if (std::strcmp(command, "listremotes") == 0) {
     std::printf("fake: fake\n");
     return 0;

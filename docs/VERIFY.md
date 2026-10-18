@@ -1768,6 +1768,20 @@ marker: `ApiAuth::Keys` · `ApiRoutes` scope · `/api/v1/keys` · กล่อ�
 
 ---
 
+### V-45 · ดูการตั้งค่าของรีโหมดจากหน้าเว็บ (R1 · R2)
+
+marker: `src/rclone_config.*` · `GET /api/v1/remotes/{name}/config` · ปุ่ม Settings
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | หน้าเว็บ · เลือกรีโหมด teldrive · **Settings** | ตาราง: chunk_size · upload_concurrency ฯลฯ พร้อมคำอธิบาย · access_token กับ api_host ขึ้นว่า "set — not shown" | 🟨 API ผ่าน | AI / 2026-10-19 |
+| 2 | Settings ของ drive / onedrive / sftp | token · client_secret · pass ไม่แสดงค่า | ✅ **PASS** (API) | AI / 2026-10-19 · 7 รีโหมดจริง ไม่มีค่าลับหลุด |
+| 3 | เปิด DevTools → Network ดูคำตอบของ /config | ไม่มีค่าลับในคำตอบดิบ | ✅ **PASS** (API) | AI / 2026-10-19 |
+| 4 | แก้ rclone.conf ข้างนอกแล้วกด Settings อีกครั้ง | เห็นค่าใหม่ (อ่านใหม่ทุกครั้ง) | ⬜ | |
+| 5 | sign in ด้วย key ระดับ write แล้วกด Settings | ถูกปฏิเสธ (ต้องเป็น admin) | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+
+---
+
 ## วิธีเพิ่มรายการใหม่
 
 เมื่อแก้อะไรที่ต้องมีคนทดสอบ ให้ทำสองอย่างคู่กัน:

@@ -2387,6 +2387,49 @@ $("remote-mount").addEventListener("click", () => {
   });
 });
 
+// ---- how a remote is set up -------------------------------------------------
+//
+// Read-only for now: what the remote is set up with, from rclone.conf, with
+// every secret left out by the daemon before it is sent. Changing it comes
+// next (docs/REMOTE-CONFIG-UI.md, R3 and R4).
+
+$("remote-settings").addEventListener("click", async () => {
+  const remote = browsing.remote;
+  showResult("Settings of " + remote + ":", "<p>reading…</p>");
+  let answer;
+  try {
+    answer = await api("GET", "/remotes/" + encodeURIComponent(remote) + "/config");
+  } catch (e) {
+    $("result-body").innerHTML = "<p>could not reach the daemon</p>";
+    return;
+  }
+  if (answer.status !== 200) {
+    $("result-body").innerHTML = '<p class="error">' + esc(reasonFrom(answer)) + "</p>";
+    return;
+  }
+  const c = answer.data;
+  const row = (s) =>
+    "<tr" + (s.advanced ? ' class="advanced"' : "") + ">" +
+      "<td><code>" + esc(s.name) + "</code>" +
+        (s.help ? '<br><span class="muted">' + esc(s.help) + "</span>" : "") + "</td>" +
+      "<td>" + (s.secret
+        ? '<span class="muted">set — not shown</span>'
+        : esc(s.value) +
+          (s.default && s.value === s.default ? ' <span class="muted">(the default)</span>' : "")) +
+      "</td>" +
+      "<td>" + (s.advanced ? '<span class="tag">advanced</span>' : "") +
+        (s.unknown ? '<span class="tag">not described by this rclone</span>' : "") + "</td>" +
+    "</tr>";
+  $("result-body").innerHTML =
+    "<p><b>" + esc(c.type) + "</b>" + (c.description ? " — " + esc(c.description) : "") + "</p>" +
+    (c.described ? "" : '<p class="muted">The kinds of remote have not been read from rclone yet, ' +
+      "so help and defaults are missing; secrets are still kept out by their names. Ask again in a moment.</p>") +
+    "<table><thead><tr><th>Setting</th><th>Value</th><th></th></tr></thead><tbody>" +
+      (c.settings || []).map(row).join("") + "</tbody></table>" +
+    '<p class="muted">Passwords, tokens and anything rclone marks sensitive are never sent to this page. ' +
+    "Changing a remote from here is not done yet; for now, rclone config.</p>";
+});
+
 // ---- streaming --------------------------------------------------------------
 //
 // A file of a remote, played here or given an address a player can open.

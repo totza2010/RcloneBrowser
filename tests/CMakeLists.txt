@@ -50,6 +50,7 @@ rb_add_test(test_local_files)
 rb_add_test(test_task_json)
 rb_add_test(test_extra_flags)
 rb_add_test(test_schedule_json)
+rb_add_test(test_rclone_config)
 
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.

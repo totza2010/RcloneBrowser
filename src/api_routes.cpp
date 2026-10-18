@@ -308,6 +308,23 @@ QList<Route> build() {
         "", R"({"path":"films/a.mkv","isDir":false})",
         "202: started, with the path; 409: refused"),
 
+      r("GET", "/api/v1/remotes/{name}/config", kRemotes,
+        "What a remote is set up with",
+        "Each setting it has, in the order its backend lists them, with help "
+        "and default. The value of anything that is a password, sensitive, or "
+        "looks like a secret is left out -- it is said to be set, and no more. "
+        "Read from rclone.conf each time.",
+        "", "", "200: the settings; 404: no such remote; 502: rclone could "
+                "not read its configuration"),
+      r("GET", "/api/v1/providers", kRemotes, "The kinds of remote there are",
+        "Every backend the rclone on this machine has, a fork's included. "
+        "\"loaded\": false means rclone has not answered yet."),
+      r("GET", "/api/v1/providers/{name}", kRemotes,
+        "Everything a kind of remote can be set up with",
+        "Its options: help, type, default, and whether each is required, a "
+        "password, sensitive or advanced. What a form for it is made from.",
+        "", "", "200: the backend; 404: no such backend"),
+
       // ---- this machine ----------------------------------------------------
       r("GET", "/api/v1/local/ls", kLocal,
         "What is in a folder of the machine the program runs on",
@@ -358,7 +375,10 @@ QString scopeOf(const Route &route) {
     return QString();
   }
   if (route.method == QLatin1String("GET")) {
-    return route.path.startsWith(QLatin1String("/api/v1/keys"))
+    // The keys, and how a remote is set up: the owner's business, even
+    // with the secrets taken out.
+    return route.path.startsWith(QLatin1String("/api/v1/keys")) ||
+                   route.path == QLatin1String("/api/v1/remotes/{name}/config")
                ? QStringLiteral("admin")
                : QStringLiteral("read");
   }

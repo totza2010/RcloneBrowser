@@ -1,5 +1,6 @@
 #include "api_auth.h"
 #include "api_routes.h"
+#include "rclone_config.h"
 #include "app_core.h"
 #include "api_server.h"
 #include "database.h"
@@ -1148,6 +1149,61 @@ private slots:
     QCOMPARE(statusOf(ask("DELETE", "/api/v1/keys/nothing", mToken)), 404);
 
     ListOfJobOptions::getInstance()->Forget(task);
+    ApiAuth::Keys::instance().forgetAll();
+  }
+
+  // ---- how a remote is set up ----------------------------------------------
+
+  void aRemotesSettingsAreShownWithTheSecretsLeftOut() {
+    QVERIFY(useFakeRclone(1));
+    // The backends first, as the page would: asked, and then there.
+    ask("GET", "/api/v1/providers", mToken);
+    QTRY_VERIFY_WITH_TIMEOUT(RcloneConfigRegistry::instance().isLoaded(), 10000);
+
+    const QByteArray kinds = ask("GET", "/api/v1/providers", mToken);
+    QCOMPARE(statusOf(kinds), 200);
+    QCOMPARE(bodyOf(kinds).object().value(QStringLiteral("providers")).toArray()
+                 .at(0).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("fake"));
+    const QByteArray kind = ask("GET", "/api/v1/providers/fake", mToken);
+    QCOMPARE(statusOf(kind), 200);
+    QCOMPARE(bodyOf(kind).object().value(QStringLiteral("options")).toArray().size(), 4);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/providers/nothing", mToken)), 404);
+
+    const QByteArray reply = ask("GET", "/api/v1/remotes/fake/config", mToken);
+    QCOMPARE(statusOf(reply), 200);
+    QVERIFY2(!reply.contains("SECRET") && !reply.contains("OBSCURED"),
+             reply.constData());
+    const QJsonObject config = bodyOf(reply).object();
+    QCOMPARE(config.value(QStringLiteral("type")).toString(), QStringLiteral("fake"));
+    QCOMPARE(config.value(QStringLiteral("described")).toBool(), true);
+    QStringList shown;
+    for (const QJsonValue &value : config.value(QStringLiteral("settings")).toArray()) {
+      const QJsonObject s = value.toObject();
+      shown << s.value(QStringLiteral("name")).toString() +
+                   (s.value(QStringLiteral("secret")).toBool()
+                        ? QStringLiteral("=*")
+                        : QLatin1Char('=') + s.value(QStringLiteral("value")).toString());
+    }
+    QCOMPARE(shown, (QStringList{QStringLiteral("access_token=*"),
+                                 QStringLiteral("chunk_size=1Gi"),
+                                 QStringLiteral("pass=*"),
+                                 QStringLiteral("page_size=10"),
+                                 QStringLiteral("client_secret=*"),
+                                 QStringLiteral("region=home")}));
+
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/nothing/config", mToken)), 404);
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/config", mToken)), 502);
+    qunsetenv("FAKE_RCLONE_FAIL");
+
+    // The owner's business, even with the secrets out.
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray made = send("POST", "/api/v1/keys", mToken,
+                                 "{\"name\":\"looker\",\"scope\":\"write\"}");
+    const QByteArray key = bodyOf(made).object().value(QStringLiteral("key")).toString().toUtf8();
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/config", key)), 403);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/providers", key)), 200);
     ApiAuth::Keys::instance().forgetAll();
   }
 

@@ -12,6 +12,7 @@
 #include "list_of_job_options.h"
 #include "local_files.h"
 #include "remote_ops.h"
+#include "rclone_config.h"
 #include "rclone_flags.h"
 #include "remote_registry.h"
 #include "run_history.h"
@@ -33,6 +34,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -1386,6 +1388,58 @@ void ApiServer::relayStream(QTcpSocket *client, const HttpRequest &request) {
   upstream->connectToHost(QHostAddress::LocalHost, serving->streamPort());
 }
 
+void ApiServer::remoteConfig(QTcpSocket *socket, const QString &remote) {
+  socket->setProperty("stream", true); // answered once, when rclone has
+  RcloneConfigRegistry &config = RcloneConfigRegistry::instance();
+  config.ensureLoaded();
+
+  QPointer<QTcpSocket> held(socket);
+  config.readDump(socket, [held, remote](bool ok, const QJsonObject &dump,
+                                         const QString &why) {
+    if (!held) {
+      return;
+    }
+    const auto answer = [held](int status, const QJsonObject &object) {
+      held->write(FormatHttpResponse(status, toJson(object)));
+      held->flush();
+      held->disconnectFromHost();
+    };
+    if (!ok) {
+      QJsonObject object;
+      object.insert(QStringLiteral("error"), why);
+      object.insert(QStringLiteral("code"), QStringLiteral("config_unreadable"));
+      answer(502, object);
+      return;
+    }
+    if (!dump.contains(remote)) {
+      QJsonObject object;
+      object.insert(QStringLiteral("error"), QStringLiteral("no such remote"));
+      object.insert(QStringLiteral("code"), QStringLiteral("no_such_remote"));
+      answer(404, object);
+      return;
+    }
+
+    // The section holds every secret the remote has. Only what
+    // DescribeSettings makes of it leaves this function.
+    const QJsonObject section = dump.value(remote).toObject();
+    const QString type = section.value(QStringLiteral("type")).toString();
+    const Provider *provider =
+        FindProvider(RcloneConfigRegistry::instance().providers(), type);
+
+    QJsonObject object;
+    object.insert(QStringLiteral("name"), remote);
+    object.insert(QStringLiteral("type"), type);
+    object.insert(QStringLiteral("description"),
+                  provider != nullptr ? provider->description : QString());
+    // False while the backends have not been read yet: then nothing is
+    // known about which settings are secret beyond their names, and help and
+    // defaults are missing. Asking again shortly gives the whole answer.
+    object.insert(QStringLiteral("described"), provider != nullptr);
+    object.insert(QStringLiteral("settings"), DescribeSettings(section, provider));
+    answer(200, object);
+  });
+}
+
 void ApiServer::openEventStream(QTcpSocket *socket) {
   socket->setProperty("stream", true);
 
@@ -1771,6 +1825,21 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
       }
       listDirectory(socket, asked, parts.at(1),
                     asked.queryValue(QStringLiteral("path")));
+      return;
+    }
+  }
+
+  // Nor this: how a remote is set up is read from rclone each time.
+  {
+    const QStringList parts = segmentsOf(asked.path);
+    if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("config")) {
+      if (headOnly) {
+        reply(FormatHttpResponse(200, QByteArray()));
+        return;
+      }
+      remoteConfig(socket, parts.at(1));
       return;
     }
   }
@@ -2555,6 +2624,68 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
   if (path == QLatin1String("/api/v1/ping")) {
     QJsonObject object;
     object.insert(QStringLiteral("ok"), true);
+    *body = toJson(object);
+    return 200;
+  }
+
+  // The kinds of remote there are, and what each can be set up with.
+  if (path == QLatin1String("/api/v1/providers") ||
+      path.startsWith(QLatin1String("/api/v1/providers/"))) {
+    RcloneConfigRegistry &config = RcloneConfigRegistry::instance();
+    config.ensureLoaded();
+
+    if (path == QLatin1String("/api/v1/providers")) {
+      QJsonArray array;
+      for (const Provider &provider : config.providers()) {
+        QJsonObject object;
+        object.insert(QStringLiteral("name"), provider.name);
+        object.insert(QStringLiteral("description"), provider.description);
+        object.insert(QStringLiteral("prefix"), provider.prefix);
+        object.insert(QStringLiteral("options"), int(provider.options.size()));
+        array.append(object);
+      }
+      QJsonObject object;
+      object.insert(QStringLiteral("loaded"), config.isLoaded());
+      object.insert(QStringLiteral("providers"), array);
+      *body = toJson(object);
+      return 200;
+    }
+
+    const Provider *provider = FindProvider(
+        config.providers(), path.mid(QStringLiteral("/api/v1/providers/").size()));
+    if (provider == nullptr) {
+      *body = problem(config.isLoaded()
+                          ? QStringLiteral("no such kind of remote")
+                          : QStringLiteral("the kinds of remote have not been "
+                                           "read from rclone yet"));
+      return 404;
+    }
+    QJsonArray options;
+    for (const ProviderOption &option : provider->options) {
+      QJsonObject o;
+      o.insert(QStringLiteral("name"), option.name);
+      o.insert(QStringLiteral("help"), option.help);
+      o.insert(QStringLiteral("type"), option.type);
+      o.insert(QStringLiteral("default"), option.defaultValue);
+      o.insert(QStringLiteral("required"), option.required);
+      o.insert(QStringLiteral("password"), option.isPassword);
+      o.insert(QStringLiteral("sensitive"), option.sensitive);
+      o.insert(QStringLiteral("advanced"), option.advanced);
+      o.insert(QStringLiteral("exclusive"), option.exclusive);
+      o.insert(QStringLiteral("hidden"), option.hide != 0);
+      QJsonArray examples;
+      for (const auto &example : option.examples) {
+        examples.append(QJsonObject{{QStringLiteral("value"), example.first},
+                                    {QStringLiteral("help"), example.second}});
+      }
+      o.insert(QStringLiteral("examples"), examples);
+      options.append(o);
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("name"), provider->name);
+    object.insert(QStringLiteral("description"), provider->description);
+    object.insert(QStringLiteral("prefix"), provider->prefix);
+    object.insert(QStringLiteral("options"), options);
     *body = toJson(object);
     return 200;
   }

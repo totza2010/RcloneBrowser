@@ -518,6 +518,8 @@ input.bad, select.bad { border-color: var(--bad); }
 .key-made input { font-family: Consolas, "Courier New", monospace; width: calc(100% - 80px); }
 .tag.scope { color: var(--muted); }
 
+#result-body tr.advanced td:first-child code { color: var(--muted); }
+
 /* ---- schedules --------------------------------------------------------- */
 
 .sched-daily { align-items: center; display: flex; flex-wrap: wrap; gap: 10px 16px; padding-left: 22px; }

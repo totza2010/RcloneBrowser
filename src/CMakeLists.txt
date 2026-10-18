@@ -47,6 +47,7 @@ set(CORE_SOURCE
   list_of_job_options.cpp
   rclone_capabilities.cpp
   rclone_flags.cpp
+  rclone_config.cpp
   task_runner.cpp
   running_job.cpp
   job_registry.cpp
@@ -89,6 +90,7 @@ set(CORE_HEADER
   list_of_job_options.h
   rclone_capabilities.h
   rclone_flags.h
+  rclone_config.h
   task_runner.h
   running_job.h
   job_registry.h
