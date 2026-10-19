@@ -121,8 +121,10 @@ function startTheme() {
 
 // ---- talking to the daemon ------------------------------------------------
 
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const options = { method: method, headers: {} };
+  // Dropped when asked: the daemon stops what it was doing for whoever goes.
+  if (signal) options.signal = signal;
   if (secret) {
     options.headers["Authorization"] = "Bearer " + secret;
   }
@@ -1569,6 +1571,46 @@ function can(feature) {
   return !caps || !caps.known || caps[feature] !== false;
 }
 
+// How full a remote is, asked once while the page is open and shown beside
+// the path. Nothing at all for a backend that cannot say.
+const quotas = {};
+
+// Each answer is a run of "rclone about", and a row in the history: kept
+// for ten minutes in this tab, so opening the page again does not ask again.
+async function readQuota(remote) {
+  const key = "rb.quota." + remote;
+  if (quotas[remote] === undefined) {
+    try {
+      const kept = JSON.parse(sessionStorage.getItem(key) || "null");
+      if (kept && Date.now() - kept.at < 10 * 60 * 1000) quotas[remote] = kept.data;
+    } catch (e) { /* nothing kept */ }
+  }
+  if (quotas[remote] === undefined) {
+    quotas[remote] = null; // being asked
+    const answer = await api("GET", "/remotes/" + encodeURIComponent(remote) + "/about").catch(() => null);
+    quotas[remote] = answer && answer.status === 200 ? answer.data : false;
+    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data: quotas[remote] })); } catch (e) { /* private window */ }
+  }
+  if (remote === browsing.remote) drawQuota();
+}
+
+function drawQuota() {
+  const box = $("remote-quota");
+  const q = quotas[browsing.remote];
+  if (!q || (typeof q.used !== "number" && typeof q.free !== "number")) {
+    box.innerHTML = "";
+    return;
+  }
+  const total = typeof q.total === "number" ? q.total
+    : typeof q.used === "number" && typeof q.free === "number" ? q.used + q.free : 0;
+  const share = total > 0 && typeof q.used === "number" ? Math.min(100, (q.used / total) * 100) : -1;
+  box.innerHTML =
+    (share >= 0 ? '<span class="bar" title="' + share.toFixed(0) + '% used"><span style="width:' + share.toFixed(1) + '%"></span></span>' : "") +
+    "<span>" + (typeof q.used === "number" ? bytes(q.used) + " used" : "") +
+      (total ? " of " + bytes(total) : "") +
+      (typeof q.free === "number" ? " · " + bytes(q.free) + " free" : "") + "</span>";
+}
+
 async function readCapabilities(remote) {
   if (capabilities[remote]) return;
   capabilities[remote] = { known: false };
@@ -1612,6 +1654,8 @@ async function browse(remote, path, fromAddress) {
   if (another) {
     drawCapabilities();
     readCapabilities(remote);
+    drawQuota();
+    if (can("about")) readQuota(remote);
   }
   browsing.path = path || "";
   browsing.chosen = "";
@@ -1737,6 +1781,11 @@ function showResult(title, html) {
 
 // Emptied as well as hidden: a film left in a hidden box goes on playing.
 function closeResult() {
+  // A question still being asked is dropped with its box: rclone is stopped.
+  if (asking) {
+    asking.abort();
+    asking = null;
+  }
   $("resultbox").classList.add("hidden");
   $("result-body").innerHTML = "";
   forgetViewed();
@@ -1845,17 +1894,29 @@ function subject() {
   return entry ? entry.path : browsing.path;
 }
 
+// The question being waited for, so Cancel and closing the box can drop it.
+let asking = null;
+
 async function ask(question, title, path, draw) {
-  showResult(title, '<p class="muted">asking rclone…</p>');
+  if (asking) asking.abort();
+  const mine = new AbortController();
+  asking = mine;
+  showResult(title, '<p class="muted">asking rclone… <button type="button" class="ghost small" ' +
+    'data-ask-cancel="">Cancel</button></p>');
   let answer;
   try {
     answer = await api(
       "GET", "/remotes/" + encodeURIComponent(browsing.remote) + "/" + question +
-        (path === null ? "" : "?path=" + encodeURIComponent(path)));
+        (path === null ? "" : "?path=" + encodeURIComponent(path)), undefined, mine.signal);
   } catch (e) {
+    if (asking === mine) asking = null;
+    // Taken back: the box is already closed, or says so.
+    if (mine.signal.aborted) return;
     showResult(title, '<p class="error">could not reach the daemon</p>');
     return;
   }
+  if (asking === mine) asking = null;
+  if (mine.signal.aborted) return;
   if (answer.status !== 200) {
     // rclone's own words. A backend that cannot report its quota says so
     // here, which is an answer and not a fault.
@@ -4368,6 +4429,7 @@ document.addEventListener("click", async (event) => {
 
   if (d.log) return openLog(d.log);
   if (d.historyOlder !== undefined) return historyOlder();
+  if (d.askCancel !== undefined) return closeResult();
   if (d.taskOpen) return openTask(d.taskOpen);
   if (d.jobOpen) return openJob(d.jobOpen);
   if (d.runOpen) return openRun(d.runOpen);

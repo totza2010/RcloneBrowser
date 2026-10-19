@@ -533,6 +533,12 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .bar { flex: 0 0 160px; }
 
 tr.clickable { cursor: pointer; }
+
+/* How full the remote is, beside where in it the page is. */
+.crumbs-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.crumbs-line .crumbs { flex: 1 1 auto; }
+.quota { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.quota .bar { width: 120px; margin: 0; }
 /* A card's name that opens it in full. */
 button.name.link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-align: left; }
 button.name.link:hover { text-decoration: underline; }
