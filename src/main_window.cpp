@@ -18,6 +18,7 @@
 #include "mount_dialog.h"
 #include "mount_widget.h"
 #include "preferences_dialog.h"
+#include "webhooks_dialog.h"
 #include "job_registry.h"
 #include "job_stats.h"
 #include "rclone_flags.h"
@@ -584,6 +585,19 @@ MainWindow::MainWindow() {
   ui.labelSchedulerInfoStart->setText("Scheduler is running.");
   ui.labelSchedulerInfoStop->setText("Scheduler is not running.");
   refreshSchedulerView();
+
+  // The page's webhooks, here too: File, just below Preferences.
+  {
+    QAction *webhooks = new QAction("Webhooks…", this);
+    webhooks->setStatusTip("Addresses told when a job ends");
+    const QList<QAction *> fileMenu = ui.menuFile->actions();
+    ui.menuFile->insertAction(fileMenu.value(fileMenu.indexOf(ui.preferences) + 1),
+                              webhooks);
+    QObject::connect(webhooks, &QAction::triggered, this, [this]() {
+      WebhooksDialog dialog(this);
+      dialog.exec();
+    });
+  }
 
   QObject::connect(ui.preferences, &QAction::triggered, this, [=]() {
     PreferencesDialog dialog(this);

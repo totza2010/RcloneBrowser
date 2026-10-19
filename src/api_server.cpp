@@ -4,6 +4,8 @@
 #include "app_core.h"
 #include "directory_listing.h"
 #include "file_reader.h"
+#include "job_json.h"
+#include "webhooks.h"
 #include "extra_flags.h"
 #include "debug_log.h"
 #include "http_message.h"
@@ -143,70 +145,36 @@ QString flagsProblem(const QString &extra) {
 qint64 gStreamIdleOverrideMs = -1;
 
 QJsonObject describe(const RunningJob &job) {
+  return JobJson::Write(job, int(ApiServer::streamIdleLimitMs() / 1000));
+}
+
+// A webhook as it may be shown: everything but the secret.
+QJsonObject describeHook(const Webhook &hook) {
   QJsonObject object;
-  object.insert(QStringLiteral("requestId"), job.requestId());
-  object.insert(QStringLiteral("taskId"), job.taskId());
-  object.insert(QStringLiteral("kind"), JobKindToString(job.kind()));
-  object.insert(QStringLiteral("startedBy"), job.transferMode());
-  object.insert(QStringLiteral("info"), job.description().info);
-  object.insert(QStringLiteral("source"), job.description().source);
-  object.insert(QStringLiteral("dest"), job.description().dest);
-  object.insert(QStringLiteral("running"), job.isRunning());
-  object.insert(QStringLiteral("dryRun"), job.isDryRun());
-  object.insert(QStringLiteral("state"), job.finalStatus());
-  object.insert(QStringLiteral("startedAt"),
-                job.startedAt().toString(Qt::ISODate));
-
-  // SECURITY: the command carries backend tokens and the remote-control
-  // password. displayCommand() is the redacted form; the raw arguments must
-  // never leave this process (docs/ARCHITECTURE.md section 5).
-  object.insert(QStringLiteral("command"),
-                job.displayCommand().join(QLatin1Char(' ')));
-
-  if (!job.bandwidth().isEmpty()) {
-    object.insert(QStringLiteral("bandwidth"), job.bandwidth());
-  }
-
-  // Where a stream can be opened: a path of this same server. The host is
-  // not here: this program does not know by what name whoever is asking
-  // reached it, and they do.
-  if (job.kind() == JobKind::Stream && job.streamPort() != 0) {
-    QJsonObject stream;
-    stream.insert(QStringLiteral("path"), job.streamPath());
-    // How long it may sit unplayed before it stops itself, 0 for never.
-    stream.insert(QStringLiteral("stopsWhenIdleFor"),
-                  int(ApiServer::streamIdleLimitMs() / 1000));
-    object.insert(QStringLiteral("stream"), stream);
-  }
-
-  // Where a serve listens. The host is not here for the same reason as a
-  // stream's: whoever asks knows by what name they reached this machine.
-  if (job.kind() == JobKind::Serve && job.serveAddress().port != 0) {
-    const RunningJob::ServeAddress &address = job.serveAddress();
-    QJsonObject serve;
-    serve.insert(QStringLiteral("protocol"), address.protocol);
-    serve.insert(QStringLiteral("port"), int(address.port));
-    serve.insert(QStringLiteral("everyone"), address.everyone);
-    serve.insert(QStringLiteral("readOnly"), address.readOnly);
-    serve.insert(QStringLiteral("user"), address.user);
-    object.insert(QStringLiteral("serve"), serve);
-  }
-
-  const JobStats &stats = job.stats();
-  if (stats.valid) {
-    QJsonObject figures;
-    figures.insert(QStringLiteral("bytes"), double(stats.bytes));
-    figures.insert(QStringLiteral("totalBytes"), double(stats.totalBytes));
-    figures.insert(QStringLiteral("transfers"), double(stats.transfers));
-    figures.insert(QStringLiteral("errors"), double(stats.errors));
-    figures.insert(QStringLiteral("elapsedSeconds"), stats.elapsedSeconds);
-    figures.insert(QStringLiteral("speed"), stats.speed);
-    figures.insert(QStringLiteral("etaSeconds"), double(stats.etaSeconds));
-    figures.insert(QStringLiteral("percent"), stats.percent());
-    figures.insert(QStringLiteral("totalTransfers"), double(stats.totalTransfers));
-    object.insert(QStringLiteral("stats"), figures);
-  }
+  object.insert(QStringLiteral("id"), hook.id);
+  object.insert(QStringLiteral("name"), hook.name);
+  object.insert(QStringLiteral("url"), hook.url);
+  object.insert(QStringLiteral("format"), hook.format);
+  object.insert(QStringLiteral("failuresOnly"), hook.failuresOnly);
+  object.insert(QStringLiteral("everyJob"), hook.everyJob);
+  object.insert(QStringLiteral("hasSecret"), !hook.secret.isEmpty());
+  object.insert(QStringLiteral("lastResult"), hook.lastResult);
+  object.insert(QStringLiteral("lastAt"),
+                hook.lastAt > 0
+                    ? QDateTime::fromMSecsSinceEpoch(hook.lastAt).toString(Qt::ISODate)
+                    : QString());
   return object;
+}
+
+Webhook hookFrom(const QJsonObject &given) {
+  Webhook hook;
+  hook.name = given.value(QStringLiteral("name")).toString();
+  hook.url = given.value(QStringLiteral("url")).toString();
+  hook.format = given.value(QStringLiteral("format")).toString(QStringLiteral("json"));
+  hook.failuresOnly = given.value(QStringLiteral("failuresOnly")).toBool(false);
+  hook.everyJob = given.value(QStringLiteral("everyJob")).toBool(false);
+  hook.secret = given.value(QStringLiteral("secret")).toString();
+  return hook;
 }
 
 // A moment, with its offset from UTC. Without one, "10:52" means a different
@@ -699,6 +667,27 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
 
   qCDebug(rbApp) << "API listing" << remote << path << "limit=" << limit;
   listing->start();
+}
+
+void ApiServer::testWebhook(QTcpSocket *socket, const QString &id) {
+  if (Webhooks::instance().find(id) == nullptr) {
+    socket->write(FormatHttpResponse(
+        404, problem(QStringLiteral("there is no such webhook"))));
+    return;
+  }
+  socket->setProperty("stream", true); // answered once, when it has answered
+  QPointer<QTcpSocket> held(socket);
+  Webhooks::instance().test(id, [held](int status, const QString &why) {
+    if (!held) {
+      return;
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("status"), status);
+    if (!why.isEmpty()) {
+      object.insert(QStringLiteral("error"), why);
+    }
+    held->write(FormatHttpResponse(why.isEmpty() ? 200 : 502, toJson(object)));
+  });
 }
 
 void ApiServer::readFile(QTcpSocket *socket, const HttpRequest &request,
@@ -2435,6 +2424,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
       return;
     }
     if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("webhooks") &&
+        parts.at(2) == QLatin1String("test")) {
+      testWebhook(socket, parts.at(1));
+      return;
+    }
+    if (asked.method == QLatin1String("POST") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         parts.at(2) == QLatin1String("answer")) {
       changeRemote(socket, asked, parts.at(1));
@@ -2917,6 +2912,44 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
     return 201;
   }
 
+  // ---- webhooks -------------------------------------------------------------
+
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("webhooks")) {
+    QString why;
+    const QString id = Webhooks::instance().add(hookFrom(options(request)), &why);
+    if (id.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    qCDebug(rbApp) << "API made webhook" << id;
+    *body = toJson(describeHook(*Webhooks::instance().find(id)));
+    return 201;
+  }
+  if (put && parts.size() == 2 && parts.at(0) == QLatin1String("webhooks")) {
+    if (Webhooks::instance().find(parts.at(1)) == nullptr) {
+      return refuseTask(404, QStringLiteral("no_such_webhook"),
+                        QStringLiteral("there is no such webhook"));
+    }
+    const QJsonObject given = options(request);
+    QString why;
+    if (!Webhooks::instance().update(
+            parts.at(1), hookFrom(given),
+            given.value(QStringLiteral("clearSecret")).toBool(false), &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    *body = toJson(describeHook(*Webhooks::instance().find(parts.at(1))));
+    return 200;
+  }
+  if (del && parts.size() == 2 && parts.at(0) == QLatin1String("webhooks")) {
+    if (!Webhooks::instance().remove(parts.at(1))) {
+      return refuseTask(404, QStringLiteral("no_such_webhook"),
+                        QStringLiteral("there is no such webhook"));
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("deleted"), parts.at(1));
+    *body = toJson(object);
+    return 200;
+  }
+
   // keys/{id} -- take one back
   if (del && parts.size() == 2 && parts.at(0) == QLatin1String("keys")) {
     if (!ApiAuth::Keys::instance().remove(parts.at(1))) {
@@ -3293,6 +3326,15 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     object.insert(QStringLiteral("prefix"), provider->prefix);
     object.insert(QStringLiteral("options"), options);
     *body = toJson(object);
+    return 200;
+  }
+
+  if (path == QLatin1String("/api/v1/webhooks")) {
+    QJsonArray array;
+    for (const Webhook &hook : Webhooks::instance().list()) {
+      array.append(describeHook(hook));
+    }
+    *body = toJson(array);
     return 200;
   }
 

@@ -365,6 +365,7 @@ function handleEvent(block) {
 
   if (name === "job") {
     const at = state.jobs.findIndex((j) => j.requestId === data.requestId);
+    if (at >= 0 && state.jobs[at].running && !data.running) tellJobEnded(data);
     if (at >= 0) state.jobs[at] = data;
     else state.jobs.unshift(data);
 
@@ -387,6 +388,47 @@ function handleEvent(block) {
     refresh();
   }
 }
+
+// ---- telling whoever has this page open ------------------------------------
+
+// Kept in this browser alone: it is this browser that shows the notice.
+function notifying() {
+  try {
+    return localStorage.getItem("rb.notify") === "1" &&
+           "Notification" in window && Notification.permission === "granted";
+  } catch (e) {
+    return false;
+  }
+}
+
+function tellJobEnded(job) {
+  if (job.kind !== "transfer" || !notifying()) return;
+  const how = job.state === "error" ? "Failed" : job.state === "stopped" ? "Stopped" : "Finished";
+  try {
+    new Notification("RcloneBrowser — " + how.toLowerCase(), {
+      body: how + ": " + (job.info || job.source || ""),
+      tag: job.requestId,
+    });
+  } catch (e) {
+    /* some browsers will only show one from a service worker */
+  }
+}
+
+async function switchNotifying(on) {
+  if (on && "Notification" in window && Notification.permission !== "granted") {
+    const answer = await Notification.requestPermission();
+    if (answer !== "granted") {
+      toast("this browser was not allowed to show notifications");
+      on = false;
+    }
+  }
+  try { localStorage.setItem("rb.notify", on ? "1" : "0"); } catch (e) { /* private window */ }
+  drawJobs();
+}
+
+$("tab-jobs").addEventListener("change", (event) => {
+  if (event.target.id === "jobs-notify") switchNotifying(event.target.checked);
+});
 
 // ---- reading the current state -------------------------------------------
 
@@ -529,7 +571,13 @@ function drawJobs() {
       bytes(s.speed || 0) + "/s</b> together</span>" +
       '<button class="ghost small" data-speed-all="">Limit every running transfer…</button></div>'
     : "";
-  $("tab-jobs").innerHTML = head + (state.jobs.length
+  // Only where a browser can show one: on HTTPS, or on this machine itself.
+  const canNotify = "Notification" in window && window.isSecureContext;
+  const tell = canNotify
+    ? '<p class="muted"><label class="check"><input type="checkbox" id="jobs-notify"' +
+      (notifying() ? " checked" : "") + "> Tell me in this browser when a transfer ends</label></p>"
+    : "";
+  $("tab-jobs").innerHTML = head + tell + (state.jobs.length
     ? state.jobs.slice().sort(jobOrder).map(jobCard).join("")
     : '<p class="empty">Nothing is running.</p>');
 }
@@ -1460,6 +1508,7 @@ async function drawApi() {
       '<span class="muted">— OpenAPI ' + esc(apiSpec.openapi || "") +
       ", for Swagger, Postman, a generated client · " + esc(origin) + "</span></p>" +
       '<div id="api-keys" class="api-keys"></div>' +
+      '<div id="api-hooks" class="api-keys"></div>' +
       '<input id="api-filter" type="text" placeholder="filter: tasks, schedule, stream…" autocomplete="off">' +
     "</div>",
   ];
@@ -1504,6 +1553,7 @@ async function drawApi() {
   }
   box.innerHTML = parts.join("");
   drawKeys();
+  drawHooks();
 
   $("api-filter").addEventListener("input", () => {
     const words = $("api-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -1592,7 +1642,110 @@ async function drawKeys(made) {
   });
 }
 
+// ---- webhooks: addresses told when a job ends ---------------------------------
+
+const hookFormats = {
+  json: "JSON — the whole event",
+  text: "Text — one line (ntfy, Gotify)",
+  slack: "Slack",
+  discord: "Discord",
+};
+
+async function drawHooks(editing) {
+  const box = $("api-hooks");
+  if (!box) return;
+  let answer;
+  try {
+    answer = await api("GET", "/webhooks");
+  } catch (e) {
+    return;
+  }
+  if (answer.status === 403) {
+    box.innerHTML = '<p class="muted">Webhooks are managed by an administrator.</p>';
+    return;
+  }
+  if (answer.status !== 200) return;
+  const hooks = answer.data || [];
+  const shown = hooks.find((h) => h.id === editing) || null;
+
+  const rows = hooks.map((h) =>
+    "<tr><td>" + esc(h.name) + '<div class="muted small">' + esc(h.url) + "</div></td>" +
+    "<td>" + esc(h.format) + "</td>" +
+    "<td>" + (h.failuresOnly ? "when one fails" : "when one ends") +
+      (h.everyJob ? " · every job" : " · transfers") + (h.hasSecret ? " · signed" : "") + "</td>" +
+    "<td>" + (h.lastResult ? esc(h.lastResult) + '<div class="muted small">' + esc(when(h.lastAt)) + "</div>"
+                           : '<span class="muted">not yet</span>') + "</td>" +
+    '<td style="text-align:right">' +
+      '<button class="ghost small" data-hook-test="' + esc(h.id) + '">Test</button> ' +
+      '<button class="ghost small" data-hook-edit="' + esc(h.id) + '">Change</button> ' +
+      '<button class="danger small" data-hook-drop="' + esc(h.id) + '" data-hook-name="' + esc(h.name) + '">Remove</button>' +
+    "</td></tr>");
+
+  const v = (field, otherwise) => (shown ? shown[field] : otherwise);
+  box.innerHTML =
+    "<h3>Webhooks</h3>" +
+    '<p class="muted">Addresses told when a job ends — a phone through ntfy, a chat channel, Sonarr, a script. ' +
+    "They are sent the job as <code>/jobs</code> says it; with a secret, each is signed " +
+    "(<code>X-Rb-Signature: sha256=…</code>).</p>" +
+    (rows.length
+      ? "<table><thead><tr><th>Where</th><th>As</th><th>When</th><th>Last</th><th></th></tr></thead><tbody>" +
+        rows.join("") + "</tbody></table>"
+      : '<p class="muted">No webhooks yet.</p>') +
+    '<form id="hook-form" class="key-form">' +
+      '<input id="hook-url" type="url" placeholder="https://ntfy.sh/my-topic" value="' + esc(v("url", "")) + '">' +
+      '<input id="hook-name" type="text" placeholder="name (optional)" maxlength="40" value="' + esc(v("name", "")) + '">' +
+      '<select id="hook-format">' + Object.keys(hookFormats).map((f) =>
+        '<option value="' + f + '"' + (v("format", "json") === f ? " selected" : "") + ">" + esc(hookFormats[f]) + "</option>").join("") +
+      "</select>" +
+      '<label class="check"><input type="checkbox" id="hook-failures"' + (v("failuresOnly", false) ? " checked" : "") + "> only failures</label>" +
+      '<label class="check"><input type="checkbox" id="hook-every"' + (v("everyJob", false) ? " checked" : "") + "> every job, not only transfers</label>" +
+      '<input id="hook-secret" type="password" autocomplete="new-password" placeholder="' +
+        (shown && shown.hasSecret ? "secret: kept unless changed" : "secret (optional)") + '">' +
+      '<button type="submit" class="small">' + (shown ? "Save" : "Add") + "</button>" +
+      (shown ? ' <button type="button" class="ghost small" id="hook-cancel">Cancel</button>' : "") +
+    "</form>" +
+    '<p id="hook-error" class="error"></p>';
+
+  $("hook-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {
+      url: $("hook-url").value,
+      name: $("hook-name").value,
+      format: $("hook-format").value,
+      failuresOnly: $("hook-failures").checked,
+      everyJob: $("hook-every").checked,
+      secret: $("hook-secret").value,
+    };
+    const result = shown
+      ? await api("PUT", "/webhooks/" + encodeURIComponent(shown.id), body)
+      : await api("POST", "/webhooks", body);
+    if (result.status !== 200 && result.status !== 201) {
+      $("hook-error").textContent = reasonFrom(result);
+      return;
+    }
+    toast(shown ? "webhook changed" : "webhook added — Test sends it a made-up event");
+    drawHooks();
+  });
+  if (shown) $("hook-cancel").addEventListener("click", () => drawHooks());
+}
+
 $("tab-api").addEventListener("click", async (event) => {
+  const hookButton = event.target.closest("button[data-hook-test],button[data-hook-edit],button[data-hook-drop]");
+  if (hookButton) {
+    const d = hookButton.dataset;
+    if (d.hookEdit) return drawHooks(d.hookEdit);
+    if (d.hookDrop) {
+      if (!confirm("Stop telling \"" + d.hookName + "\" when jobs end?")) return;
+      if (await command("DELETE", "/webhooks/" + encodeURIComponent(d.hookDrop))) drawHooks();
+      return;
+    }
+    hookButton.disabled = true;
+    const answer = await api("POST", "/webhooks/" + encodeURIComponent(d.hookTest) + "/test", {});
+    hookButton.disabled = false;
+    toast(answer.status === 200 ? "it answered " + answer.data.status : reasonFrom(answer));
+    drawHooks();
+    return;
+  }
   const drop = event.target.closest("button[data-key-drop]");
   if (drop) {
     if (!confirm("Take back the key \"" + drop.dataset.keyName + "\"?\n\n" +

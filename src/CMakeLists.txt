@@ -77,6 +77,8 @@ set(CORE_SOURCE
   lsjson_parser.cpp
   directory_listing.cpp
   file_reader.cpp
+  job_json.cpp
+  webhooks.cpp
   rc_client.cpp
   qcron.cpp
   qcronfield.cpp
@@ -121,6 +123,8 @@ set(CORE_HEADER
   lsjson_parser.h
   directory_listing.h
   file_reader.h
+  job_json.h
+  webhooks.h
   rc_client.h
   qcron.h
   qcronfield.h
@@ -185,6 +189,7 @@ set(MOC
   remote_settings_dialog.h
   serve_dialog.h
   file_view_dialog.h
+  webhooks_dialog.h
 )
 
 set(OTHER
@@ -224,6 +229,7 @@ set(SOURCE
   remote_settings_dialog.cpp
   serve_dialog.cpp
   file_view_dialog.cpp
+  webhooks_dialog.cpp
 )
 
 if(WIN32)

@@ -10,6 +10,7 @@
 #include "schedule.h"
 #include "scheduler_store.h"
 #include "script_runner.h"
+#include "webhooks.h"
 #include "utils.h"
 
 #include <QDateTime>
@@ -148,6 +149,8 @@ void AppCore::start() {
   // starting, and a queue that begins work as soon as it is read would
   // otherwise have started one before anything was listening.
   ScriptRunner::instance().install();
+  // And whoever wants to be told when a job ends, however it was started.
+  Webhooks::instance().install();
 
   // The queue keeps itself moving from here. This used to be switched on by
   // the window, which meant a queue left running only resumed if somebody

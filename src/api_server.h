@@ -147,6 +147,9 @@ private:
   // does. See docs/WEB-UI.md.
   void listDirectory(QTcpSocket *socket, const HttpRequest &request,
                      const QString &remote, const QString &path);
+  // A test event to a webhook, answered when the address has answered.
+  void testWebhook(QTcpSocket *socket, const QString &id);
+
   // The start of a file, for the page to show. Held open the same way.
   void readFile(QTcpSocket *socket, const HttpRequest &request,
                 const QString &remote);

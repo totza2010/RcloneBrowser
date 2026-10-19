@@ -1913,6 +1913,20 @@ marker: `FileReader` · `GET /api/v1/remotes/{name}/cat` · `FileViewDialog`
 | 9 | หน้าต่าง · View PDF | เปิดด้วยโปรแกรมอ่าน PDF ของเครื่อง | ⬜ | |
 | 10 | config ที่เข้ารหัส · serve ที่มีรหัสผ่าน | rclone เปิด config ได้ · serve ขึ้น | ⬜ | (test: ✅ ทั้งสองค่าไปถึง rclone) |
 
+### V-54 · webhook และการแจ้งเตือน
+
+marker: `Webhooks` · `/api/v1/webhooks` · `WebhooksDialog` · `jobs-notify`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: เพิ่ม webhook ที่มี secret · รัน task · เฉพาะที่ล้ม · test · เปลี่ยนโดยไม่บอก secret · ที่อยู่ไม่ใช่ http · key ระดับ write | event job.finished ตรง · ลายเซ็นถูก · hook เฉพาะล้มไม่ถูกเรียก · test 204 · secret คงอยู่ · 400 · 403 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | หน้าเว็บ · แท็บ API · เพิ่ม ntfy (text) · Test | มือถือได้แจ้งเตือน "Test: …" | ⬜ | |
+| 3 | Discord webhook · งาน copy จบ | ข้อความในช่อง | ⬜ | |
+| 4 | งานล้ม (รีโหมดผิด) กับ hook เฉพาะที่ล้ม | ได้ job.failed | ⬜ | |
+| 5 | หน้าต่าง · File → Webhooks… · เพิ่ม/Change/Remove/Test | ตรงกับหน้าเว็บ · เปลี่ยนจากหน้าเว็บแล้วหน้าต่างวาดใหม่ | ⬜ | |
+| 6 | หน้าเว็บ · ☐ Tell me in this browser… · transfer จบ | browser แจ้งเตือน | ⬜ | |
+| 7 | งานจากตารางเวลาตอนไม่มีหน้าต่าง (daemon) | webhook ยังถูกเรียก | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

@@ -420,7 +420,7 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 3. ~~dashboard ความเร็วรวม · ปรับ bandwidth ขณะรัน~~ — **ทำแล้ว 2026-10-19** ดู "ความเร็วรวมและปรับความเร็วขณะรัน"
 4. ~~serve ทั้งรีโหมดเป็น WebDAV / SFTP / FTP / HTTP~~ — **ทำแล้ว 2026-10-19** ดู "serve โฟลเดอร์ให้โปรแกรมอื่น"
 5. ~~ดูไฟล์ในตัว (ภาพ · PDF · ข้อความ)~~ — **ทำแล้ว 2026-10-19** ดู "ดูไฟล์ในตัว"
-6. การแจ้งเตือนเมื่องานจบ/ล้ม · webhook (A6)
+6. ~~การแจ้งเตือนเมื่องานจบ/ล้ม · webhook (A6)~~ — **ทำแล้ว 2026-10-19** ดู "webhook และการแจ้งเตือน"
 7. sync สองทาง (bisync) · ตัวช่วยสำรองข้อมูล
 8. หลายภาษา · เฝ้าโฟลเดอร์
 
@@ -446,6 +446,18 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test
 - `docs/VERIFY.md` มี 164 แถวที่ยังไม่มีใครลอง
+
+## webhook และการแจ้งเตือน (2026-10-19)
+
+- **core**: `Webhooks` ฟัง `JobRegistry::jobFinished` (ติดตั้งใน `AppCore::start` ถัดจาก ScriptRunner) — งานจบแบบเดียวกันไม่ว่าใครสั่ง ·
+  เก็บใน `Settings/webhooks` · `JobJson::Write` (ย้ายมาจาก `describe()` ของ API) ทำให้ webhook บอกงานเหมือน `/jobs` ทุกตัวอักษร
+- รูปแบบ: json · text (ntfy/Gotify) · slack · discord · เลือกเฉพาะที่ล้ม · ทุกงานหรือเฉพาะ transfer · secret → ลายเซ็น HMAC-SHA256 ·
+  timeout 15 วิ · ส่งต่อ redirect เฉพาะที่ไม่ลดความปลอดภัย · บันทึกผลส่งล่าสุด (ในหน่วยความจำ)
+- **API**: ระดับ **admin** ทั้งหมด รวม GET — ที่อยู่ webhook มักมี token ของผู้รับ (Discord, Slack) · ไม่คืน secret
+- **หน้าเว็บ**: แท็บ API ส่วน **Webhooks** (เพิ่ม · Change · Remove · Test พร้อมผลล่าสุด) ·
+  แท็บ Jobs: ☐ **Tell me in this browser when a transfer ends** (Notification ของ browser · ต้องเป็น HTTPS หรือเครื่องตัวเอง · จำใน browser นี้)
+- **หน้าต่าง**: **File → Webhooks…** (`WebhooksDialog` · รายการเดียวกัน วาดใหม่เมื่อหน้าเว็บเปลี่ยน) · การแจ้งเตือนใน tray มีอยู่เดิมแล้ว
+- ยังไม่ได้: ลองส่งไป ntfy/Discord จริง · ลองซ้ำเมื่อส่งไม่ถึง · ผลส่งล่าสุดหายเมื่อเปิดโปรแกรมใหม่ · การแจ้งเตือนของ daemon (ไม่มีหน้าต่าง) นอกจาก webhook
 
 ## ดูไฟล์ในตัว (2026-10-19)
 

@@ -37,6 +37,7 @@ const char *const kHistory = "History";
 const char *const kRemotes = "Remotes";
 const char *const kLocal = "This machine";
 const char *const kStreams = "Streams";
+const char *const kWebhooks = "Webhooks";
 
 const char *const kTaskBody =
     R"({"type":"upload","name":"nightly","source":"/media/films","dest":"gdrive:films","operation":"sync","syncTiming":"after","compare":"checksum","transfers":"4","bandwidth":"2M","excluded":"*.tmp\n*.part","extra":"--fast-list"})";
@@ -440,6 +441,33 @@ QList<Route> build() {
       r("GET", "/api/v1/keys", kSignIn, "The API keys there are",
         "Names, levels, when made and when last used. Never the keys "
         "themselves."),
+      r("GET", "/api/v1/webhooks", kWebhooks, "Where to tell when a job ends",
+        "Each with when it is told, how, and how the last delivery went "
+        "(since the program started). Never the secret: hasSecret says "
+        "whether there is one.",
+        "", "", "200: the webhooks"),
+      r("POST", "/api/v1/webhooks", kWebhooks, "Tell an address when jobs end",
+        "POSTed to when a job ends. format: json (the event: event, at, "
+        "summary, and the job as /jobs says it), text (the summary alone -- "
+        "ntfy and the like), slack, discord. failuresOnly: only when one "
+        "fails. everyJob: not only transfers. With a secret, each POST "
+        "carries X-Rb-Signature: sha256=<HMAC-SHA256 of the body>. "
+        "X-Rb-Event says which event: job.finished, job.failed, job.stopped "
+        "or test.",
+        "",
+        R"({"name":"phone","url":"https://ntfy.sh/my-topic","format":"text","failuresOnly":true,"everyJob":false,"secret":""})",
+        "201: made; 400: not an http(s) address, or no such format"),
+      r("PUT", "/api/v1/webhooks/{id}", kWebhooks, "Change a webhook",
+        "Everything is given again. An empty secret keeps the one there was; "
+        "clearSecret: true takes it away.",
+        "", R"({"url":"https://example.org/hook","format":"json","clearSecret":false})",
+        "200: changed; 400: refused; 404: no such webhook"),
+      r("DELETE", "/api/v1/webhooks/{id}", kWebhooks, "Stop telling an address",
+        "", "", "", "200: gone; 404: no such webhook"),
+      r("POST", "/api/v1/webhooks/{id}/test", kWebhooks, "Send a test event",
+        "Answered when the address has answered, or after 15 seconds.", "", "",
+        "200: it took it, with its status; 502: it did not, with why; 404: "
+        "no such webhook"),
       r("POST", "/api/v1/keys", kSignIn, "Make an API key",
         "For another program. The key is in the answer and nowhere else: it "
         "is stored only as a hash, so it cannot be shown again. Levels: "
@@ -465,7 +493,9 @@ QString scopeOf(const Route &route) {
   if (route.method == QLatin1String("GET")) {
     // The keys, and how a remote is set up: the owner's business, even
     // with the secrets taken out.
+    // The webhooks too: an address can carry a token of whoever receives it.
     return route.path.startsWith(QLatin1String("/api/v1/keys")) ||
+                   route.path.startsWith(QLatin1String("/api/v1/webhooks")) ||
                    route.path == QLatin1String("/api/v1/remotes/{name}/config")
                ? QStringLiteral("admin")
                : QStringLiteral("read");
@@ -502,6 +532,11 @@ QString scopeOf(const Route &route) {
       // Opens a remote to whoever can reach a port -- more than any key that
       // is not the owner's should be able to give away.
       QStringLiteral("POST /api/v1/remotes/{name}/serve"),
+      // Where this program sends news of every job, and with what.
+      QStringLiteral("POST /api/v1/webhooks"),
+      QStringLiteral("PUT /api/v1/webhooks/{id}"),
+      QStringLiteral("DELETE /api/v1/webhooks/{id}"),
+      QStringLiteral("POST /api/v1/webhooks/{id}/test"),
       QStringLiteral("DELETE /api/v1/remotes/{name}")};
 
   const QString key = route.method + QLatin1Char(' ') + route.path;

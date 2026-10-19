@@ -13,6 +13,7 @@
 #include "scheduler_store.h"
 #include "schedule.h"
 #include "utils.h"
+#include "webhooks.h"
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
@@ -28,6 +29,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QMessageAuthenticationCode>
 #include <QTcpServer>
 #include <QUrl>
 #include <QUuid>
@@ -2866,6 +2868,145 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/cat?path=gone.txt", mToken)), 502);
     qunsetenv("FAKE_RCLONE_FAIL");
     qunsetenv("FAKE_RCLONE_CAT");
+  }
+
+  // A job ending is told to the addresses that asked, as /jobs says it, and
+  // signed when there is a secret. Standing in for whoever receives it:
+  // something on a port that writes down every POST.
+  void aJobEndingIsToldToWebhooks() {
+    QVERIFY(useFakeRclone(1));
+    Webhooks::instance().install(); // what AppCore does when it starts
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    QTcpServer receiver;
+    QVERIFY(receiver.listen(QHostAddress::LocalHost, 0));
+    QList<QByteArray> received;
+    QObject::connect(&receiver, &QTcpServer::newConnection, &receiver, [&]() {
+      QTcpSocket *peer = receiver.nextPendingConnection();
+      auto buffer = QSharedPointer<QByteArray>::create();
+      QObject::connect(peer, &QTcpSocket::readyRead, peer, [&received, peer, buffer]() {
+        *buffer += peer->readAll();
+        const int end = buffer->indexOf("\r\n\r\n");
+        if (end < 0) {
+          return;
+        }
+        const QByteArray head = buffer->left(end).toLower();
+        const int at = head.indexOf("content-length:");
+        const int length = at < 0 ? 0 : head.mid(at + 15).split('\r').first().trimmed().toInt();
+        if (buffer->size() < end + 4 + length) {
+          return;
+        }
+        received.append(*buffer);
+        peer->write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        peer->disconnectFromHost();
+      });
+    });
+    const QByteArray address =
+        "http://127.0.0.1:" + QByteArray::number(receiver.serverPort()) + "/hook";
+
+    const QByteArray made = send("POST", "/api/v1/webhooks", mToken,
+                                 "{\"name\":\"all\",\"url\":\"" + address +
+                                     "\",\"secret\":\"shh\"}");
+    QCOMPARE(statusOf(made), 201);
+    const QJsonObject hook = bodyOf(made).object();
+    QCOMPARE(hook.value(QStringLiteral("hasSecret")).toBool(), true);
+    QVERIFY(!made.contains("shh"));
+    // Only failures: not told of a job that finished.
+    QCOMPARE(statusOf(send("POST", "/api/v1/webhooks", mToken,
+                           "{\"url\":\"" + address + "?failures\",\"failuresOnly\":true,"
+                           "\"format\":\"text\"}")),
+             201);
+
+    JobOptions *task = makeTask(QStringLiteral("told"));
+    QCOMPARE(statusOf(ask("POST", "/api/v1/tasks/" +
+                                      QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+                          mToken)),
+             202);
+    QTRY_COMPARE_WITH_TIMEOUT(received.size(), 1, 5000);
+    QTest::qWait(300); // and no second one
+    QCOMPARE(received.size(), 1);
+
+    const QByteArray told = received.first();
+    QVERIFY(told.startsWith("POST /hook "));
+    QVERIFY(told.toLower().contains("x-rb-event: job.finished"));
+    const QByteArray body = told.mid(told.indexOf("\r\n\r\n") + 4);
+    const QJsonObject event = QJsonDocument::fromJson(body).object();
+    QCOMPARE(event.value(QStringLiteral("event")).toString(), QStringLiteral("job.finished"));
+    QCOMPARE(event.value(QStringLiteral("job")).toObject().value(QStringLiteral("kind")).toString(),
+             QStringLiteral("transfer"));
+    QVERIFY(event.value(QStringLiteral("summary")).toString().startsWith(QStringLiteral("Finished: ")));
+    const QByteArray signature =
+        "sha256=" + QMessageAuthenticationCode::hash(body, "shh", QCryptographicHash::Sha256).toHex();
+    QVERIFY(told.toLower().contains("x-rb-signature: " + signature));
+
+    // A test, answered when the address has answered.
+    const QByteArray testPath =
+        "/api/v1/webhooks/" + hook.value(QStringLiteral("id")).toString().toUtf8() + "/test";
+    const QByteArray tested = send("POST", testPath, mToken, "{}");
+    QCOMPARE(statusOf(tested), 200);
+    QCOMPARE(bodyOf(tested).object().value(QStringLiteral("status")).toInt(), 204);
+    QVERIFY(received.last().toLower().contains("x-rb-event: test"));
+    // And said with the hook.
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/webhooks", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("id")) == hook.value(QStringLiteral("id"))) {
+        QCOMPARE(value.toObject().value(QStringLiteral("lastResult")).toString(), QStringLiteral("204"));
+      }
+    }
+
+    // Changed without its secret said again: it keeps it.
+    const QByteArray hookPath =
+        "/api/v1/webhooks/" + hook.value(QStringLiteral("id")).toString().toUtf8();
+    const QByteArray changed = send("PUT", hookPath, mToken,
+                                    "{\"name\":\"renamed\",\"url\":\"" + address + "\"}");
+    QCOMPARE(statusOf(changed), 200);
+    QCOMPARE(bodyOf(changed).object().value(QStringLiteral("hasSecret")).toBool(), true);
+
+    QCOMPARE(statusOf(send("POST", "/api/v1/webhooks", mToken, "{\"url\":\"file:///etc/passwd\"}")), 400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/webhooks", mToken,
+                           "{\"url\":\"https://example.org\",\"format\":\"xml\"}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/webhooks/nothing/test", mToken, "{}")), 404);
+
+    // The owner's alone: an address can carry whoever receives it's token.
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray writer =
+        bodyOf(send("POST", "/api/v1/keys", mToken, "{\"name\":\"w\",\"scope\":\"write\"}"))
+            .object().value(QStringLiteral("key")).toString().toUtf8();
+    QCOMPARE(statusOf(ask("GET", "/api/v1/webhooks", writer)), 403);
+    ApiAuth::Keys::instance().forgetAll();
+
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/webhooks", mToken)).array()) {
+      QCOMPARE(statusOf(ask("DELETE", "/api/v1/webhooks/" +
+                                          value.toObject().value(QStringLiteral("id")).toString().toUtf8(),
+                            mToken)),
+               200);
+    }
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/webhooks", mToken)).array().size(), 0);
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  // What a person reads, and what each kind of receiver is sent.
+  void aWebhookBodySuitsItsReceiver() {
+    QJsonObject job;
+    job.insert(QStringLiteral("info"), QStringLiteral("Copy of a"));
+    QJsonObject stats;
+    stats.insert(QStringLiteral("transfers"), 3.0);
+    stats.insert(QStringLiteral("errors"), 1.0);
+    job.insert(QStringLiteral("stats"), stats);
+    QJsonObject event;
+    event.insert(QStringLiteral("event"), QStringLiteral("job.failed"));
+    event.insert(QStringLiteral("job"), job);
+    event.insert(QStringLiteral("summary"), Webhooks::Summary(event));
+    QCOMPARE(event.value(QStringLiteral("summary")).toString(),
+             QStringLiteral("Failed: Copy of a · 3 files · 1 errors"));
+
+    QByteArray type;
+    QCOMPARE(Webhooks::Body(QStringLiteral("text"), event, &type),
+             QByteArray("Failed: Copy of a · 3 files · 1 errors"));
+    QVERIFY(type.startsWith("text/plain"));
+    QVERIFY(Webhooks::Body(QStringLiteral("discord"), event, &type).startsWith("{\"content\":"));
+    QVERIFY(Webhooks::Body(QStringLiteral("slack"), event, &type).startsWith("{\"text\":"));
+    QCOMPARE(Webhooks::EventName(QStringLiteral("error")), QStringLiteral("job.failed"));
+    QCOMPARE(Webhooks::EventName(QStringLiteral("stopped")), QStringLiteral("job.stopped"));
   }
 
   void aMountNeedsSomewhereToGo() {

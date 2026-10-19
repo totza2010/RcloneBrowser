@@ -148,6 +148,16 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 - `limit` ไม่บอก: ภาพ/PDF อ่านทั้งไฟล์ · อื่นๆ 2 MiB · สูงสุด 64 MiB · rclone หยุดอ่านตรงนั้น (`cat --count`)
 - `400` ไม่ได้ระบุไฟล์ · `404` ไม่มีรีโหมด · `502` rclone อ่านไม่ได้ · ไม่มีประวัติ (เป็นคำถาม ไม่ใช่งาน)
 
+### webhooks — `GET/POST /api/v1/webhooks` · `PUT/DELETE /webhooks/{id}` · `POST /webhooks/{id}/test` (ระดับ admin ทั้งหมด)
+
+ที่อยู่ที่ถูก POST ไปหาเมื่องานจบ ไม่ว่าใครสั่ง (หน้าต่าง · หน้าเว็บ · คิว · ตารางเวลา)
+`{"name","url","format":"json|text|slack|discord","failuresOnly":false,"everyJob":false,"secret":""}`
+- `json`: `{"event":"job.finished|job.failed|job.stopped|test","at","summary","job":{…เหมือน /jobs…}}` · `text`: บรรทัด `summary` อย่างเดียว (ntfy, Gotify) ·
+  `slack` `{"text"}` · `discord` `{"content"}`
+- header: `X-Rb-Event` · มี secret → `X-Rb-Signature: sha256=<HMAC-SHA256 ของ body>` · timeout 15 วินาที · ไม่ลองซ้ำ
+- `failuresOnly`: เฉพาะ job.failed · `everyJob`: ไม่ใช่เฉพาะ transfer · GET ไม่คืน secret (`hasSecret`) · `lastResult`/`lastAt` ของการส่งล่าสุด (ไม่เก็บข้ามการเปิดโปรแกรม)
+- PUT: secret ว่าง = คงของเดิม · `clearSecret:true` = ลบ · test ตอบเมื่อปลายทางตอบ: `200 {status}` · `502 {status, error}`
+
 ### serve — `POST /api/v1/remotes/{name}/serve` (ระดับ admin)
 
 `{"path":"films","protocol":"webdav","port":8081,"everyone":false,"readOnly":true,"user":"rb","password":"…"}` →
