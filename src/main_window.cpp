@@ -19,6 +19,7 @@
 #include "mount_widget.h"
 #include "preferences_dialog.h"
 #include "webhooks_dialog.h"
+#include "backup_dialog.h"
 #include "job_registry.h"
 #include "job_stats.h"
 #include "rclone_flags.h"
@@ -595,6 +596,15 @@ MainWindow::MainWindow() {
                               webhooks);
     QObject::connect(webhooks, &QAction::triggered, this, [this]() {
       WebhooksDialog dialog(this);
+      dialog.exec();
+    });
+
+    // And the page's New backup: a task and its schedule in one go.
+    QAction *backup = new QAction("New backup…", this);
+    backup->setStatusTip("A folder to a remote, on a schedule");
+    ui.menuFile->insertAction(webhooks, backup);
+    QObject::connect(backup, &QAction::triggered, this, [this]() {
+      BackupDialog dialog(this);
       dialog.exec();
     });
   }

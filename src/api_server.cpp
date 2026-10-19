@@ -5,6 +5,7 @@
 #include "directory_listing.h"
 #include "file_reader.h"
 #include "job_json.h"
+#include "backup_plan.h"
 #include "webhooks.h"
 #include "extra_flags.h"
 #include "debug_log.h"
@@ -3014,6 +3015,54 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
   };
 
   // schedules -- make one
+  // backups -- a task and its schedule, from a few words. See backup_plan.h.
+  if (post && parts.size() == 1 && parts.at(0) == QLatin1String("backups")) {
+    const QJsonObject given = options(request);
+    BackupPlan plan;
+    plan.name = given.value(QStringLiteral("name")).toString();
+    plan.source = given.value(QStringLiteral("source")).toString();
+    plan.dest = given.value(QStringLiteral("dest")).toString();
+    plan.mirror = given.value(QStringLiteral("mirror")).toBool(true);
+    plan.keepVersions = given.value(QStringLiteral("keepVersions")).toBool(true);
+    for (const QJsonValue &day : given.value(QStringLiteral("days")).toArray()) {
+      plan.days << day.toString();
+    }
+    plan.time = given.value(QStringLiteral("time")).toString(QStringLiteral("02:00"));
+
+    auto *task = new JobOptions(false);
+    Schedule schedule;
+    QString why;
+    if (!Backup::Build(plan, task, &schedule, &why)) {
+      delete task;
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    const TaskRefusal ends = endsProblem(*task, nullptr);
+    if (ends.status != 0) {
+      delete task;
+      return refuseTask(ends.status, ends.code, ends.why);
+    }
+    // The old versions are a folder too, beside the backup: on this machine,
+    // it has to be one the API may use, as the backup itself is.
+    if (plan.keepVersions && task->jobType == JobOptions::Download &&
+        LocalFiles::Allowed(Backup::VersionsFolder(task->dest)).isEmpty()) {
+      delete task;
+      return refuseTask(403, QStringLiteral("outside_roots"),
+                        QStringLiteral("the old versions would go beside the "
+                                       "backup, outside the folders the API "
+                                       "may use"));
+    }
+    if (!Backup::Save(task, &schedule, &why)) {
+      delete task;
+      return refuseTask(400, QStringLiteral("incomplete"), why);
+    }
+    qCDebug(rbApp) << "API made a backup" << task->description;
+    QJsonObject made;
+    made.insert(QStringLiteral("task"), describe(*task));
+    made.insert(QStringLiteral("schedule"), describe(schedule));
+    *body = toJson(made);
+    return 201;
+  }
+
   if (post && parts.size() == 1 && parts.at(0) == QLatin1String("schedules")) {
     Schedule schedule;
     schedule.id = QUuid::createUuid().toString();

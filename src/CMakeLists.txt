@@ -78,6 +78,7 @@ set(CORE_SOURCE
   directory_listing.cpp
   file_reader.cpp
   job_json.cpp
+  backup_plan.cpp
   webhooks.cpp
   rc_client.cpp
   qcron.cpp
@@ -124,6 +125,7 @@ set(CORE_HEADER
   directory_listing.h
   file_reader.h
   job_json.h
+  backup_plan.h
   webhooks.h
   rc_client.h
   qcron.h
@@ -190,6 +192,7 @@ set(MOC
   serve_dialog.h
   file_view_dialog.h
   webhooks_dialog.h
+  backup_dialog.h
 )
 
 set(OTHER
@@ -230,6 +233,7 @@ set(SOURCE
   serve_dialog.cpp
   file_view_dialog.cpp
   webhooks_dialog.cpp
+  backup_dialog.cpp
 )
 
 if(WIN32)

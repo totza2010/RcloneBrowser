@@ -3067,6 +3067,68 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(copy);
   }
 
+  // A backup said in a few words becomes an ordinary task and schedule.
+  void aBackupIsATaskAndItsSchedule() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given); // the API is held to it
+    const QString documents = root + QStringLiteral("/films");
+
+    const QByteArray made = send(
+        "POST", "/api/v1/backups", mToken,
+        "{\"name\":\"films\",\"source\":\"" + documents.toUtf8() +
+            "\",\"dest\":\"fake:Backups/films\",\"days\":[\"mon\",\"thu\"],\"time\":\"2:30\"}");
+    QCOMPARE(statusOf(made), 201);
+    const QJsonObject task = bodyOf(made).object().value(QStringLiteral("task")).toObject();
+    const QJsonObject schedule = bodyOf(made).object().value(QStringLiteral("schedule")).toObject();
+    QCOMPARE(task.value(QStringLiteral("operation")).toString(), QStringLiteral("sync"));
+    QCOMPARE(task.value(QStringLiteral("dest")).toString(), QStringLiteral("fake:Backups/films"));
+    QCOMPARE(task.value(QStringLiteral("extra")).toString(),
+             QStringLiteral("--backup-dir \"fake:Backups/films-versions/{date}\""));
+    QCOMPARE(schedule.value(QStringLiteral("runAs")).toString(), QStringLiteral("queue"));
+    QCOMPARE(schedule.value(QStringLiteral("time")).toString(), QStringLiteral("02:30"));
+    QCOMPARE(schedule.value(QStringLiteral("days")).toArray().size(), 2);
+    QCOMPARE(schedule.value(QStringLiteral("taskId")).toString(),
+             task.value(QStringLiteral("id")).toString());
+
+    // {date} is this run's: the command has a moment in its place.
+    JobOptions *saved = ListOfJobOptions::getInstance()->find(task.value(QStringLiteral("id")).toString());
+    QVERIFY(saved != nullptr);
+    const QString command = saved->getOptions().join(' ');
+    QVERIFY(command.contains(QStringLiteral("fake:Backups/films-versions/2")));
+    QVERIFY(!command.contains(QStringLiteral("{date}")));
+
+    // Keeping everything: a copy, and nothing kept aside.
+    const QByteArray kept = send(
+        "POST", "/api/v1/backups", mToken,
+        "{\"source\":\"" + documents.toUtf8() +
+            "\",\"dest\":\"fake:Backups/all\",\"mirror\":false,\"keepVersions\":false}");
+    QCOMPARE(statusOf(kept), 201);
+    const QJsonObject keptTask = bodyOf(kept).object().value(QStringLiteral("task")).toObject();
+    QCOMPARE(keptTask.value(QStringLiteral("operation")).toString(), QStringLiteral("copy"));
+    QCOMPARE(keptTask.value(QStringLiteral("extra")).toString(), QString());
+
+    const auto refused = [&](const QByteArray &body) {
+      return statusOf(send("POST", "/api/v1/backups", mToken, body));
+    };
+    QCOMPARE(refused("{\"source\":\"" + documents.toUtf8() + "\",\"dest\":\"" + root.toUtf8() + "/x\"}"), 400);
+    QCOMPARE(refused("{\"source\":\"fake:a\",\"dest\":\"fake:b\"}"), 400);
+    QCOMPARE(refused("{\"source\":\"" + documents.toUtf8() + "\",\"dest\":\"fake:\"}"), 400); // nowhere beside it
+    QCOMPARE(refused("{\"source\":\"" + documents.toUtf8() + "\",\"dest\":\"fake:b\",\"time\":\"25:00\"}"), 400);
+    QCOMPARE(refused("{\"source\":\"" + documents.toUtf8() + "\",\"dest\":\"fake:b\",\"days\":[\"someday\"]}"), 400);
+    // From a remote to a folder the API may not use.
+    QCOMPARE(refused("{\"source\":\"fake:a\",\"dest\":\"C:/elsewhere/backup\"}"), 403);
+
+    for (const QJsonObject &one : {schedule, bodyOf(kept).object().value(QStringLiteral("schedule")).toObject()}) {
+      SchedulerStore::instance().remove(one.value(QStringLiteral("id")).toString());
+    }
+    for (const QJsonObject &one : {task, keptTask}) {
+      ListOfJobOptions::getInstance()->Forget(
+          ListOfJobOptions::getInstance()->find(one.value(QStringLiteral("id")).toString()));
+    }
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

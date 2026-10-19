@@ -198,6 +198,19 @@ QList<Route> build() {
       r("GET", "/api/v1/schedules", kSchedules, "Every schedule",
         "In words, with when each next comes due by the clock of the machine "
         "the program runs on."),
+      r("POST", "/api/v1/backups", kSchedules,
+        "Make a backup: a task and the schedule that runs it",
+        "One side is a folder of this machine, the other remote:path. "
+        "mirror: the backup is made the same as the source (sync) -- or, "
+        "false, nothing is ever deleted from it (copy). keepVersions: what "
+        "is changed or deleted goes to <dest>-versions/<date of the run> "
+        "instead of being lost. days: mon..sun, empty for every day. Run "
+        "through the queue. Both are ordinary afterwards: change them as any "
+        "task and schedule.",
+        "",
+        R"({"name":"documents","source":"/media/documents","dest":"gdrive:Backups/documents","mirror":true,"keepVersions":true,"days":[],"time":"02:00"})",
+        "201: the task and the schedule; 400: refused; 403: outside the "
+        "folders the API may use"),
       r("POST", "/api/v1/schedules", kSchedules, "Put a task on a schedule",
         "mode is daily (days and time) or cron (five fields). runAs is now or "
         "queue. Something that could never come due is refused.",

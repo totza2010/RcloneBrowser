@@ -1,4 +1,5 @@
 #include "job_options.h"
+#include <QDateTime>
 #include "utils.h"
 #include <QRegularExpression>
 #include <qexception.h>
@@ -199,7 +200,14 @@ QStringList JobOptions::getOptions() const {
     list << "--delete-excluded";
   }
 
-  list << SplitExtraOptions(extra);
+  // {date} in the extra options is this run's moment, so a run can have a
+  // folder of its own: --backup-dir "remote:old/{date}". rclone has nothing
+  // of the kind, and a task is the same words every time it runs.
+  const QString now =
+      QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_HHmmss"));
+  for (QString arg : SplitExtraOptions(extra)) {
+    list << arg.replace(QLatin1String("{date}"), now);
+  }
 
   if (!included.isEmpty()) {
     for (auto line : included.split('\n')) {

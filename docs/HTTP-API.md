@@ -148,6 +148,15 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 - `limit` ไม่บอก: ภาพ/PDF อ่านทั้งไฟล์ · อื่นๆ 2 MiB · สูงสุด 64 MiB · rclone หยุดอ่านตรงนั้น (`cat --count`)
 - `400` ไม่ได้ระบุไฟล์ · `404` ไม่มีรีโหมด · `502` rclone อ่านไม่ได้ · ไม่มีประวัติ (เป็นคำถาม ไม่ใช่งาน)
 
+### backups — `POST /api/v1/backups` (ระดับ write)
+
+`{"name","source","dest","mirror":true,"keepVersions":true,"days":["mon",…],"time":"02:00"}` → `201 {task, schedule}`
+- ฝั่งหนึ่งต้องเป็นโฟลเดอร์ของเครื่องที่โปรแกรมรัน อีกฝั่ง `remote:path` · `mirror` true = sync · false = copy (ไม่ลบอะไรจาก backup)
+- `keepVersions`: `--backup-dir "<dest>-versions/{date}"` — **ข้างๆ backup** (ข้างในจะถูก rclone ปฏิเสธว่าทับกัน) · ปลายทางเป็นรากของรีโหมด/ไดรฟ์ → 400
+- `days` ว่าง = ทุกวัน · ตารางเวลารันผ่านคิว · หลังสร้างเป็น task และตารางเวลาธรรมดา แก้ได้ตามปกติ
+- `{date}` ใน extra options ของ task ใดก็ได้ = เวลาของรอบนั้น `yyyy-MM-dd_HHmmss`
+- `403` เมื่อปลายทางหรือโฟลเดอร์ versions อยู่นอกโฟลเดอร์ที่ API ใช้ได้
+
 ### webhooks — `GET/POST /api/v1/webhooks` · `PUT/DELETE /webhooks/{id}` · `POST /webhooks/{id}/test` (ระดับ admin ทั้งหมด)
 
 ที่อยู่ที่ถูก POST ไปหาเมื่องานจบ ไม่ว่าใครสั่ง (หน้าต่าง · หน้าเว็บ · คิว · ตารางเวลา)

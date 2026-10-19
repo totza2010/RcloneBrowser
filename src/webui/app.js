@@ -678,6 +678,7 @@ function drawTasks() {
     '<div class="toolbar">' +
       '<button class="ghost small" data-new-task="upload">New upload task</button>' +
       '<button class="ghost small" data-new-task="download">New download task</button>' +
+      '<button class="small" data-new-backup="">New backup…</button>' +
     "</div>" +
     (cards.length ? cards.join("") : '<p class="empty">No saved tasks.</p>');
 }
@@ -2688,6 +2689,61 @@ $("remote-mount").addEventListener("click", () => {
   });
 });
 
+// ---- a backup in a few words ------------------------------------------------
+
+// What a person means by a backup, made by the daemon into a task and the
+// schedule that runs it. Both are ordinary afterwards.
+function openBackup() {
+  const week = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"],
+                ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+  const remotes = (state.remotes || []).map((r) => '<option value="' + esc(r.name) + ':">').join("");
+  showResult("New backup",
+    '<p class="muted">A folder of the machine the program runs on to a remote — or a remote to a folder there — ' +
+    "on a schedule. It is made into a task and a schedule you can change afterwards like any other.</p>" +
+    '<p><label>What to back up<input id="backup-source" type="text" placeholder="/media/documents  or  gdrive:Documents" list="backup-remotes"></label></p>' +
+    '<p><label>Where to<input id="backup-dest" type="text" placeholder="gdrive:Backups/documents" list="backup-remotes"></label></p>' +
+    '<datalist id="backup-remotes">' + remotes + "</datalist>" +
+    '<p><label class="check"><input type="radio" name="backup-mode" value="mirror" checked> ' +
+      "Mirror — the backup is kept the same as the source, so what is deleted there goes here too</label>" +
+    '<label class="check"><input type="radio" name="backup-mode" value="keep"> ' +
+      "Keep everything — nothing is ever deleted from the backup</label></p>" +
+    '<p><label class="check"><input type="checkbox" id="backup-versions" checked> ' +
+      "Keep old versions: what is changed or deleted in the backup is moved to a dated folder beside it, not lost</label></p>" +
+    '<p>When ' + week.map(([v, l]) =>
+      '<label class="check inline"><input type="checkbox" class="backup-day" value="' + v + '" checked> ' + l + "</label>").join(" ") +
+      ' at <input id="backup-time" type="time" value="02:00"></p>' +
+    '<p><label>Name<input id="backup-name" type="text" placeholder="optional"></label></p>' +
+    '<p><button id="backup-go" class="small">Make the backup</button> <span id="backup-state" class="error"></span></p>');
+
+  $("backup-go").addEventListener("click", async () => {
+    const days = [...document.querySelectorAll(".backup-day")].filter((c) => c.checked).map((c) => c.value);
+    if (!days.length) {
+      $("backup-state").textContent = "choose at least one day";
+      return;
+    }
+    const answer = await api("POST", "/backups", {
+      name: $("backup-name").value,
+      source: $("backup-source").value,
+      dest: $("backup-dest").value,
+      mirror: document.querySelector('input[name="backup-mode"]:checked').value === "mirror",
+      keepVersions: $("backup-versions").checked,
+      days: days.length === 7 ? [] : days,
+      time: $("backup-time").value || "02:00",
+    }).catch(() => null);
+    if (!answer) {
+      $("backup-state").textContent = "could not reach the daemon";
+      return;
+    }
+    if (answer.status !== 201) {
+      $("backup-state").textContent = reasonFrom(answer);
+      return;
+    }
+    closeResult();
+    toast("backup made: " + answer.data.task.name + " — Run on its task starts the first one now");
+    refresh();
+  });
+}
+
 // ---- serving ---------------------------------------------------------------
 
 // A folder offered to other programs -- a file manager, a TV, another
@@ -3715,6 +3771,7 @@ document.addEventListener("click", async (event) => {
   if (d.enqueue && (await command("POST", task(d.enqueue, "/enqueue")))) return refresh();
 
   if (d.newTask) return openTransfer(d.newTask, {});
+  if (d.newBackup !== undefined) return openBackup();
   if (d.edit) {
     const found = state.tasks.find((t) => t.id === d.edit);
     if (found) openTransfer(found.type, found, { id: found.id, title: "Edit task — " + found.name });

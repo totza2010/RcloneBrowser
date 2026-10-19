@@ -1940,6 +1940,18 @@ marker: `JobOptions::Bisync` · `"resync"` · `Run first time (resync)`
 | 5 | bisync เครื่องนี้ ↔ gdrive ตามตารางเวลา | รอบต่อไปไม่มี --resync · การเปลี่ยนทั้งสองฝั่งไปถึงกัน | ⬜ | |
 | 6 | เปิด task เดิม (copy/sync/mount) หลังอัปเดต | ชนิดเดิมไม่เปลี่ยน | ⬜ | |
 
+### V-56 · ตัวช่วยสำรองข้อมูล
+
+marker: `Backup::Build` · `POST /api/v1/backups` · `BackupDialog` · `{date}`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: backup mirror + versions · keep everything · สองฝั่งในเครื่อง · สองฝั่งรีโหมด · ราก · เวลา/วันผิด · นอกโฟลเดอร์ | task sync + backup-dir · copy · 400 · 403 · `{date}` ถูกแทน | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | rclone จริง: sync + backup-dir ข้างๆ สองรอบ | ไฟล์เก่าและที่ลบอยู่ใน `<dest>-versions/<date>` | ✅ **PASS** (โฟลเดอร์ในเครื่อง) | AI / 2026-10-19 |
+| 3 | หน้าเว็บ · Tasks → New backup… → Make | task + ตารางเวลาขึ้น · Run แล้วไฟล์ไปถึง gdrive | ⬜ | |
+| 4 | หน้าต่าง · File → New backup… | เหมือนข้อ 3 · ขึ้นในหน้าเว็บด้วย | ⬜ | |
+| 5 | แก้ไฟล์ในเครื่อง · รอรอบถัดไป | ไฟล์เดิมอยู่ใน `-versions/<วันเวลา>` บน gdrive | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่
