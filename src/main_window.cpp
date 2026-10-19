@@ -743,14 +743,45 @@ MainWindow::MainWindow() {
   ui.menuHelp->insertAction(ui.openLogFolder, openWeb);
   QObject::connect(openWeb, &QAction::triggered, this, [=]() {
     if (!ApiServer::instance().isListening()) {
-      // Said, with the two usual reasons, rather than opening a browser at
-      // an address nothing is listening on.
-      QMessageBox::information(
-          this, "Rclone Browser",
-          "The web interface is not running.\n\nEither it is switched off "
-          "(Settings/apiEnabled), or its port was already in use when the "
-          "program started. The log says which.");
-      return;
+      // Said with the reason it gave, rather than opening a browser at an
+      // address nothing is listening on -- and with a way to try again now.
+      const QString why = qApp->property("apiProblem").toString();
+      QMessageBox box(this);
+      box.setWindowTitle("Rclone Browser");
+      box.setIcon(QMessageBox::Warning);
+      box.setText("The web interface is not running.");
+      box.setInformativeText(
+          (why.isEmpty() ? QString("It could not start.")
+                         : QString("It could not start: %1.").arg(why)) +
+          (qApp->property("apiRetrying").toBool()
+               ? QString("\n\nIt is tried again every 15 seconds.")
+               : QString()) +
+          QString("\n\nMost often its port (19999 unless set) was in use "
+                  "-- another copy of the program, still closing."));
+      QPushButton *now = box.addButton(tr("Try now"), QMessageBox::AcceptRole);
+      box.addButton(QMessageBox::Close);
+      box.exec();
+      if (box.clickedButton() != now) {
+        return;
+      }
+      const quint16 port = quint16(
+          GetSettings()->value("Settings/apiPort", 19999).toUInt());
+      QString error;
+      if (!ApiServer::instance().start(
+              GetSettings()
+                  ->value("Settings/apiAddress", QStringLiteral("127.0.0.1"))
+                  .toString(),
+              port, &error)) {
+        qApp->setProperty("apiProblem", error);
+        QMessageBox::warning(this, "Rclone Browser",
+                             QString("It still could not start: %1").arg(error));
+        return;
+      }
+      qApp->setProperty("apiProblem", QString());
+      statusBar()->showMessage(
+          QString("The web page is available at http://127.0.0.1:%1/")
+              .arg(ApiServer::instance().port()),
+          20000);
     }
 
     // Always the loopback address: whoever is looking at this window is on

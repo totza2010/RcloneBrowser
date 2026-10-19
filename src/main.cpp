@@ -746,12 +746,49 @@ int main(int argc, char *argv[]) {
   // happens. A failure here is not a reason to refuse to open -- the window
   // works without it -- but it is said, in the log and in the Help menu.
   QString apiError;
-  if (StartApi(&apiError).isEmpty()) {
+  const bool apiUp = !StartApi(&apiError).isEmpty();
+  if (!apiUp) {
     qCDebug(rbApp) << "the web interface is not available:" << apiError;
   }
+  // Why, for the Help menu to say -- the window has no other way to know.
+  app.setProperty("apiProblem", apiUp ? QString() : apiError);
 
   MainWindow w;
   w.show();
+
+  // Not up, and not because it was switched off: most often its port was
+  // taken when the program opened -- by another copy of it, closing as this
+  // one opened. Said where it is seen, and tried again until it works,
+  // rather than leaving the page unreachable for as long as the window is
+  // open with nothing to say why. Found 2026-10-19: the page "would not
+  // open", and the window was running without it.
+  if (!apiUp && !apiError.contains(QLatin1String("switched off"))) {
+    w.statusBar()->showMessage(
+        QStringLiteral("The web page is not available: %1 -- trying again "
+                       "every 15 seconds.")
+            .arg(apiError));
+    auto *retry = new QTimer(&app);
+    retry->setInterval(15000);
+    QObject::connect(retry, &QTimer::timeout, &app, [&w, &app, retry]() {
+      if (ApiServer::instance().isListening()) {
+        retry->stop();
+        return;
+      }
+      QString again;
+      const QString url = StartApi(&again);
+      if (url.isEmpty()) {
+        app.setProperty("apiProblem", again);
+        return;
+      }
+      retry->stop();
+      app.setProperty("apiProblem", QString());
+      qCDebug(rbApp) << "the web interface is up after all, at" << url;
+      w.statusBar()->showMessage(
+          QStringLiteral("The web page is available at %1").arg(url), 20000);
+    });
+    retry->start();
+    app.setProperty("apiRetrying", true);
+  }
 
   // A window in a container is stopped the way a daemon is: by a signal,
   // with nobody there to answer "are you sure?". So this does not go through
