@@ -11,6 +11,13 @@
 #include "list_of_job_options.h"
 #include "mount_dialog.h"
 #include "serve_dialog.h"
+#include "remote_registry.h"
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLabel>
+#include <QPushButton>
 #include "file_view_dialog.h"
 #include "progress_dialog.h"
 #include "remote_folder_dialog.h"
@@ -405,8 +412,89 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
   QObject::connect(ui.tree, &QAbstractItemView::doubleClicked, this,
                    [=](const QModelIndex &) { viewChosen(); });
 
+  // What the page's Copy and Move do when another remote is chosen: the
+  // chosen files and folders into a folder of another remote, one transfer
+  // each, through RemoteOps::CopyInto as the page's are. The window's own
+  // Copy and Move stay within this remote, where its folder tree is.
+  QAction *otherRemoteAction =
+      new QAction("Copy or move to another remote…", this);
+  otherRemoteAction->setStatusTip(
+      "Copy or move what is chosen into a folder of another remote");
+  QObject::connect(otherRemoteAction, &QAction::triggered, this, [=]() {
+    QList<RemoteOps::Item> items;
+    for (const QModelIndex &index : ui.tree->selectionModel()->selectedRows()) {
+      if (model->isLoading(index) || model->isTopLevel(index)) {
+        continue;
+      }
+      RemoteOps::Item item;
+      item.remote = remote;
+      item.path = model->path(index).path();
+      item.isFolder = model->isFolder(index);
+      items << item;
+    }
+    if (items.isEmpty()) {
+      QMessageBox::information(this, "Copy or move",
+                               "Choose the files or folders to send first.");
+      return;
+    }
+
+    QDialog ask(this);
+    ask.setWindowTitle("Copy or move to another remote");
+    auto *to = new QComboBox(&ask);
+    for (const auto &other : RemoteRegistry::instance().remotes()) {
+      to->addItem(other.name + ":", other.name);
+    }
+    // Another remote to begin with: this one is what the window's own Copy
+    // is for.
+    for (int i = 0; i < to->count(); ++i) {
+      if (to->itemData(i).toString() != remote) {
+        to->setCurrentIndex(i);
+        break;
+      }
+    }
+    auto *folder = new QLineEdit(&ask);
+    folder->setPlaceholderText("a folder there, empty for the top");
+    auto *move = new QCheckBox("Move: delete each from here once it has arrived", &ask);
+    auto *dryRun = new QCheckBox("Dry run: say what would happen, change nothing", &ask);
+    auto *form = new QFormLayout(&ask);
+    form->addRow(new QLabel(QString("%1 item(s) from %2:").arg(items.size()).arg(remote), &ask));
+    form->addRow("To", to);
+    form->addRow("Folder", folder);
+    form->addRow(QString(), move);
+    form->addRow(QString(), dryRun);
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &ask);
+    buttons->button(QDialogButtonBox::Ok)->setText("Start");
+    form->addRow(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &ask, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &ask, &QDialog::reject);
+    if (ask.exec() != QDialog::Accepted) {
+      return;
+    }
+
+    int started = 0;
+    QStringList refused;
+    for (const RemoteOps::Item &item : items) {
+      QString why;
+      if (RemoteOps::CopyInto(move->isChecked(), item, to->currentData().toString(),
+                              folder->text().trimmed(), dryRun->isChecked(),
+                              &why) != nullptr) {
+        ++started;
+      } else {
+        refused << QString("%1: %2").arg(item.path, why);
+      }
+    }
+    if (!refused.isEmpty()) {
+      QMessageBox::warning(this, "Copy or move",
+                           QString("%1 started; these were refused:\n\n%2")
+                               .arg(started)
+                               .arg(refused.join('\n')));
+    }
+  });
+
   QMenu *menuMode = new QMenu(this);
   menuMode->addAction(serveAction);
+  menuMode->addAction(otherRemoteAction);
   menuMode->addAction(ui.getTree);
   menuMode->addAction(ui.link);
   menuMode->addAction(ui.export_);
@@ -1753,6 +1841,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                      menu.addAction(viewAction);
                      menu.addAction(ui.stream);
                      menu.addAction(serveAction);
+                     menu.addAction(otherRemoteAction);
                      menu.addAction(ui.upload);
                      menu.addAction(ui.download);
                      menu.addSeparator();
