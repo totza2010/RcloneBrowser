@@ -450,6 +450,23 @@ function handleEvent(block) {
     return;
   }
 
+  // The remotes changed, somewhere: read them again, and leave a remote that
+  // is no longer there rather than go on showing it.
+  if (name === "remotes") {
+    const names = data.remotes || [];
+    if (browsing.remote && !names.includes(browsing.remote)) {
+      toast(browsing.remote + ": is no longer a remote");
+      browsing.remote = "";
+      browsing.path = "";
+      browsing.entries = [];
+      browsing.picked = new Set();
+      browsing.chosen = "";
+      setAddress("#/remotes", false);
+    }
+    refresh();
+    return;
+  }
+
   if (name === "queue" || name === "schedule" || name === "hello" || name === "tasks") {
     refresh();
   }

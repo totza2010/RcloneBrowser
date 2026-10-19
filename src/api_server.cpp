@@ -2233,6 +2233,20 @@ void ApiServer::watchWhatHappens() {
     broadcast(QStringLiteral("queue"), object);
   });
 
+  // The remotes read again: one made, changed, renamed or deleted -- from
+  // this page, another one, or the window. Said with the names, so a page
+  // showing a remote that is gone can say so.
+  QObject::connect(&RemoteRegistry::instance(), &RemoteRegistry::refreshed,
+                   this, [this]() {
+                     QJsonArray names;
+                     for (const auto &remote : RemoteRegistry::instance().remotes()) {
+                       names.append(remote.name);
+                     }
+                     QJsonObject object;
+                     object.insert(QStringLiteral("remotes"), names);
+                     broadcast(QStringLiteral("remotes"), object);
+                   });
+
   // A schedule made, changed, switched or deleted, or the whole scheduler
   // switched -- here or in the window.
   QObject::connect(&SchedulerStore::instance(), &SchedulerStore::changed, this,

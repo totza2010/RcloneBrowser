@@ -597,3 +597,40 @@ tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.08)); }
 #sched-cronwrap input { font-family: Consolas, "Courier New", monospace; margin-top: 0; }
 .off-part { opacity: .45; }
 .tag.off { color: var(--muted); }
+
+/* ---- a phone ------------------------------------------------------------
+   One narrow column. Nothing makes the page itself scroll sideways: a table
+   too wide for the screen scrolls inside its own box, the least needed
+   columns go, and what is tapped is big enough for a finger. */
+@media (max-width: 640px) {
+  header { flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+  .controls { margin-left: 0; width: 100%; }
+  main { padding: 10px; }
+
+  button, button.small { min-height: 34px; }
+  button.small { padding: 6px 10px; font-size: 13px; }
+  .toolbar { gap: 6px; }
+
+  .card-head { gap: 6px; }
+  .card-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+
+  /* A table scrolls by itself rather than widening the page. */
+  .tab table, #result-body table { display: block; overflow-x: auto; max-width: 100%; }
+  #listing td:nth-child(4), #listing th:nth-child(4) { display: none; }
+  #listing td.pick input { width: 20px; height: 20px; }
+  #tab-history td:nth-child(3), #tab-history th:nth-child(3),
+  #tab-history td:nth-child(4), #tab-history th:nth-child(4),
+  #tab-history td:nth-child(6), #tab-history th:nth-child(6) { display: none; }
+
+  /* A box is the screen, and scrolls when it has more than the screen. */
+  .modal { place-items: start center; padding-top: 8px; }
+  .modal-box, .modal-box.wide { width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 16px; }
+  .modal-box dl { grid-template-columns: 1fr; gap: 2px; }
+  .modal-box dd { margin-bottom: 8px; }
+  .modal-actions { flex-wrap: wrap; }
+  .logbox { inset: 8px; }
+
+  .crumbs-line { gap: 6px; }
+  .quota .bar { width: 70px; }
+  .row-menu button { padding: 10px 12px; }
+}
