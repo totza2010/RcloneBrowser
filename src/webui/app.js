@@ -647,7 +647,8 @@ function jobCard(job) {
   return (
     '<div class="card">' +
       '<div class="card-head">' +
-        '<span class="name">' + esc(job.info || job.kind) + "</span>" +
+        '<button class="name link" data-job-open="' + esc(job.requestId) + '" title="everything about this job">' +
+          esc(job.info || job.kind) + "</button>" +
         '<span class="tag ' + esc(status) + '">' + esc(status) + "</span>" +
         (job.dryRun ? '<span class="tag">dry run</span>' : "") +
         '<div class="card-actions">' +
@@ -812,7 +813,8 @@ function drawTasks() {
   const cards = state.tasks.map((task) => (
     '<div class="card">' +
       '<div class="card-head">' +
-        '<span class="name">' + esc(task.name) + "</span>" +
+        '<button class="name link" data-task-open="' + esc(task.id) + '" title="everything about this task">' +
+          esc(task.name) + "</button>" +
         '<span class="muted">' + esc(task.type || (task.isDownload ? "download" : "upload")) +
           (task.operation ? " · " + esc(task.operation) : "") + "</span>" +
         '<div class="card-actions">' +
@@ -1058,6 +1060,136 @@ async function openRun(requestId, fromAddress) {
       ? '<p><button class="ghost small" data-log="' + esc(r.requestId) + '">Log — the command and what rclone printed</button></p>'
       : '<p class="muted">No log is kept for it.</p>'));
   routedBox = true; // closing this box takes #/history/<id> with it
+}
+
+// ---- a task in full ------------------------------------------------------------
+
+// Its settings in words, what runs it, how it went the last times, and the
+// command it is -- everything the page knows about it in one place.
+async function openTask(id, fromAddress) {
+  const task = state.tasks.find((t) => t.id === id);
+  if (!task) {
+    setAddress("#/tasks", false);
+    return toast("there is no such task");
+  }
+  if (!fromAddress) setAddress("#/tasks/" + encodeURIComponent(id), true);
+  showResult(task.name, '<p class="muted">reading…</p>');
+  routedBox = true;
+
+  const [runs, preview] = await Promise.all([
+    api("GET", "/history?limit=10&task=" + encodeURIComponent(id)).catch(() => null),
+    api("POST", "/tasks/preview", task).catch(() => null),
+  ]);
+  if ($("resultbox").classList.contains("hidden")) return; // closed meanwhile
+
+  const yes = (v) => v === true;
+  const what = {
+    copy: "Copy: what is new or changed goes over, nothing is deleted",
+    move: "Move: what has gone over is deleted from where it was",
+    sync: "Sync: the destination is made the same, deleting what the source does not have",
+    bisync: "Bisync: both sides kept the same, changes on either carried to the other",
+    mount: "Mount",
+  }[task.operation] || task.operation;
+  const settings = [
+    ["What", what],
+    ["From", task.source],
+    ["To", task.dest],
+  ];
+  if (task.operation === "sync") settings.push(["Deletes", task.syncTiming + " the transfer"]);
+  if (yes(task.skipNewer)) settings.push(["Skips", "files newer on the destination"]);
+  if (yes(task.skipExisting)) settings.push(["Skips", "files already on the destination"]);
+  if (task.compare && task.compare !== "none") settings.push(["Compares by", task.compare]);
+  if (task.transfers) settings.push(["Files at once", String(task.transfers)]);
+  if (task.bandwidth) settings.push(["Speed limit", task.bandwidth]);
+  if (task.minSize) settings.push(["Smallest file", task.minSize]);
+  if (task.minAge || task.maxAge) settings.push(["Age", [task.minAge && "older than " + task.minAge, task.maxAge && "newer than " + task.maxAge].filter(Boolean).join(", ")]);
+  if (task.maxDepth) settings.push(["Folder depth", String(task.maxDepth)]);
+  if (yes(task.deleteExcluded)) settings.push(["Excluded files", "deleted from the destination"]);
+  if (task.included) settings.push(["Only", task.included.split("\n").join(" · ")]);
+  if (task.excluded) settings.push(["Never", task.excluded.split("\n").join(" · ")]);
+  if (task.extra) settings.push(["Extra options", task.extra]);
+
+  const schedules = state.schedules.filter((s) => s.taskId === id);
+  const watch = watchOf(task);
+  const rows = runs && runs.status === 200 ? runs.data || [] : [];
+
+  showResult(task.name,
+    figures(settings) +
+    "<h3>When it runs</h3>" +
+    (schedules.length || watch
+      ? "<ul>" +
+          schedules.map((s) => "<li>⏱ " + esc(s.name) + " — " + esc(whenText(s)) + (s.active ? "" : " (off)") + "</li>").join("") +
+          (watch ? "<li>👁 when its folder has been quiet for " + seconds(watch.quietSeconds) + "</li>" : "") +
+        "</ul>"
+      : '<p class="muted">Only when it is started: no schedule runs it and no folder is watched.</p>') +
+    "<h3>The last times it ran</h3>" +
+    (rows.length
+      ? "<table><thead><tr><th>Started</th><th>Result</th><th>Took</th><th>Bytes</th><th>Asked by</th></tr></thead><tbody>" +
+          rows.map((r) =>
+            '<tr class="clickable" data-run-open="' + esc(r.requestId) + '">' +
+              "<td>" + esc(when(r.startedAt)) + "</td>" +
+              '<td><span class="tag ' + esc(r.state) + '">' + esc(r.state) + "</span>" + (r.dryRun ? " (dry run)" : "") + "</td>" +
+              "<td>" + esc(duration(r)) + "</td>" +
+              "<td>" + bytes(r.bytes) + "</td>" +
+              "<td>" + esc(r.askedBy || r.startedBy || "") + "</td>" +
+            "</tr>").join("") +
+        "</tbody></table>"
+      : '<p class="muted">It has not run yet.</p>') +
+    "<h3>The command</h3>" +
+    '<pre class="command">' + esc(preview && preview.status === 200 ? preview.data.command : "—") + "</pre>" +
+    '<p class="card-actions">' +
+      '<button class="small" data-run="' + esc(id) + '">Run</button>' +
+      '<button class="ghost small" data-enqueue="' + esc(id) + '">Queue</button>' +
+      '<button class="ghost small" data-dry="' + esc(id) + '">Dry run</button>' +
+      (["copy", "move", "sync", "bisync"].includes(task.operation)
+        ? '<button class="ghost small" data-edit="' + esc(id) + '">Edit</button>' : "") +
+    "</p>");
+  routedBox = true;
+}
+
+// A row of a task's last runs opens that run.
+$("result-body").addEventListener("click", (event) => {
+  if (event.target.closest("button")) return;
+  const row = event.target.closest("tr[data-run-open]");
+  if (row) openRun(row.dataset.runOpen);
+});
+
+// ---- a job in full ----------------------------------------------------------------
+
+async function openJob(requestId, fromAddress) {
+  const job = state.jobs.find((j) => j.requestId === requestId);
+  if (!job) {
+    // Gone from the running list: its history row says the rest.
+    setAddress("#/jobs", false);
+    return openRun(requestId);
+  }
+  if (!fromAddress) setAddress("#/jobs/" + encodeURIComponent(requestId), true);
+  const log = await api("GET", "/jobs/" + encodeURIComponent(requestId) + "/log?tail=40").catch(() => null);
+  const s = job.stats || {};
+  showResult(job.info || job.kind,
+    figures([
+      ["What", job.kind + (job.dryRun ? " (dry run)" : "")],
+      ["From", job.source || "—"],
+      ["To", job.serve ? serveAddress(job) : (job.dest || "—")],
+      ["Started", when(job.startedAt) + " by " + (job.startedBy || "?") + (job.askedBy ? ", asked by " + job.askedBy : "")],
+      ["Now", job.running ? (s.phase || "running") : job.state],
+      ["Moved", s.totalBytes ? bytes(s.bytes) + " of " + bytes(s.totalBytes) + " (" + (s.percent || 0) + "%)" : bytes(s.bytes || 0)],
+      ["Files", (s.transfers || 0) + (s.totalTransfers ? " of " + s.totalTransfers : "") +
+        (s.totalChecks ? " · " + s.checks + " of " + s.totalChecks + " checked" : "") +
+        (s.errors ? " · " + s.errors + " errors" : "")],
+      ["Speed", job.running ? bytes(s.speed || 0) + "/s" + (job.bandwidth ? " (limited to " + job.bandwidth + ")" : "") : "—"],
+    ]) +
+    (job.running ? fileBars(s.transferring || []) : "") +
+    "<h3>The command</h3>" +
+    '<pre class="command">' + esc(job.command || "") + "</pre>" +
+    "<h3>The end of what rclone printed</h3>" +
+    '<pre class="command">' + esc(log && log.status === 200 && typeof log.data === "string" ? log.data : "—") + "</pre>" +
+    '<p class="card-actions">' +
+      '<button class="ghost small" data-log="' + esc(requestId) + '">Whole log</button>' +
+      (job.running ? '<button class="danger small" data-stop="' + esc(requestId) + '">' +
+        (job.kind === "mount" ? "Unmount" : "Stop") + "</button>" : "") +
+    "</p>");
+  routedBox = true;
 }
 
 function drawHistory() {
@@ -1610,7 +1742,8 @@ function closeResult() {
   forgetViewed();
   if (routedBox) {
     routedBox = false;
-    if (/^#\/history\/./.test(location.hash)) setAddress("#/history", false);
+    const detail = /^#\/(history|tasks|jobs)\/./.exec(location.hash);
+    if (detail) setAddress("#/" + detail[1], false);
   }
 }
 
@@ -4235,6 +4368,9 @@ document.addEventListener("click", async (event) => {
 
   if (d.log) return openLog(d.log);
   if (d.historyOlder !== undefined) return historyOlder();
+  if (d.taskOpen) return openTask(d.taskOpen);
+  if (d.jobOpen) return openJob(d.jobOpen);
+  if (d.runOpen) return openRun(d.runOpen);
   if (d.stream) return reopenStream(d.stream);
   if (d.copyText !== undefined) {
     try {
@@ -4426,8 +4562,8 @@ function route() {
     .map((p) => { try { return decodeURIComponent(p); } catch (e) { return p; } });
   const name = TABS.includes(parts[0]) ? parts[0] : "remotes";
   showTab(name);
-  // Back from a run in full is back to the list: the box goes with it.
-  if (!(name === "history" && parts[1])) {
+  // Back from something in full is back to its list: the box goes with it.
+  if (!parts[1] || name === "remotes") {
     if (!$("resultbox").classList.contains("hidden") && routedBox) closeResult();
   }
   if (name === "remotes" && parts[1]) {
@@ -4435,6 +4571,8 @@ function route() {
     if (parts[1] !== browsing.remote || path !== browsing.path) browse(parts[1], path, true);
   }
   if (name === "history" && parts[1]) openRun(parts[1], true);
+  if (name === "tasks" && parts[1]) openTask(parts[1], true);
+  if (name === "jobs" && parts[1]) openJob(parts[1], true);
 }
 
 window.addEventListener("popstate", route);
