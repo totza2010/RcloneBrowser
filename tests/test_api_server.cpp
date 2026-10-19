@@ -3480,6 +3480,34 @@ private slots:
     QVERIFY(!LocalFiles::IsRestricted());
   }
 
+  // A mount task started anywhere but the window's own button carries the
+  // mount options from Preferences, as one made by hand does.
+  void aMountTaskCarriesTheMountOptionsFromPreferences() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000");
+    GetSettings()->setValue("Settings/mount", "--vfs-cache-max-age 2h");
+    auto *task = new JobOptions(true);
+    task->description = QStringLiteral("mounted");
+    task->operation = JobOptions::Mount;
+    task->jobType = JobOptions::Download;
+    task->source = QStringLiteral("fake:films");
+    task->dest = QStringLiteral("X:");
+    task->uniqueId = QUuid::createUuid();
+    ListOfJobOptions::getInstance()->Persist(task);
+
+    RunningJob *job = StartTask(task, QStringLiteral("api"), QUuid::createUuid().toString());
+    QVERIFY(job != nullptr);
+    const QStringList command = job->displayCommand();
+    QVERIFY2(command.contains(QStringLiteral("--vfs-cache-max-age")) &&
+                 command.contains(QStringLiteral("2h")),
+             qPrintable(command.join(' ')));
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    GetSettings()->remove("Settings/mount");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

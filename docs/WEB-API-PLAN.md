@@ -440,7 +440,8 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - Mount และ Copy/Move บนเว็บมีตัวเลือกน้อยกว่า · Check กับโฟลเดอร์ในเครื่อง · Size หลายรายการ
 - ~~หน้าต่างคัดลอกข้ามรีโหมดไม่ได้ (หน้าเว็บได้)~~ — **ทำแล้ว 2026-10-19**: คลิกขวา / Tools → **Copy or move to another remote…**
   (เลือกรีโหมดปลายทาง · โฟลเดอร์ · Move · Dry run · ทุกรายการที่เลือก งานละรายการ ผ่าน `RemoteOps::CopyInto` ตัวเดียวกับหน้าเว็บ ·
-  Copy/Move เดิมของหน้าต่างยังอยู่ในรีโหมดเดียวกัน) · mount จาก task ไม่ได้ `Settings/mount`
+  Copy/Move เดิมของหน้าต่างยังอยู่ในรีโหมดเดียวกัน) · ~~mount จาก task ไม่ได้ `Settings/mount`~~ — **แก้แล้ว 2026-10-19**: `StartTask` เติมตัวเลือก mount จาก Preferences
+  (คิว · ตารางเวลา · API · `--run-task` ไม่มีมาก่อน — ปุ่มในหน้าต่างเติมใน `addNewMount` อยู่แล้ว) · test `aMountTaskCarriesTheMountOptionsFromPreferences`
 - ค่าเริ่มต้นของฟอร์มอยู่สองที่ · การ์ดตารางเวลาควรอ่านจากที่เก็บ
 - ~~ตั้งค่า stream idle / ขอบเขตโฟลเดอร์ จาก Preferences และหน้าเว็บ~~ — **ทำแล้ว 2026-10-19**: `ProgramSettings` (core) ·
   `GET/PUT /api/v1/settings` (**admin** ทั้งอ่านและเขียน — ขอบเขตโฟลเดอร์คือเส้นที่ทุก key ถูกจำกัด) · หน้าเว็บ แท็บ API → **Program settings** ·

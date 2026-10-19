@@ -2139,6 +2139,15 @@ marker: `ProgramSettings` · `/api/v1/settings` · Preferences → Web page
 | 2 | หน้าเว็บ 19991 · API → Program settings | roots แสดง /media แบบแก้ไม่ได้ (RB_LOCAL_ROOTS) · idle แก้ได้ | ⬜ | |
 | 3 | หน้าต่าง · Preferences → Web page · Add folder… · OK | ค่าบันทึก · หน้าเว็บเห็นตรงกัน · ตัวเลือกไฟล์ของหน้าเว็บเห็นแค่โฟลเดอร์นั้น | ⬜ | |
 
+### V-74 · mount task ได้ตัวเลือกจาก Preferences
+
+marker: `Settings/mount` ใน `StartTask`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | test: Settings/mount = `--vfs-cache-max-age 2h` · StartTask ของ mount task | คำสั่งมีตัวเลือกนั้น | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | ตั้งตัวเลือก mount ใน Preferences · รัน mount task จากหน้าเว็บ/ตารางเวลา | Log ของงานแสดงตัวเลือกนั้นในคำสั่ง | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

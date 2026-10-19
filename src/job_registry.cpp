@@ -1,5 +1,7 @@
 #include "debug_log.h"
 #include "job_registry.h"
+#include "utils.h"
+#include <QSettings>
 #include "list_of_job_options.h"
 #include "run_history.h"
 
@@ -100,9 +102,14 @@ RunningJob *StartTask(JobOptions *task, const QString &transferMode,
   task->dryRun = dryRun && !isMount;
 
   task->resync = resync;
-  const QStringList args = isMount ? task->getMountOptions()
-                                   : task->getOptions();
+  QStringList args = isMount ? task->getMountOptions() : task->getOptions();
   task->resync = false; // this run's, not the task's
+  // The mount options from Preferences, which a mount made by hand in the
+  // window or on the page has always carried: a mount task started by the
+  // queue, a schedule, the API or --run-task went without them.
+  if (isMount) {
+    args << SplitRcloneOptions(GetSettings()->value("Settings/mount").toString());
+  }
 
   qCDebug(rbJob) << "start task" << task->description << "mode=" << transferMode
                  << "dryRun=" << dryRun << "request=" << requestId;
