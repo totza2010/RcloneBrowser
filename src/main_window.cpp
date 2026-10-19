@@ -20,6 +20,7 @@
 #include "preferences_dialog.h"
 #include "webhooks_dialog.h"
 #include "backup_dialog.h"
+#include "api_keys_dialog.h"
 #include "folder_watches.h"
 #include <QInputDialog>
 #include "job_registry.h"
@@ -598,6 +599,16 @@ MainWindow::MainWindow() {
                               webhooks);
     QObject::connect(webhooks, &QAction::triggered, this, [this]() {
       WebhooksDialog dialog(this);
+      dialog.exec();
+    });
+
+    // And the page's keys for other programs.
+    QAction *keys = new QAction("API keys…", this);
+    keys->setStatusTip("Keys for other programs, each with its own level");
+    ui.menuFile->insertAction(fileMenu.value(fileMenu.indexOf(ui.preferences) + 1),
+                              keys);
+    QObject::connect(keys, &QAction::triggered, this, [this]() {
+      ApiKeysDialog dialog(this);
       dialog.exec();
     });
 

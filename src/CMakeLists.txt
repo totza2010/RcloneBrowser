@@ -211,6 +211,7 @@ set(MOC
   file_view_dialog.h
   webhooks_dialog.h
   backup_dialog.h
+  api_keys_dialog.h
 )
 
 set(OTHER
@@ -253,6 +254,7 @@ set(SOURCE
   file_view_dialog.cpp
   webhooks_dialog.cpp
   backup_dialog.cpp
+  api_keys_dialog.cpp
 )
 
 if(WIN32)
