@@ -644,7 +644,7 @@ function scheduledLine(task) {
 function drawTasks() {
   // A mount is a task too, and is not a transfer: it is shown, and left to
   // the window to change.
-  const editable = (task) => ["copy", "move", "sync"].includes(task.operation);
+  const editable = (task) => ["copy", "move", "sync", "bisync"].includes(task.operation);
 
   const cards = state.tasks.map((task) => (
     '<div class="card">' +
@@ -654,6 +654,12 @@ function drawTasks() {
           (task.operation ? " · " + esc(task.operation) : "") + "</span>" +
         '<div class="card-actions">' +
           '<button class="small" data-run="' + esc(task.id) + '">Run</button>' +
+          // A bisync starts as a resync: rclone refuses a pair it has no
+          // record of. Asked for by hand, for one run.
+          (task.operation === "bisync"
+            ? '<button class="ghost small" data-resync="' + esc(task.id) + '" ' +
+              'title="rclone bisync --resync: before the first run, and when rclone says so">First run (resync)</button>'
+            : "") +
           '<button class="ghost small" data-enqueue="' + esc(task.id) + '">Queue</button>' +
           '<button class="ghost small" data-dry="' + esc(task.id) + '">Dry run</button>' +
           (editable(task)
@@ -746,7 +752,7 @@ function schedRules() {
 
 // `from` is a schedule to change, or what a new one starts with.
 function openSchedule(from, title) {
-  const tasks = state.tasks.filter((t) => ["copy", "move", "sync"].includes(t.operation));
+  const tasks = state.tasks.filter((t) => ["copy", "move", "sync", "bisync"].includes(t.operation));
   if (!tasks.length) {
     toast("there are no tasks to schedule — save a transfer as a task first");
     return;
@@ -3705,6 +3711,7 @@ document.addEventListener("click", async (event) => {
 
   if (d.run && (await command("POST", task(d.run, "/run")))) return refresh();
   if (d.dry && (await command("POST", task(d.dry, "/run?dryRun=1")))) return refresh();
+  if (d.resync && (await command("POST", task(d.resync, "/run"), { resync: true }))) return refresh();
   if (d.enqueue && (await command("POST", task(d.enqueue, "/enqueue")))) return refresh();
 
   if (d.newTask) return openTransfer(d.newTask, {});

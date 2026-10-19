@@ -192,6 +192,7 @@
             <label class="check"><input type="radio" name="task-operation" value="copy"> Copy <span class="muted">— rclone copy</span></label>
             <label class="check"><input type="radio" name="task-operation" value="move"> Move <span class="muted">— rclone move: the source is deleted once it has arrived</span></label>
             <label class="check"><input type="radio" name="task-operation" value="sync"> Sync <span class="muted">— rclone sync: the destination is made the same, deleting what the source does not have</span></label>
+            <label class="check"><input type="radio" name="task-operation" value="bisync"> Bisync <span class="muted">— rclone bisync: both sides kept the same, changes on either carried to the other. Its first run is <b>First run (resync)</b> on the task</span></label>
             <select data-field="syncTiming" id="task-timing">
               <option value="during">Delete during transfer</option>
               <option value="after">Delete after transfer</option>

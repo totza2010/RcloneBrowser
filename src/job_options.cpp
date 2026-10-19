@@ -60,6 +60,8 @@ QStringList JobOptions::getOptions() const {
     list << "move";
   } else if (operation == Sync) {
     list << "sync";
+  } else if (operation == Bisync) {
+    list << "bisync";
   }
 
   list << source;
@@ -256,6 +258,9 @@ QStringList JobOptions::getOptions() const {
 
   if (dryRun) {
     list << "--dry-run";
+  }
+  if (operation == Bisync && resync) {
+    list << "--resync";
   }
 
   return list;

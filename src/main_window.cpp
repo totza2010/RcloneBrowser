@@ -1076,6 +1076,22 @@ MainWindow::MainWindow() {
           if (!isRunning) {
             menu.addAction(ui.actionRun);
           }
+          // A bisync's first run starts the pair afresh. Asked for here, by
+          // hand, and for this one run: the task stays an ordinary bisync.
+          if (!isRunning && items.count() == 1) {
+            JobOptions *jo =
+                static_cast<JobOptionsListWidgetItem *>(items.first())->GetData();
+            if (jo->operation == JobOptions::Bisync) {
+              QAction *first = menu.addAction("Run first time (resync)");
+              first->setStatusTip("rclone bisync --resync: needed before the "
+                                  "first run, and when rclone says so");
+              QObject::connect(first, &QAction::triggered, this, [this, jo]() {
+                jo->resync = true;
+                runItem(jo, "task", QUuid::createUuid().toString(), false);
+                jo->resync = false;
+              });
+            }
+          }
           if (isRunning) {
             menu.addAction(ui.actionStop);
           }
@@ -3852,6 +3868,8 @@ void MainWindow::runItem(JobOptions *jo, const QString &transferMode,
       operation = "Move";
     if (int(jo->operation) == 3)
       operation = "Sync";
+    if (jo->operation == JobOptions::Bisync)
+      operation = "Bisync";
 
     if (dryrun) {
       info = QString("Dry run, task: \"%1\", %2 from %3")

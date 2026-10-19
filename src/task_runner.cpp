@@ -64,6 +64,8 @@ QString operationName(JobOptions::Operation operation) {
     return QStringLiteral("move");
   case JobOptions::Sync:
     return QStringLiteral("sync");
+  case JobOptions::Bisync:
+    return QStringLiteral("bisync");
   case JobOptions::Mount:
     return QStringLiteral("mount");
   case JobOptions::Check:

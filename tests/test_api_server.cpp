@@ -3009,6 +3009,64 @@ private slots:
     QCOMPARE(Webhooks::EventName(QStringLiteral("stopped")), QStringLiteral("job.stopped"));
   }
 
+  // A bisync is a task like any other; its first run is a resync, asked for
+  // with that one run and never kept with the task.
+  void aBisyncStartsWithAResyncOnlyWhenAsked() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    JobOptions *task = makeTask(QStringLiteral("both ways"));
+    task->operation = JobOptions::Bisync;
+    ListOfJobOptions::getInstance()->Persist(task);
+    const QByteArray path =
+        "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString());
+
+    // Said as bisync, and read back as one.
+    const QByteArray listed = ask("GET", path, mToken);
+    QCOMPARE(bodyOf(listed).object().value(QStringLiteral("operation")).toString(),
+             QStringLiteral("bisync"));
+
+    const auto commandOf = [&](const QByteArray &started) {
+      const QString id = bodyOf(started).object().value(QStringLiteral("requestId")).toString();
+      RunningJob *job = JobRegistry::instance().find(id);
+      return job != nullptr ? job->displayCommand() : QStringList();
+    };
+
+    const QByteArray first = send("POST", path + "/run", mToken, "{\"resync\":true}");
+    QCOMPARE(statusOf(first), 202);
+    const QStringList firstCommand = commandOf(first);
+    QVERIFY(firstCommand.contains(QStringLiteral("bisync")));
+    QVERIFY(firstCommand.contains(QStringLiteral("--resync")));
+    QCOMPARE(task->resync, false); // the run's, not the task's
+    QTRY_VERIFY_WITH_TIMEOUT(!JobRegistry::instance()
+                                  .find(bodyOf(first).object().value(QStringLiteral("requestId")).toString())
+                                  ->isRunning(),
+                             5000);
+
+    const QByteArray again = send("POST", path + "/run", mToken, "{}");
+    QCOMPARE(statusOf(again), 202);
+    QVERIFY(!commandOf(again).contains(QStringLiteral("--resync")));
+    QTRY_VERIFY_WITH_TIMEOUT(!JobRegistry::instance()
+                                  .find(bodyOf(again).object().value(QStringLiteral("requestId")).toString())
+                                  ->isRunning(),
+                             5000);
+
+    // Only a bisync is resynced.
+    JobOptions *copy = makeTask(QStringLiteral("one way"));
+    QCOMPARE(statusOf(send("POST",
+                           "/api/v1/tasks/" + QUrl::toPercentEncoding(copy->uniqueId.toString()) + "/run",
+                           mToken, "{\"resync\":true}")),
+             400);
+
+    // And a task can be made one from the page.
+    QCOMPARE(statusOf(send("PUT", path, mToken, "{\"operation\":\"copy\"}")), 200);
+    QCOMPARE(statusOf(send("PUT", path, mToken, "{\"operation\":\"bisync\"}")), 200);
+    QCOMPARE(task->operation, JobOptions::Bisync);
+    QCOMPARE(statusOf(send("PUT", path, mToken, "{\"operation\":\"trisync\"}")), 400);
+
+    ListOfJobOptions::getInstance()->Forget(task);
+    ListOfJobOptions::getInstance()->Forget(copy);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

@@ -163,6 +163,7 @@ int main(int argc, char *argv[]) {
 
   if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
       std::strcmp(command, "move") == 0 || std::strcmp(command, "mount") == 0 ||
+      std::strcmp(command, "bisync") == 0 ||
       std::strcmp(command, "serve") == 0) {
     // What a serve was given, and the password it found in its environment
     // -- which is where it has to come from, never the arguments.

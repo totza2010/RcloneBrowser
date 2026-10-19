@@ -46,6 +46,8 @@ QString operationWord(const JobOptions &task) {
     return QStringLiteral("Move");
   case JobOptions::Sync:
     return QStringLiteral("Sync");
+  case JobOptions::Bisync:
+    return QStringLiteral("Bisync");
   default:
     return QString();
   }
@@ -84,7 +86,7 @@ JobDescription DescribeTask(const JobOptions &task,
 }
 
 RunningJob *StartTask(JobOptions *task, const QString &transferMode,
-                      const QString &requestId, bool dryRun) {
+                      const QString &requestId, bool dryRun, bool resync) {
   if (task == nullptr) {
     return nullptr;
   }
@@ -95,8 +97,10 @@ RunningJob *StartTask(JobOptions *task, const QString &transferMode,
   // what stops a dry run turning into a real one on the next start.
   task->dryRun = dryRun && !isMount;
 
+  task->resync = resync;
   const QStringList args = isMount ? task->getMountOptions()
                                    : task->getOptions();
+  task->resync = false; // this run's, not the task's
 
   qCDebug(rbJob) << "start task" << task->description << "mode=" << transferMode
                  << "dryRun=" << dryRun << "request=" << requestId;

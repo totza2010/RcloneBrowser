@@ -15,7 +15,8 @@ const QStringList kOperations = {QStringLiteral("unknown"),
                                  QStringLiteral("sync"),
                                  QStringLiteral("mount"),
                                  QStringLiteral("check"),
-                                 QStringLiteral("cryptcheck")};
+                                 QStringLiteral("cryptcheck"),
+                                 QStringLiteral("bisync")};
 
 const QStringList kTimings = {QStringLiteral("during"), QStringLiteral("after"),
                               QStringLiteral("before")};
@@ -158,9 +159,12 @@ bool Read(const QJsonObject &json, JobOptions *task, QString *why) {
       next.operation = JobOptions::Move;
     } else if (asked == QLatin1String("sync")) {
       next.operation = JobOptions::Sync;
+    } else if (asked == QLatin1String("bisync")) {
+      next.operation = JobOptions::Bisync;
     } else {
       return fail(why, QStringLiteral(
-                           "\"operation\" has to be copy, move or sync"));
+                           "\"operation\" has to be copy, move, sync or "
+                           "bisync"));
     }
   }
   // The flag the command is built from follows the choice, so the two cannot

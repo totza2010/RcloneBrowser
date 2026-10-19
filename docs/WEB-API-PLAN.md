@@ -421,7 +421,7 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 4. ~~serve ทั้งรีโหมดเป็น WebDAV / SFTP / FTP / HTTP~~ — **ทำแล้ว 2026-10-19** ดู "serve โฟลเดอร์ให้โปรแกรมอื่น"
 5. ~~ดูไฟล์ในตัว (ภาพ · PDF · ข้อความ)~~ — **ทำแล้ว 2026-10-19** ดู "ดูไฟล์ในตัว"
 6. ~~การแจ้งเตือนเมื่องานจบ/ล้ม · webhook (A6)~~ — **ทำแล้ว 2026-10-19** ดู "webhook และการแจ้งเตือน"
-7. sync สองทาง (bisync) · ตัวช่วยสำรองข้อมูล
+7. sync สองทาง (bisync) · ตัวช่วยสำรองข้อมูล — **bisync ทำแล้ว 2026-10-19** ดู "bisync" · ตัวช่วยสำรองข้อมูลยังค้าง
 8. หลายภาษา · เฝ้าโฟลเดอร์
 
 **API** (A1 · A2)
@@ -446,6 +446,21 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test
 - `docs/VERIFY.md` มี 164 แถวที่ยังไม่มีใครลอง
+
+## bisync (2026-10-19)
+
+- **task ชนิดใหม่** `JobOptions::Bisync` (ต่อท้าย enum = 7 เพราะเก็บเป็นตัวเลข · task เดิมไม่เปลี่ยน) → `rclone bisync source dest` ·
+  คิว · ตารางเวลา · ประวัติ · webhook ใช้ได้เหมือน task อื่นทันที · TaskJson `"operation":"bisync"`
+- **ครั้งแรกต้อง `--resync`** (rclone ไม่รู้จักคู่นี้ → exit 7 "Must run --resync to recover") · `resync` **ไม่เก็บกับ task**
+  แบบเดียวกับ dryRun — ถ้าเก็บ ทุกรอบตามตารางเวลาจะเริ่มคู่ใหม่ · `StartTask(..., resync)` ตั้งแล้วล้างทันทีหลังสร้างคำสั่ง
+- **API**: `POST /tasks/{id}/run {"resync":true}` · task ที่ไม่ใช่ bisync → 400
+- **หน้าเว็บ**: ตัวเลือก Bisync ในฟอร์ม task (ตัวเลือกการลบของ sync ซ่อน) · การ์ด task มีปุ่ม **First run (resync)**
+- **หน้าต่าง**: ตัวเลือก Bisync ในกล่อง transfer · คลิกขวา task → **Run first time (resync)**
+- **ตรวจกับ rclone v1.73.1 จริง** (โฟลเดอร์ทดสอบในเครื่อง พร้อม flag ที่ task เติม `--rc` `--stats-log-level` `--stats`):
+  ไม่ resync → exit 7 · resync → สองฝั่งรวมกัน · เพิ่มไฟล์ฝั่ง b + ลบฝั่ง a → ทั้งสองฝั่งตรงกัน · ลบโฟลเดอร์และ listing ทดสอบแล้ว
+- ⚠ Windows: listing ของ bisync อยู่ที่ `%LOCALAPPDATA%/rclone/bisync/<path1>..<path2>.lst` — path ยาวมากเกิน MAX_PATH แล้ว bisync ล้ม
+  ("syntax error detected in your path(s)")
+- ยังไม่ได้: บอกในหน้าเว็บ/หน้าต่างเมื่องานล้มเพราะต้อง resync (ตอนนี้อยู่ใน log) · ตัวเลือกของ bisync เอง (`--conflict-resolve`, `--max-delete`, `--resilient`)
 
 ## webhook และการแจ้งเตือน (2026-10-19)
 

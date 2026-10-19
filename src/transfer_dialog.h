@@ -28,6 +28,8 @@ public:
   JobOptions *getJobOptions(JobOptions *taskOptions);
 
 private:
+  // Bisync, made here: the form's .ui has the other three.
+  class QRadioButton *mRbBisync = nullptr;
   Ui::TransferDialog ui;
 
   bool mIsDownload;

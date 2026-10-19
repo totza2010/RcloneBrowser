@@ -3,6 +3,7 @@
 #include "completers.h"
 #include "file_dialog.h"
 #include "list_of_job_options.h"
+#include <QRadioButton>
 #include "utils.h"
 #include "widget_settings.h"
 #include <QToolTip>
@@ -18,6 +19,14 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       mRemoteType(remoteType), mIsMultiItem(isMultiItem), mJobOptions(task) {
 
   ui.setupUi(this);
+
+  // Next to the other three, in the same group so only one is chosen.
+  mRbBisync = new QRadioButton("Bisync — both sides kept the same, changes "
+                               "on either carried to the other",
+                               ui.modeGroup);
+  mRbBisync->setToolTip("rclone bisync. Its first run has to be a resync: "
+                        "Tasks, right-click, Run first time (resync).");
+  ui.gridLayout_2->addWidget(mRbBisync, 3, 0);
 
   // remove window close button
   setWindowFlags(Qt::Dialog | Qt::WindowTitleHint | Qt::CustomizeWindowHint |
@@ -829,6 +838,8 @@ QString TransferDialog::getMode() const {
     return "Move";
   } else if (ui.rbSync->isChecked()) {
     return "Sync";
+  } else if (mRbBisync->isChecked()) {
+    return "Bisync";
   }
 
   return QString();
@@ -882,6 +893,9 @@ JobOptions *TransferDialog::getJobOptions(JobOptions *taskOptions) {
     taskOptions->sync = false;
   } else if (ui.rbSync->isChecked()) {
     taskOptions->operation = JobOptions::Sync;
+  } else if (mRbBisync->isChecked()) {
+    taskOptions->operation = JobOptions::Bisync;
+    taskOptions->sync = false;
   }
 
   //  taskOptions->dryRun = mDryRun;
@@ -986,6 +1000,7 @@ void TransferDialog::putJobOptions() {
 
   mDryRun = mJobOptions->dryRun;
   ui.rbSync->setChecked(mJobOptions->sync);
+  mRbBisync->setChecked(mJobOptions->operation == JobOptions::Bisync);
 
   ui.cbSyncDelete->setCurrentIndex((int)mJobOptions->syncTiming);
   // set combobox tooltips

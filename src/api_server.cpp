@@ -2876,8 +2876,15 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
 
       const QString requestId = QUuid::createUuid().toString();
       qCDebug(rbApp) << "API running task" << id << "request=" << requestId;
+      // The first run of a bisync. Asked for by name, never assumed.
+      const bool resync =
+          options(request).value(QStringLiteral("resync")).toBool(false);
+      if (resync && task->operation != JobOptions::Bisync) {
+        *body = problem(QStringLiteral("only a bisync is resynced"));
+        return 400;
+      }
       StartTask(task, mCallerName.isEmpty() ? QStringLiteral("api") : mCallerName,
-                requestId, wantsDryRun(request));
+                requestId, wantsDryRun(request), resync);
       *body = startedJob(requestId, QStringLiteral("now"));
       return 202;
     }

@@ -1927,6 +1927,19 @@ marker: `Webhooks` · `/api/v1/webhooks` · `WebhooksDialog` · `jobs-notify`
 | 6 | หน้าเว็บ · ☐ Tell me in this browser… · transfer จบ | browser แจ้งเตือน | ⬜ | |
 | 7 | งานจากตารางเวลาตอนไม่มีหน้าต่าง (daemon) | webhook ยังถูกเรียก | ⬜ | |
 
+### V-55 · bisync
+
+marker: `JobOptions::Bisync` · `"resync"` · `Run first time (resync)`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: task bisync · run resync · run ธรรมดา · resync กับ copy · PUT operation | `--resync` เฉพาะรอบที่ขอ · ไม่ติดกับ task · 400 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | rclone จริง: คำสั่งของ task + resync / ไม่ resync / เปลี่ยนทั้งสองฝั่ง | exit 7 · รวมกัน · ตรงกัน | ✅ **PASS** (โฟลเดอร์ในเครื่อง) | AI / 2026-10-19 |
+| 3 | หน้าเว็บ · ฟอร์ม task เลือก Bisync · บันทึก · First run (resync) | งานจบ · สองฝั่งตรงกัน | ⬜ | |
+| 4 | หน้าต่าง · กล่อง transfer เลือก Bisync · คลิกขวา → Run first time (resync) | เหมือนข้อ 3 | ⬜ | |
+| 5 | bisync เครื่องนี้ ↔ gdrive ตามตารางเวลา | รอบต่อไปไม่มี --resync · การเปลี่ยนทั้งสองฝั่งไปถึงกัน | ⬜ | |
+| 6 | เปิด task เดิม (copy/sync/mount) หลังอัปเดต | ชนิดเดิมไม่เปลี่ยน | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

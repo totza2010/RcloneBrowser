@@ -25,8 +25,11 @@ JobDescription DescribeTask(const JobOptions &task, const QString &transferMode,
 // that turns a task into a command, not one per caller.
 //
 // Returns nullptr only for a null task.
+//
+// `resync`: for a bisync, start the pair afresh this once (its first run).
 RunningJob *StartTask(JobOptions *task, const QString &transferMode,
-                      const QString &requestId, bool dryRun = false);
+                      const QString &requestId, bool dryRun = false,
+                      bool resync = false);
 
 class JobRegistry : public QObject {
   Q_OBJECT

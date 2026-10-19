@@ -15,7 +15,21 @@ public:
 
   ~JobOptions();
 
-  enum Operation { UnknownOp, Copy, Move, Sync, Mount, Check, CryptCheck };
+  // Stored as their numbers, so a new one goes at the end.
+  //
+  // Bisync: both sides made the same, changes on either carried to the
+  // other ("rclone bisync"). Its first run, and a run after the two have
+  // drifted apart for rclone's own reasons, has to be a resync.
+  enum Operation {
+    UnknownOp,
+    Copy,
+    Move,
+    Sync,
+    Mount,
+    Check,
+    CryptCheck,
+    Bisync
+  };
   enum JobType { UnknownJobType, Upload, Download };
 
   /*
@@ -37,6 +51,9 @@ public:
   JobType jobType;
   Operation operation;
   bool dryRun; // not persisted
+  // Not persisted either: a resync is asked for one run, by hand. Kept as
+  // the next run's would make every scheduled run start the pair afresh.
+  bool resync = false;
   bool sync;
   SyncTiming syncTiming;
   bool skipNewer;
