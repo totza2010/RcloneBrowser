@@ -527,6 +527,13 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .row { align-items: center; display: flex; font-size: 13px; gap: 10px; padding: 3px 0; }
 .uploads .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uploads .bar { flex: 0 0 160px; }
+
+/* The files of a job on their way, one line each. */
+.files { margin-top: 6px; display: grid; gap: 3px; }
+.file { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 8px; align-items: center; font-size: 0.85em; }
+.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file .bar { margin: 0; }
+@media (max-width: 640px) { .file { grid-template-columns: 1fr; } }
 #listing.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; }
 
 /* ---- the remote form --------------------------------------------------- */

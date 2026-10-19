@@ -3212,6 +3212,68 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/i18n/..%2Fapp.json", QByteArray())), 404);
   }
 
+  // How a transfer is going, file by file, as the window's card shows it.
+  void aTransferSaysEachFileOnItsWay() {
+    QVERIFY(useFakeRclone(1));
+    QTcpServer rc;
+    QVERIFY(rc.listen(QHostAddress::LocalHost, 0));
+    QObject::connect(&rc, &QTcpServer::newConnection, &rc, [&]() {
+      QTcpSocket *peer = rc.nextPendingConnection();
+      QObject::connect(peer, &QTcpSocket::readyRead, peer, [peer]() {
+        peer->readAll();
+        const QByteArray body =
+            "{\"bytes\":1000,\"totalBytes\":4000,\"speed\":2500,\"eta\":2,"
+            "\"checks\":3,\"totalChecks\":5,\"transfers\":1,\"totalTransfers\":4,"
+            "\"transferring\":[{\"name\":\"films/a.mkv\",\"bytes\":500,\"size\":1000,"
+            "\"percentage\":50,\"speed\":1500,\"eta\":1},"
+            "{\"name\":\"films/b.mkv\",\"bytes\":200,\"size\":-1,\"speed\":1000}]}";
+        peer->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    QByteArray::number(body.size()) + "\r\n\r\n" + body);
+      });
+    });
+    qputenv("FAKE_RCLONE_RC_PORT", QByteArray::number(rc.serverPort()));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000");
+
+    JobOptions *task = makeTask(QStringLiteral("file by file"));
+    const QByteArray run =
+        ask("POST", "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+            mToken);
+    const QString id = bodyOf(run).object().value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(job->stats().valid, 5000);
+
+    QJsonObject stats;
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("requestId")).toString() == id) {
+        stats = value.toObject().value(QStringLiteral("stats")).toObject();
+      }
+    }
+    QCOMPARE(stats.value(QStringLiteral("checks")).toInt(), 3);
+    QCOMPARE(stats.value(QStringLiteral("totalChecks")).toInt(), 5);
+    QCOMPARE(stats.value(QStringLiteral("phase")).toString(), QStringLiteral("transferring"));
+    // And when it began, with its offset from UTC: a moment, not a clock.
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("requestId")).toString() == id) {
+        const QString at = value.toObject().value(QStringLiteral("startedAt")).toString();
+        QVERIFY2(QRegularExpression(QStringLiteral("([+-]\\d\\d:\\d\\d|Z)$")).match(at).hasMatch(),
+                 qPrintable(at));
+      }
+    }
+    const QJsonArray files = stats.value(QStringLiteral("transferring")).toArray();
+    QCOMPARE(files.size(), 2);
+    QCOMPARE(files.at(0).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("films/a.mkv"));
+    QCOMPARE(files.at(0).toObject().value(QStringLiteral("percent")).toInt(), 50);
+    // No size up front: no percent, rather than an invented one.
+    QCOMPARE(files.at(1).toObject().value(QStringLiteral("percent")).toInt(), -1);
+
+    job->stop();
+    qunsetenv("FAKE_RCLONE_RC_PORT");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

@@ -165,9 +165,7 @@ QJsonObject describeHook(const Webhook &hook) {
   object.insert(QStringLiteral("hasSecret"), !hook.secret.isEmpty());
   object.insert(QStringLiteral("lastResult"), hook.lastResult);
   object.insert(QStringLiteral("lastAt"),
-                hook.lastAt > 0
-                    ? QDateTime::fromMSecsSinceEpoch(hook.lastAt).toString(Qt::ISODate)
-                    : QString());
+                JobJson::Stamp(hook.lastAt));
   return object;
 }
 
@@ -185,13 +183,7 @@ Webhook hookFrom(const QJsonObject &given) {
 // A moment, with its offset from UTC. Without one, "10:52" means a different
 // instant to every reader in a different time zone, and a program reading
 // this has no window to look at to guess which.
-QString stamp(qint64 msSinceEpoch) {
-  if (msSinceEpoch <= 0) {
-    return QString();
-  }
-  const QDateTime local = QDateTime::fromMSecsSinceEpoch(msSinceEpoch);
-  return local.toOffsetFromUtc(local.offsetFromUtc()).toString(Qt::ISODate);
-}
+QString stamp(qint64 msSinceEpoch) { return JobJson::Stamp(msSinceEpoch); }
 
 // One run, as the answer to "when did this last happen": when it began, when
 // it ended, how long that was and how it went. Null when it never has.
@@ -231,9 +223,9 @@ QJsonObject describeKey(const ApiAuth::Key &key) {
   object.insert(QStringLiteral("id"), key.id);
   object.insert(QStringLiteral("name"), key.name);
   object.insert(QStringLiteral("scope"), ApiAuth::ScopeName(key.scope));
-  object.insert(QStringLiteral("created"), key.created.toString(Qt::ISODate));
+  object.insert(QStringLiteral("created"), JobJson::Stamp(key.created));
   object.insert(QStringLiteral("lastUsed"),
-                key.lastUsed.isValid() ? key.lastUsed.toString(Qt::ISODate)
+                key.lastUsed.isValid() ? JobJson::Stamp(key.lastUsed)
                                        : QString());
   return object;
 }
@@ -3468,10 +3460,10 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       object.insert(QStringLiteral("taskId"), watch.taskId);
       object.insert(QStringLiteral("quietSeconds"), watch.quietSeconds);
       object.insert(QStringLiteral("lastChange"),
-                    watch.lastChange.isValid() ? watch.lastChange.toString(Qt::ISODate)
+                    watch.lastChange.isValid() ? JobJson::Stamp(watch.lastChange)
                                                : QString());
       object.insert(QStringLiteral("lastQueued"),
-                    watch.lastQueued.isValid() ? watch.lastQueued.toString(Qt::ISODate)
+                    watch.lastQueued.isValid() ? JobJson::Stamp(watch.lastQueued)
                                                : QString());
       array.append(object);
     }
@@ -3810,10 +3802,6 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
 
       // When, as well as what. A history that does not say when is a list
       // of things that happened at some point.
-      const auto stamp = [](qint64 ms) {
-        return ms > 0 ? QDateTime::fromMSecsSinceEpoch(ms).toString(Qt::ISODate)
-                      : QString();
-      };
       object.insert(QStringLiteral("startedAt"), stamp(row.startedAt));
       object.insert(QStringLiteral("finishedAt"), stamp(row.finishedAt));
       array.append(object);

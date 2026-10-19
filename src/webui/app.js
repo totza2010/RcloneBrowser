@@ -555,7 +555,10 @@ function jobCard(job) {
   } else if (stats.bytes) {
     figures.push(bytes(stats.bytes));
   }
-  if (stats.transfers) figures.push(stats.transfers + " files");
+  if (job.running && stats.phase && stats.phase !== "transferring") figures.push(esc(stats.phase) + "…");
+  if (stats.transfers) figures.push(stats.transfers + (stats.totalTransfers ? " of " + stats.totalTransfers : "") + " files");
+  if (stats.totalChecks) figures.push(stats.checks + " of " + stats.totalChecks + " checked");
+  if (stats.deletes) figures.push(stats.deletes + " deleted");
   if (stats.errors) figures.push(stats.errors + " errors");
   if (stats.elapsedSeconds) figures.push(seconds(stats.elapsedSeconds));
   if (job.running && stats.speed) figures.push(bytes(stats.speed) + "/s");
@@ -597,8 +600,26 @@ function jobCard(job) {
         ? '<div class="bar"><span style="width:' + done.toFixed(1) + '%"></span></div>'
         : "") +
       '<div class="figures"><span>' + figures.join("</span><span>") + "</span></div>" +
+      (job.running ? fileBars(stats.transferring || []) : "") +
     "</div>"
   );
+}
+
+// Each file on its way, with a bar of its own -- what the window's card
+// shows under its overall bar.
+function fileBars(files) {
+  if (!files.length) return "";
+  return '<div class="files">' + files.map((f) => {
+    const known = f.percent >= 0;
+    return '<div class="file">' +
+      '<span class="file-name" title="' + esc(f.name) + '">' + esc(f.name) + "</span>" +
+      (known
+        ? '<span class="bar"><span style="width:' + Math.min(100, f.percent) + '%"></span></span>'
+        : '<span class="muted">' + bytes(f.bytes) + "</span>") +
+      '<span class="muted">' + (known ? f.percent + "% · " : "") + bytes(f.speed || 0) + "/s" +
+        (known && f.etaSeconds > 0 ? " · " + seconds(f.etaSeconds) : "") + "</span>" +
+    "</div>";
+  }).join("") + "</div>";
 }
 
 // Running first, then the newest. The daemon hands jobs over in the order

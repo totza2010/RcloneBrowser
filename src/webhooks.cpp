@@ -209,9 +209,7 @@ QString Webhooks::EventName(const QString &finalStatus) {
 QJsonObject Webhooks::EventFor(const RunningJob &job) {
   QJsonObject event;
   event.insert(QStringLiteral("event"), EventName(job.finalStatus()));
-  const QDateTime now = QDateTime::currentDateTime();
-  event.insert(QStringLiteral("at"),
-               now.toOffsetFromUtc(now.offsetFromUtc()).toString(Qt::ISODate));
+  event.insert(QStringLiteral("at"), JobJson::Stamp(QDateTime::currentDateTime()));
   event.insert(QStringLiteral("job"), JobJson::Write(job));
   event.insert(QStringLiteral("summary"), Summary(event));
   return event;
@@ -297,9 +295,7 @@ void Webhooks::test(const QString &id,
   job.insert(QStringLiteral("state"), QStringLiteral("finished"));
   QJsonObject event;
   event.insert(QStringLiteral("event"), QStringLiteral("test"));
-  const QDateTime now = QDateTime::currentDateTime();
-  event.insert(QStringLiteral("at"),
-               now.toOffsetFromUtc(now.offsetFromUtc()).toString(Qt::ISODate));
+  event.insert(QStringLiteral("at"), JobJson::Stamp(QDateTime::currentDateTime()));
   event.insert(QStringLiteral("job"), job);
   event.insert(QStringLiteral("summary"), Summary(event));
   deliver(*hook, event, done);
