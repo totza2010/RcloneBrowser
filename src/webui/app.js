@@ -36,9 +36,20 @@ const state = {
 // Where the file browser is standing.
 const browsing = {
   remote: "", path: "", entries: [], error: "", loading: false,
-  // The row a command would act on. One for now; deleting will want several.
+  // The row a command for one thing acts on -- the last one clicked.
   chosen: "",
+  // Every row chosen: one with a click, more with Ctrl or Shift or the box
+  // beside each. Delete, Copy and Move act on all of them.
+  picked: new Set(),
+  // The rows in the order they are drawn, for Shift to pick a run of.
+  order: [],
 };
+
+// The rows chosen, as entries; the one chosen when there is only that.
+function pickedEntries() {
+  const paths = browsing.picked.size ? browsing.picked : new Set(browsing.chosen ? [browsing.chosen] : []);
+  return browsing.entries.filter((e) => paths.has(e.path));
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -1230,9 +1241,12 @@ function drawListing() {
     return a.name.localeCompare(b.name);
   });
 
+  browsing.order = sorted.map((e) => e.path);
   const rows = sorted.map((entry) => (
     '<tr data-entry="' + esc(entry.path) + '"' +
-      (entry.path === browsing.chosen ? ' class="chosen"' : "") + ">" +
+      (browsing.picked.has(entry.path) ? ' class="chosen"' : "") + ">" +
+      '<td class="pick"><input type="checkbox" data-pick="' + esc(entry.path) + '"' +
+        (browsing.picked.has(entry.path) ? " checked" : "") + ' aria-label="choose"></td>' +
       "<td>" +
         (entry.isDir
           ? '<button class="entry-name dir" data-go="' + esc(entry.path) + '">📁 ' + esc(entry.name) + "</button>"
@@ -1244,36 +1258,155 @@ function drawListing() {
   ));
 
   $("listing").innerHTML =
-    "<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>" +
+    '<table><thead><tr><th class="pick"><input type="checkbox" id="pick-all" aria-label="choose all"></th>' +
+    "<th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>" +
     rows.join("") + "</tbody></table>";
   drawChosen();
 }
 
 // What the commands that act on one thing are allowed to do right now.
 function drawChosen() {
-  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
-  $("remote-rename").disabled = !entry;
-  $("remote-delete").disabled = !entry;
-  $("remote-link").disabled = !entry || !can("publicLink");
-  $("remote-view").disabled = !entry || entry.isDir;
-  $("remote-copy").disabled = !entry;
-  $("remote-download").disabled = !entry;
-  $("remote-move").disabled = !entry;
-  $("remote-chosen").textContent = entry ? entry.name : "";
+  // Rows that have gone (deleted, renamed, another folder) are not chosen.
+  const there = new Set(browsing.entries.map((e) => e.path));
+  for (const path of [...browsing.picked]) if (!there.has(path)) browsing.picked.delete(path);
+  if (browsing.chosen && !there.has(browsing.chosen)) browsing.chosen = "";
+  if (!browsing.picked.size && browsing.chosen) browsing.picked.add(browsing.chosen);
+
+  const all = pickedEntries();
+  const one = all.length === 1 ? all[0] : null;
+  // What acts on one thing waits for one; what acts on many takes them all.
+  $("remote-rename").disabled = !one;
+  $("remote-link").disabled = !one || !can("publicLink");
+  $("remote-view").disabled = !one || one.isDir;
+  $("remote-download").disabled = !one;
+  $("remote-download").title = all.length > 1 ? "one at a time: choose one, or download the folder they are in" : "";
+  $("remote-delete").disabled = !all.length;
+  $("remote-copy").disabled = !all.length;
+  $("remote-move").disabled = !all.length;
+  $("remote-chosen").textContent = all.length > 1 ? all.length + " chosen" : one ? one.name : "";
   for (const row of document.querySelectorAll("#listing tbody tr")) {
-    row.classList.toggle("chosen", row.dataset.entry === browsing.chosen);
+    const on = browsing.picked.has(row.dataset.entry);
+    row.classList.toggle("chosen", on);
+    const box = row.querySelector("input[data-pick]");
+    if (box) box.checked = on;
   }
+  const head = $("pick-all");
+  if (head) {
+    head.checked = all.length > 0 && all.length === browsing.entries.length;
+    head.indeterminate = all.length > 0 && all.length < browsing.entries.length;
+  }
+}
+
+// A row chosen the way a file manager chooses: alone with a click, added or
+// taken out with Ctrl (or Cmd), a run of them with Shift.
+function pickRow(path, how) {
+  if (how === "range" && browsing.chosen) {
+    const from = browsing.order.indexOf(browsing.chosen);
+    const to = browsing.order.indexOf(path);
+    if (from >= 0 && to >= 0) {
+      for (const p of browsing.order.slice(Math.min(from, to), Math.max(from, to) + 1)) browsing.picked.add(p);
+      drawChosen();
+      return;
+    }
+  }
+  if (how === "toggle") {
+    if (browsing.picked.has(path)) {
+      browsing.picked.delete(path);
+      if (browsing.chosen === path) browsing.chosen = [...browsing.picked].pop() || "";
+    } else {
+      browsing.picked.add(path);
+      browsing.chosen = path;
+    }
+    drawChosen();
+    return;
+  }
+  // Alone. A second click on the only one chosen lets it go.
+  const only = browsing.picked.size === 1 && browsing.picked.has(path);
+  browsing.picked.clear();
+  browsing.chosen = only ? "" : path;
+  if (!only) browsing.picked.add(path);
+  drawChosen();
 }
 
 // Clicking a row chooses it. Clicking a folder's name still opens it, which
 // is handled with the other buttons below and never reaches here.
 $("listing").addEventListener("click", (event) => {
   if (event.target.closest("button")) return;
+  if (event.target.id === "pick-all") {
+    browsing.picked = new Set(event.target.checked ? browsing.order : []);
+    browsing.chosen = event.target.checked ? browsing.order[browsing.order.length - 1] || "" : "";
+    drawChosen();
+    return;
+  }
   const row = event.target.closest("tr[data-entry]");
   if (!row) return;
-  browsing.chosen = browsing.chosen === row.dataset.entry ? "" : row.dataset.entry;
-  drawChosen();
+  const box = event.target.closest("input[data-pick]");
+  pickRow(row.dataset.entry,
+          box || event.ctrlKey || event.metaKey ? "toggle" : event.shiftKey ? "range" : "alone");
 });
+
+// ---- the menu on a row ---------------------------------------------------------
+
+// The toolbar's own buttons, run from here, so what a menu item does is what
+// the button does -- including whether it may.
+function openRowMenu(x, y) {
+  const all = pickedEntries();
+  if (!all.length) return;
+  const one = all.length === 1 ? all[0] : null;
+  const item = (button, label) => {
+    const b = $(button);
+    return b ? '<button type="button" data-menu="' + button + '"' + (b.disabled ? " disabled" : "") + ">" +
+      esc(label) + "</button>" : "";
+  };
+  const menu = $("row-menu");
+  menu.innerHTML =
+    (one && !one.isDir ? item("remote-view", "View") + item("remote-stream", "Play") : "") +
+    (one && one.isDir ? item("remote-serve", "Serve…") + item("remote-mount", "Mount…") : "") +
+    item("remote-download", "Download…") +
+    "<hr>" +
+    item("remote-copy", all.length > 1 ? "Copy " + all.length + " to…" : "Copy to…") +
+    item("remote-move", all.length > 1 ? "Move " + all.length + " to…" : "Move to…") +
+    item("remote-rename", "Rename…") +
+    item("remote-link", "Public link") +
+    item("remote-size", "Size") +
+    "<hr>" +
+    item("remote-delete", all.length > 1 ? "Delete " + all.length + "…" : "Delete…");
+  menu.classList.remove("hidden");
+  // Kept on the screen, however near its edge the click was.
+  const box = menu.getBoundingClientRect();
+  menu.style.left = Math.max(4, Math.min(x, window.innerWidth - box.width - 4)) + "px";
+  menu.style.top = Math.max(4, Math.min(y, window.innerHeight - box.height - 4)) + "px";
+  const first = menu.querySelector("button:not(:disabled)");
+  if (first) first.focus();
+}
+
+function closeRowMenu() {
+  $("row-menu").classList.add("hidden");
+}
+
+$("listing").addEventListener("contextmenu", (event) => {
+  const row = event.target.closest("tr[data-entry]");
+  if (!row) return;
+  event.preventDefault();
+  // A row not among those chosen is chosen alone, as file managers do.
+  if (!browsing.picked.has(row.dataset.entry)) pickRow(row.dataset.entry, "alone");
+  if (!browsing.picked.size) pickRow(row.dataset.entry, "alone");
+  openRowMenu(event.clientX, event.clientY);
+});
+
+$("row-menu").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-menu]");
+  if (!button || button.disabled) return;
+  closeRowMenu();
+  $(button.dataset.menu).click();
+});
+document.addEventListener("mousedown", (event) => {
+  if (!event.target.closest("#row-menu")) closeRowMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeRowMenu();
+});
+window.addEventListener("scroll", closeRowMenu, true);
 
 // A file opens in the viewer when double-clicked.
 $("listing").addEventListener("dblclick", (event) => {
@@ -1281,6 +1414,7 @@ $("listing").addEventListener("dblclick", (event) => {
   const row = event.target.closest("tr[data-entry]");
   const entry = row && browsing.entries.find((e) => e.path === row.dataset.entry);
   if (!entry || entry.isDir) return;
+  browsing.picked = new Set([entry.path]);
   browsing.chosen = entry.path;
   drawChosen();
   viewFile(entry);
@@ -1334,6 +1468,7 @@ async function browse(remote, path) {
   }
   browsing.path = path || "";
   browsing.chosen = "";
+  browsing.picked = new Set();
   browsing.entries = [];
   browsing.error = "";
   browsing.loading = true;
@@ -1391,7 +1526,9 @@ $("remote-rename").addEventListener("click", async () => {
 });
 
 $("remote-delete").addEventListener("click", async () => {
-  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  const all = pickedEntries();
+  if (all.length > 1) return deleteMany(all);
+  const entry = all[0];
   if (!entry) return;
 
   // Says exactly what will go, and that a folder takes its contents with it.
@@ -1408,6 +1545,34 @@ $("remote-delete").addEventListener("click", async () => {
     { path: entry.path, isDir: entry.isDir });
   if (gone) browse(browsing.remote, browsing.path);
 });
+
+// Several at once: one question naming them, then one after another, so a
+// failure says which -- and what went before it is gone.
+async function deleteMany(all) {
+  const folders = all.filter((e) => e.isDir).length;
+  const names = all.slice(0, 12).map((e) => "  " + e.name + (e.isDir ? "/" : "")).join("\n") +
+    (all.length > 12 ? "\n  … and " + (all.length - 12) + " more" : "");
+  if (!await askYes("Delete " + all.length + " items from " + browsing.remote + ":" + browsing.path + "?\n\n" +
+                    names + (folders ? "\n\nThe folders go with everything inside them." : "") +
+                    "\n\nThis cannot be undone.")) return;
+  let done = 0;
+  for (const entry of all) {
+    let answer;
+    try {
+      answer = await api("POST", remoteUrl("delete"), { path: entry.path, isDir: entry.isDir });
+    } catch (e) {
+      answer = null;
+    }
+    if (!answer || answer.status >= 400) {
+      toast("stopped at " + entry.name + ": " + (answer ? reasonFrom(answer) : "could not reach the daemon") +
+            (done ? " — " + done + " deleted before it" : ""));
+      return browse(browsing.remote, browsing.path);
+    }
+    done += 1;
+  }
+  toast(done + " deleted");
+  browse(browsing.remote, browsing.path);
+}
 
 // ---- asking rclone about a remote ----------------------------------------
 //
@@ -2856,14 +3021,38 @@ $("taskbox").addEventListener("click", (event) => {
 // ---- copying and moving ---------------------------------------------------
 
 async function copyOrMove(move) {
-  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  const all = pickedEntries();
+  const entry = all[0];
   if (!entry) return;
 
   const verb = move ? "Move" : "Copy";
   const from = { remote: browsing.remote, path: browsing.path };
   const where = await pickFolder(
-    verb + " " + entry.name + " to…", verb + " here", browsing.remote, browsing.path);
+    verb + " " + (all.length > 1 ? all.length + " items" : entry.name) + " to…", verb + " here",
+    browsing.remote, browsing.path);
   if (!where) return;
+
+  // Several: one job each, all to the one place chosen.
+  if (all.length > 1) {
+    let started = 0;
+    for (const one of all) {
+      const answer = await api("POST", remoteUrl(move ? "move" : "copy"), {
+        path: one.path, isDir: one.isDir,
+        to: where.path, toRemote: where.remote, dryRun: where.dryRun,
+      }).catch(() => null);
+      if (!answer || answer.status !== 202) {
+        toast("stopped at " + one.name + ": " + (answer ? reasonFrom(answer) : "could not reach the daemon") +
+              (started ? " — " + started + " started before it" : ""));
+        break;
+      }
+      watching.set(answer.data.requestId, from);
+      started += 1;
+    }
+    if (started === all.length) {
+      toast(started + " " + verb.toLowerCase() + (where.dryRun ? " dry runs" : " jobs") + " started — see Jobs");
+    }
+    return refresh();
+  }
 
   // Started, not finished: this takes as long as the files are large. The
   // Jobs tab shows how it is going, and the folder is read again when it

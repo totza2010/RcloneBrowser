@@ -533,6 +533,19 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .bar { flex: 0 0 160px; }
 
 tr.clickable { cursor: pointer; }
+
+/* Rows chosen together, and the box beside each for a finger to tick. */
+#listing td.pick, #listing th.pick { width: 28px; text-align: center; }
+#listing tr.chosen td { background: var(--chosen, rgba(80, 140, 255, 0.16)); }
+.row-menu {
+  position: fixed; z-index: 40; min-width: 180px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 28px var(--shadow); display: flex; flex-direction: column;
+}
+.row-menu button { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 4px; }
+.row-menu button:hover:not(:disabled) { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.row-menu button:disabled { opacity: 0.45; }
+.row-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.08)); }
 
 /* The files of a job on their way, one line each. */
