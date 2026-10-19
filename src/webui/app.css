@@ -322,6 +322,10 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
 }
 
 .modal-box.wide { width: min(760px, 94vw); max-height: 86vh; }
+/* A question asked while another box is open goes on top of it. */
+.modal.ask { z-index: 50; }
+.ask-text { white-space: pre-wrap; word-break: break-word; }
+#ask-value { width: 100%; box-sizing: border-box; }
 .modal-box.wide #result-body { overflow: auto; }
 .modal-box pre { font: 12px/1.45 Consolas, "Courier New", monospace; margin: 0; white-space: pre; }
 .modal-box dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }

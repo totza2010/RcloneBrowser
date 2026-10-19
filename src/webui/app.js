@@ -481,6 +481,65 @@ $("tab-jobs").addEventListener("change", (event) => {
   if (event.target.id === "jobs-notify") switchNotifying(event.target.checked);
 });
 
+// ---- the page's own questions -------------------------------------------------
+//
+// What prompt() and confirm() did, without the browser's grey box: drawn as
+// the page is, readable at any width, and on top of whatever box is open.
+// Enter answers, Escape or a click outside takes it back.
+
+function ask(options) {
+  return new Promise((resolve) => {
+    const box = $("askbox");
+    const input = $("ask-value");
+    const lines = String(options.text || "").split("\n");
+    // The first line is the question; the rest, if any, is what it means.
+    $("ask-title").textContent = options.title || lines[0];
+    $("ask-text").textContent = options.title ? lines.join("\n") : lines.slice(1).join("\n").trim();
+    $("ask-text").classList.toggle("hidden", !$("ask-text").textContent);
+    const typing = options.value !== undefined;
+    input.classList.toggle("hidden", !typing);
+    input.readOnly = !!options.readOnly;
+    input.value = typing ? String(options.value) : "";
+    $("ask-yes").textContent = options.yes || "OK";
+    $("ask-yes").className = options.danger ? "danger" : "";
+    $("ask-no").classList.toggle("hidden", !!options.noCancel);
+    box.classList.remove("hidden");
+    (typing ? input : $("ask-yes")).focus();
+    if (typing) input.select();
+
+    const finish = (answer) => {
+      box.classList.add("hidden");
+      $("ask-form").removeEventListener("submit", yes);
+      $("ask-no").removeEventListener("click", no);
+      box.removeEventListener("mousedown", outside);
+      document.removeEventListener("keydown", escape, true);
+      resolve(answer);
+    };
+    const yes = (event) => { event.preventDefault(); finish(typing ? input.value : true); };
+    const no = () => finish(typing ? null : false);
+    const outside = (event) => { if (event.target === box) no(); };
+    const escape = (event) => {
+      if (event.key === "Escape") { event.stopPropagation(); no(); }
+    };
+    $("ask-form").addEventListener("submit", yes);
+    $("ask-no").addEventListener("click", no);
+    box.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape, true);
+  });
+}
+
+// prompt(): the words typed, or null when it was taken back.
+function askText(text, value) {
+  return ask({ text: text, value: value === undefined ? "" : value });
+}
+
+// confirm(): true or false. What is asked about is irreversible more often
+// than not, so the button says so in red when the question does.
+function askYes(text) {
+  const danger = /\b(delete|remove|take back|clear|stop|unmount|clean up)\b/i.test(String(text).split("\n")[0]);
+  return ask({ text: text, danger: danger, yes: danger ? "Yes, do it" : "Yes" });
+}
+
 // ---- reading the current state -------------------------------------------
 
 async function refresh() {
@@ -632,8 +691,8 @@ function jobOrder(a, b) {
 }
 
 // A speed limit, asked for in words rclone takes.
-function askRate(what) {
-  const asked = prompt("How fast may " + what + " go?\n\n" +
+async function askRate(what) {
+  const asked = await askText("How fast may " + what + " go?\n\n" +
     "A speed per second such as 500k, 2M or 1.5G — or off for no limit.", "off");
   return asked === null ? null : asked.trim();
 }
@@ -1307,7 +1366,7 @@ $("remote-refresh").addEventListener("click", () =>
 
 $("remote-mkdir").addEventListener("click", async () => {
   const where = browsing.remote + ":" + browsing.path;
-  const name = prompt("Create folder in " + where);
+  const name = await askText("Create folder in " + where);
   if (name === null || !name.trim()) return;
 
   // Answered when rclone has finished, so the listing read straight after
@@ -1322,7 +1381,7 @@ $("remote-rename").addEventListener("click", async () => {
   const entry = browsing.entries.find((e) => e.path === browsing.chosen);
   if (!entry) return;
 
-  const name = prompt("New name for " + entry.name, entry.name);
+  const name = await askText("New name for " + entry.name, entry.name);
   if (name === null || !name.trim() || name.trim() === entry.name) return;
 
   const renamed = await command(
@@ -1342,7 +1401,7 @@ $("remote-delete").addEventListener("click", async () => {
   const question = entry.isDir
     ? "Delete the folder\n\n" + what + "\n\nand everything inside it? This cannot be undone."
     : "Delete the file\n\n" + what + "\n\n? This cannot be undone.";
-  if (!confirm(question)) return;
+  if (!await askYes(question)) return;
 
   const gone = await command(
     "POST", "/remotes/" + encodeURIComponent(browsing.remote) + "/delete",
@@ -1975,7 +2034,7 @@ $("tab-api").addEventListener("click", async (event) => {
     const d = hookButton.dataset;
     if (d.hookEdit) return drawHooks(d.hookEdit);
     if (d.hookDrop) {
-      if (!confirm("Stop telling \"" + d.hookName + "\" when jobs end?")) return;
+      if (!await askYes("Stop telling \"" + d.hookName + "\" when jobs end?")) return;
       if (await command("DELETE", "/webhooks/" + encodeURIComponent(d.hookDrop))) drawHooks();
       return;
     }
@@ -1988,7 +2047,7 @@ $("tab-api").addEventListener("click", async (event) => {
   }
   const drop = event.target.closest("button[data-key-drop]");
   if (drop) {
-    if (!confirm("Take back the key \"" + drop.dataset.keyName + "\"?\n\n" +
+    if (!await askYes("Take back the key \"" + drop.dataset.keyName + "\"?\n\n" +
                  "Whatever uses it is refused from its next request.")) return;
     if (await command("DELETE", "/keys/" + encodeURIComponent(drop.dataset.keyDrop))) drawKeys();
     return;
@@ -3090,7 +3149,7 @@ $("remote-settings").addEventListener("click", async () => {
   });
 
   $("remote-rename-config").addEventListener("click", async () => {
-    const to = prompt("New name for " + remote + ":\n\n" +
+    const to = await askText("New name for " + remote + ":\n\n" +
       "Saved tasks on it are changed to the new name.", remote);
     if (!to || to === remote) return;
     const result = await api("PUT", "/remotes/" + encodeURIComponent(remote) + "/config", { name: to });
@@ -3108,12 +3167,12 @@ $("remote-settings").addEventListener("click", async () => {
   });
 
   $("remote-delete-config").addEventListener("click", async () => {
-    if (!confirm("Delete the remote " + remote + ": from rclone.conf?\n\n" +
+    if (!await askYes("Delete the remote " + remote + ": from rclone.conf?\n\n" +
                  "Its files are not touched — they are on the remote — but this program " +
                  "and rclone will no longer know how to reach them.")) return;
     let result = await api("DELETE", "/remotes/" + encodeURIComponent(remote));
     if (result.status === 409 && result.data && result.data.code === "used_by_tasks") {
-      if (!confirm("These saved tasks use " + remote + ":\n\n  " +
+      if (!await askYes("These saved tasks use " + remote + ":\n\n  " +
                    result.data.tasks.join("\n  ") +
                    "\n\nDelete the remote anyway? The tasks are kept, and will not run until changed.")) return;
       result = await api("DELETE", "/remotes/" + encodeURIComponent(remote) + "?force=1");
@@ -3867,14 +3926,14 @@ async function run(title, path, body, draw) {
 const remoteUrl = (operation) =>
   "/remotes/" + encodeURIComponent(browsing.remote) + "/" + operation;
 
-$("remote-link").addEventListener("click", () => {
+$("remote-link").addEventListener("click", async () => {
   const entry = browsing.entries.find((e) => e.path === browsing.chosen);
   if (!entry) return;
 
   // Said before it is done, because it cannot be seen afterwards: nothing in
   // a listing shows that a file has been shared.
   const what = browsing.remote + ":" + entry.path;
-  if (!confirm("Make a public link to\n\n" + what +
+  if (!await askYes("Make a public link to\n\n" + what +
                "\n\n? Anybody who has the link will be able to open it.")) {
     return;
   }
@@ -3886,10 +3945,10 @@ $("remote-link").addEventListener("click", () => {
       : "<pre>" + esc(d.output || "rclone gave no address") + "</pre>");
 });
 
-$("remote-cleanup").addEventListener("click", () => {
+$("remote-cleanup").addEventListener("click", async () => {
   // The window's own wording, because what this does is not obvious from its
   // name and differs from one backend to another.
-  if (!confirm("Clean up remote " + browsing.remote + ": ?\n\n" +
+  if (!await askYes("Clean up remote " + browsing.remote + ": ?\n\n" +
                "This empties the trash, or deletes old versions of files, " +
                "depending on what the backend supports. Files removed this " +
                "way cannot be recovered.\n\n" +
@@ -3922,9 +3981,9 @@ $("remote-dedupe").addEventListener("click", () => {
     '<p><button id="dedupe-dry" class="small">Dry run</button> ' +
     '<button id="dedupe-run" class="danger small">Run for real</button></p>');
 
-  const go = (dryRun) => {
+  const go = async (dryRun) => {
     const mode = $("dedupe-mode").value;
-    if (!dryRun && !confirm("Run dedupe (" + mode + ") on\n\n" + what +
+    if (!dryRun && !await askYes("Run dedupe (" + mode + ") on\n\n" + what +
                             "\n\nfor real? Files it removes do not come back.")) {
       return;
     }
@@ -3973,13 +4032,13 @@ document.addEventListener("click", async (event) => {
       toast("copied " + d.copyText);
     } catch (e) {
       // No clipboard without HTTPS on anything but this machine itself.
-      prompt("Copy it from here:", d.copyText);
+      await ask({ title: "Copy it from here", value: d.copyText, readOnly: true, noCancel: true, yes: "Done" });
     }
     return;
   }
   if (d.speed) {
     const job = state.jobs.find((j) => j.requestId === d.speed);
-    const rate = askRate(job ? '"' + job.info + '"' : "this transfer");
+    const rate = await askRate(job ? '"' + job.info + '"' : "this transfer");
     if (rate === null) return;
     const answer = await api("POST", "/jobs/" + encodeURIComponent(d.speed) + "/bandwidth", { rate: rate });
     if (answer.status !== 200) return toast(reasonFrom(answer));
@@ -3987,7 +4046,7 @@ document.addEventListener("click", async (event) => {
     return refresh();
   }
   if (d.speedAll !== undefined) {
-    const rate = askRate("every running transfer");
+    const rate = await askRate("every running transfer");
     if (rate === null) return;
     const answer = await api("POST", "/bandwidth", { rate: rate });
     if (answer.status !== 200) return toast(reasonFrom(answer));
@@ -4003,7 +4062,7 @@ document.addEventListener("click", async (event) => {
   if (d.dry && (await command("POST", task(d.dry, "/run?dryRun=1")))) return refresh();
   if (d.resync && (await command("POST", task(d.resync, "/run"), { resync: true }))) return refresh();
   if (d.watch) {
-    const asked = prompt("Run it once its folder has been quiet for how many seconds?\n\n" +
+    const asked = await askText("Run it once its folder has been quiet for how many seconds?\n\n" +
       "Everything in the folder now counts as already sent.", "30");
     if (asked === null) return;
     if (await command("POST", task(d.watch, "/watch"), { quietSeconds: Number(asked) || 30 })) {
@@ -4024,7 +4083,7 @@ document.addEventListener("click", async (event) => {
   }
   if (d.forget) {
     const found = state.tasks.find((t) => t.id === d.forget);
-    if (!confirm("Delete the task " + (found ? found.name : d.forget) + "?\n\n" +
+    if (!await askYes("Delete the task " + (found ? found.name : d.forget) + "?\n\n" +
                  "A task that has a schedule cannot be deleted until the schedule is.")) return;
     if (await command("DELETE", task(d.forget, ""))) refresh();
     return;
@@ -4033,7 +4092,7 @@ document.addEventListener("click", async (event) => {
   if (d.stop) {
     const job = state.jobs.find((j) => j.requestId === d.stop);
     const verb = job && job.kind === "mount" ? "Unmount " : "Stop ";
-    if (!confirm(verb + (job ? job.info : d.stop) + "?")) return;
+    if (!await askYes(verb + (job ? job.info : d.stop) + "?")) return;
     if (await command("POST", "/jobs/" + encodeURIComponent(d.stop) + "/stop")) refresh();
     return;
   }
@@ -4044,7 +4103,7 @@ document.addEventListener("click", async (event) => {
   }
   if (d.queueClear !== undefined) {
     const waiting = state.queue.filter((e) => !e.running).length;
-    if (!confirm("Take all " + waiting + " waiting tasks out of the queue?\n\n" +
+    if (!await askYes("Take all " + waiting + " waiting tasks out of the queue?\n\n" +
                  "One that is running is left to finish; the tasks themselves are kept.")) return;
     if (await command("POST", "/queue/clear")) refresh();
     return;
@@ -4078,7 +4137,7 @@ document.addEventListener("click", async (event) => {
   }
   if (d.schedDrop) {
     const found = state.schedules.find((s) => s.id === d.schedDrop);
-    if (!confirm("Delete the schedule " + (found ? found.name : d.schedDrop) + "?\n\n" +
+    if (!await askYes("Delete the schedule " + (found ? found.name : d.schedDrop) + "?\n\n" +
                  "The task it runs is kept.")) return;
     if (await command("DELETE", "/schedules/" + encodeURIComponent(d.schedDrop))) refresh();
     return;

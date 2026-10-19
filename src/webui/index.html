@@ -478,6 +478,20 @@
   </div>
 
   <!-- What a question to rclone came back with: a size, a quota, a tree. -->
+  <!-- The page's own question: what prompt() and confirm() were, drawn as
+       the page is, and above anything else that is open. -->
+  <div id="askbox" class="modal ask hidden">
+    <form id="ask-form" class="modal-box">
+      <h2 id="ask-title"></h2>
+      <p id="ask-text" class="ask-text"></p>
+      <input id="ask-value" type="text" autocomplete="off" class="hidden">
+      <div class="modal-actions">
+        <button type="button" id="ask-no" class="ghost">Cancel</button>
+        <button type="submit" id="ask-yes">OK</button>
+      </div>
+    </form>
+  </div>
+
   <div id="resultbox" class="modal hidden">
     <div class="modal-box wide">
       <h2 id="result-title"></h2>

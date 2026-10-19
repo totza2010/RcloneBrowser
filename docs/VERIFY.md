@@ -2019,6 +2019,18 @@ marker: `askedBy` · schema 4
 | 2 | เปิด build นี้กับ database เดิมของจริง (schema 3) | ขึ้น schema 4 · คิว task ประวัติเดิมครบ | ⬜ | (สำรอง rclone-browser.db ก่อน) |
 | 3 | หน้าต่าง · ใส่คิว · ตารางเวลา · เฝ้าโฟลเดอร์ | askedBy = window · schedule: ชื่อ · folder watch | ⬜ | |
 
+### V-63 · กล่องถามของหน้าเว็บ
+
+marker: `askbox` · `askText` · `askYes`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | สร้างโฟลเดอร์ · เปลี่ยนชื่อ · Speed… · Watch folder | กล่องของหน้าเว็บ (ไม่ใช่ของ browser) · Enter ตกลง · Escape ยกเลิก | ⬜ | |
+| 2 | ลบไฟล์ · ลบ task · ลบรีโหมด · Take back key · Remove webhook | ปุ่มแดง "Yes, do it" · ยกเลิกแล้วไม่มีอะไรเกิด | ⬜ | |
+| 3 | Dedupe (ไม่ใช่ dry run) จากในกล่อง Dedupe | กล่องยืนยันอยู่เหนือกล่องเดิม | ⬜ | |
+| 4 | Copy address บนหน้าที่ไม่ใช่ HTTPS | กล่อง "Copy it from here" เลือกข้อความได้ · ปุ่ม Done | ⬜ | |
+| 5 | จอมือถือ | กล่องพอดีจอ · อ่านได้ | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่
