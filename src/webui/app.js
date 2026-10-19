@@ -3423,6 +3423,12 @@ $("remote-mount").addEventListener("click", () => {
       '<option value="full">full — everything read is kept on disk</option>' +
     "</select></label></p>" +
     '<p><label class="check"><input type="checkbox" id="mount-ro"> Read only</label></p>' +
+    '<details><summary>More</summary>' +
+      '<p><label>Name the drive is shown by<input id="mount-volume" type="text" placeholder="optional"></label></p>' +
+      '<p><label>More rclone options, as a task takes them<input id="mount-extra" type="text" placeholder="--vfs-cache-max-age 2h"></label></p>' +
+      '<p><label>Keep it as a task named<input id="mount-save" type="text" placeholder="empty: mount it this once"></label></p>' +
+      '<p><label class="check"><input type="checkbox" id="mount-auto"> and mount it every time the program starts</label></p>' +
+    "</details>" +
     '<p><button id="mount-go" class="small">Mount</button> ' +
     '<span id="mount-state" class="error"></span></p>');
 
@@ -3434,6 +3440,10 @@ $("remote-mount").addEventListener("click", () => {
         mountPoint: $("mount-point").value,
         cache: $("mount-cache").value,
         readOnly: $("mount-ro").checked,
+        volumeName: $("mount-volume").value,
+        extra: $("mount-extra").value,
+        saveAs: $("mount-save").value,
+        autoStart: $("mount-auto").checked,
       });
     } catch (e) {
       $("mount-state").textContent = "could not reach the daemon";

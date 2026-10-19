@@ -174,6 +174,29 @@ void AppCore::start() {
   // The same five seconds the window used to wait before its first look, so
   // a schedule due in the minute the program starts in behaves as it did.
   QTimer::singleShot(5000, Qt::VeryCoarseTimer, this, [this]() { tick(); });
+
+  // The mounts marked to start with the program, a moment after it has: the
+  // same second the window used to wait, so a window opening alongside has
+  // drawn its tabs and shows them as they come up.
+  QTimer::singleShot(1000, Qt::CoarseTimer, this, [this]() { startAutoMounts(); });
+}
+
+void AppCore::startAutoMounts() {
+  for (JobOptions *task : ListOfJobOptions::getInstance()->getTasks()) {
+    if (task->operation != JobOptions::Mount || !task->mountAutoStart) {
+      continue;
+    }
+    // One already up -- started by hand before this ran -- is left alone.
+    bool up = false;
+    for (RunningJob *job : JobRegistry::instance().jobs()) {
+      up = up || (job->isRunning() && job->taskId() == task->uniqueId.toString());
+    }
+    if (up) {
+      continue;
+    }
+    qCDebug(rbApp) << "mounting" << task->description << "as the program starts";
+    StartTask(task, QStringLiteral("autostart"), QUuid::createUuid().toString());
+  }
 }
 
 void AppCore::checkSchedules() { tick(); }

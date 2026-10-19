@@ -2148,6 +2148,17 @@ marker: `Settings/mount` ใน `StartTask`
 | 1 | test: Settings/mount = `--vfs-cache-max-age 2h` · StartTask ของ mount task | คำสั่งมีตัวเลือกนั้น | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
 | 2 | ตั้งตัวเลือก mount ใน Preferences · รัน mount task จากหน้าเว็บ/ตารางเวลา | Log ของงานแสดงตัวเลือกนั้นในคำสั่ง | ⬜ | |
 
+### V-75 · ตัวเลือก Mount บนหน้าเว็บ · autostart ใน core
+
+marker: `saveAs` · `autoStart` · `AppCore::startAutoMounts`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: mount พร้อม volume · extra · saveAs · autoStart · startAutoMounts ตอนขึ้นอยู่และตอนลง · extra ต้องห้าม | task ถูกเก็บ · คำสั่งมีตัวเลือก · ไม่ซ้ำ · ขึ้นใหม่ด้วย autostart · 400 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | หน้าเว็บ · Mount → More · เก็บเป็น task + ทุกครั้งที่เปิด | task ขึ้นในแท็บ Tasks · mount ขึ้น | ⬜ | |
+| 3 | ปิดแล้วเปิดโปรแกรม (หน้าต่าง) | mount ขึ้นเองครั้งเดียว · การ์ดขึ้นในหน้าต่าง | ⬜ | |
+| 4 | Docker โหมด web · restart container | mount ที่ตั้ง autostart ขึ้นเอง (เดิมไม่ขึ้น) | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

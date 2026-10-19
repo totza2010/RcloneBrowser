@@ -1265,11 +1265,36 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     RemoteOps::MountOptions options;
     options.readOnly = given.value(QStringLiteral("readOnly")).toBool(false);
     options.cache = given.value(QStringLiteral("cache")).toString();
+    options.volumeName = given.value(QStringLiteral("volumeName")).toString();
+    options.extra = given.value(QStringLiteral("extra")).toString();
+    // The same line a task's extra options are held to.
+    const QString flags = flagsProblem(options.extra);
+    if (!flags.isEmpty()) {
+      refuse(400, QStringLiteral("bad_flag"), flags);
+      return;
+    }
 
     QString why;
-    RunningJob *job = RemoteOps::Mount(
-        remote, path, given.value(QStringLiteral("mountPoint")).toString(),
-        options, &why);
+    RunningJob *job = nullptr;
+    const QString saveAs = given.value(QStringLiteral("saveAs")).toString().trimmed();
+    if (!saveAs.isEmpty()) {
+      // Kept as a task, and started as one: the next start of the program
+      // mounts it again when it is to start with the program.
+      JobOptions *task = RemoteOps::MountTask(
+          remote, path, given.value(QStringLiteral("mountPoint")).toString(),
+          options, saveAs, given.value(QStringLiteral("autoStart")).toBool(false),
+          &why);
+      if (task == nullptr) {
+        refuse(400, QStringLiteral("refused"), why);
+        return;
+      }
+      job = StartTask(task, mCallerName.isEmpty() ? QStringLiteral("api") : mCallerName,
+                      QUuid::createUuid().toString());
+    } else {
+      job = RemoteOps::Mount(
+          remote, path, given.value(QStringLiteral("mountPoint")).toString(),
+          options, &why);
+    }
     if (job == nullptr) {
       refuse(400, QStringLiteral("refused"), why);
       return;

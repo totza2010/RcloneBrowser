@@ -3,7 +3,10 @@
 #include "job_options.h"
 #include "job_registry.h"
 #include "running_job.h"
+#include "task_builder.h"
 #include "utils.h"
+
+#include <QDateTime>
 
 #include <QDir>
 #include <QFileInfo>
@@ -462,6 +465,8 @@ RunningJob *Mount(const QString &remote, const QString &path,
       : options.cache == QLatin1String("writes") ? JobOptions::Writes
       : options.cache == QLatin1String("full")   ? JobOptions::Full
                                                  : JobOptions::Off;
+  task.mountVolume = options.volumeName.trimmed();
+  task.extra = options.extra;
 
   QStringList command = task.getMountOptions();
   // The mount options from the settings, which the window has always added.
@@ -579,6 +584,50 @@ QStringList ServeUrls(const RunningJob::ServeAddress &address) {
     }
   }
   return urls;
+}
+
+JobOptions *MountTask(const QString &remote, const QString &path,
+                      const QString &mountPoint, const MountOptions &options,
+                      const QString &name, bool autoStart, QString *why) {
+  if (mountPoint.trimmed().isEmpty()) {
+    if (why != nullptr) {
+      *why = QStringLiteral("say where to mount it");
+    }
+    return nullptr;
+  }
+  auto *task = new JobOptions(true);
+  task->operation = JobOptions::Mount;
+  task->jobType = JobOptions::Download;
+  task->description = name.trimmed();
+  task->source = Target(remote, path);
+  task->dest = mountPoint.trimmed();
+  task->isFolder = true;
+  task->mountReadOnly = options.readOnly;
+  task->mountCacheLevel =
+      options.cache == QLatin1String("minimal")  ? JobOptions::Minimal
+      : options.cache == QLatin1String("writes") ? JobOptions::Writes
+      : options.cache == QLatin1String("full")   ? JobOptions::Full
+                                                 : JobOptions::Off;
+  task->mountVolume = options.volumeName.trimmed();
+  task->extra = options.extra;
+  task->mountAutoStart = autoStart;
+  // A port of its own, kept with the task: on Windows unmounting has to
+  // reach the same one every time. See Mount().
+  {
+    QTcpServer probe;
+    if (probe.listen(QHostAddress::LocalHost, 0)) {
+      task->mountRcPort = QString::number(probe.serverPort());
+    }
+  }
+  TaskBuilder::Problem problem = TaskBuilder::Problem::None;
+  if (TaskBuilder::Create(task, QDateTime::currentDateTime(), &problem).isEmpty()) {
+    if (why != nullptr) {
+      *why = TaskBuilder::Explain(problem);
+    }
+    delete task;
+    return nullptr;
+  }
+  return task;
 }
 
 namespace {

@@ -56,6 +56,10 @@ public:
   // them is right today.
   QString runNow(const QString &scheduleId, QString *reason = nullptr);
 
+  // The mount tasks marked to start with the program. The window used to do
+  // this, so a daemon -- Docker in web mode -- never mounted them.
+  void startAutoMounts();
+
   // Stops everything, the way it would want to be stopped, and returns how
   // many jobs were still going when the time ran out (zero is the answer to
   // hope for).

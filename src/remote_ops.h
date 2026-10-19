@@ -23,6 +23,7 @@
 #include <QString>
 #include <QStringList>
 
+class JobOptions;
 class RunningJob;
 
 namespace RemoteOps {
@@ -219,7 +220,20 @@ struct MountOptions {
   // "off", "minimal", "writes" or "full": how much rclone keeps on disk so
   // that programs which seek and rewrite can work. Anything else is "off".
   QString cache;
+  // The name the mounted drive is shown by (--volname); empty: rclone's own.
+  QString volumeName;
+  // More rclone options, written as a task's extra options are. Whoever
+  // takes them from outside checks them first (ExtraFlags).
+  QString extra;
 };
+
+// The mount kept as a task, as the window's Mount dialog can: named, and
+// started when the program starts when `autoStart`. Not started here --
+// StartTask() does that, as for any mount task. Null with why not.
+JobOptions *MountTask(const QString &remote, const QString &path,
+                      const QString &mountPoint, const MountOptions &options,
+                      const QString &name, bool autoStart,
+                      QString *why = nullptr);
 
 // Makes a folder of a remote appear as a folder (or a drive) on this
 // machine, at `mountPoint`. The job runs for as long as the mount is up, and

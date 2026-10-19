@@ -3508,6 +3508,56 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(task);
   }
 
+  // A mount kept as a task, with the window's options, and the mounts marked
+  // to start with the program started by the core -- not only by a window.
+  void aMountCanBeKeptAndStartsWithTheProgram() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "3000");
+    const QByteArray made = send(
+        "POST", "/api/v1/remotes/fake/mount", mToken,
+        "{\"path\":\"films\",\"mountPoint\":\"X:\",\"volumeName\":\"Films\","
+        "\"extra\":\"--vfs-cache-max-age 2h\",\"saveAs\":\"films drive\",\"autoStart\":true}");
+    QCOMPARE(statusOf(made), 202);
+    JobOptions *task = ListOfJobOptions::getInstance()->findByName(QStringLiteral("films drive"));
+    QVERIFY(task != nullptr);
+    QCOMPARE(task->operation, JobOptions::Mount);
+    QVERIFY(task->mountAutoStart);
+    QCOMPARE(task->mountVolume, QStringLiteral("Films"));
+    RunningJob *job = JobRegistry::instance().find(
+        bodyOf(made).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    QVERIFY(job->displayCommand().contains(QStringLiteral("--volname")));
+    QVERIFY(job->displayCommand().contains(QStringLiteral("--vfs-cache-max-age")));
+    QCOMPARE(job->taskId(), task->uniqueId.toString());
+
+    // Already up: not started a second time.
+    AppCore::instance().startAutoMounts();
+    int running = 0;
+    for (RunningJob *one : JobRegistry::instance().jobs()) {
+      running += one->isRunning() && one->taskId() == task->uniqueId.toString();
+    }
+    QCOMPARE(running, 1);
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+
+    // Down: started by the core, as the program starting would.
+    AppCore::instance().startAutoMounts();
+    RunningJob *again = nullptr;
+    for (RunningJob *one : JobRegistry::instance().jobs()) {
+      if (one->isRunning() && one->taskId() == task->uniqueId.toString()) again = one;
+    }
+    QVERIFY(again != nullptr);
+    QCOMPARE(again->transferMode(), QStringLiteral("autostart"));
+    again->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!again->isRunning(), 10000);
+
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mount", mToken,
+                           "{\"mountPoint\":\"X:\",\"extra\":\"--rc-addr :1\"}")),
+             400); // the line a task's extra options are held to
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

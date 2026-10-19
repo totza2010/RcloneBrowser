@@ -58,7 +58,6 @@ private slots:
   bool saveQueueFile(void);
   bool saveSchedulerFile(void);
 
-  void autoStartMounts(void);
 
   // quit RB but only when all processes finished
   void quitApp(void);

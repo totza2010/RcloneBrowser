@@ -2247,7 +2247,9 @@ MainWindow::MainWindow() {
 
   // we start all auto mount tasks with 1s delay - so RB has chance to start
   // properly
-  QTimer::singleShot(1000, Qt::CoarseTimer, this, SLOT(autoStartMounts()));
+  // The mounts marked to start with the program are AppCore's to start now
+  // (AppCore::startAutoMounts), so a daemon starts them too. They come up as
+  // cards like any mount this window did not start itself.
 
   // start minimised to tray
   if ((settings->value("Settings/startMinimisedToTray").toBool())) {
@@ -2306,20 +2308,6 @@ MainWindow::sortListWidget(const QList<QListWidgetItem *> &list,
 #endif
   }
   return sortedList;
-}
-
-void MainWindow::autoStartMounts(void) {
-
-  // autostart all auto mounts from tasks list
-  for (int k = 0; k < ui.tasksListWidget->count(); k = k + 1) {
-    JobOptionsListWidgetItem *item =
-        static_cast<JobOptionsListWidgetItem *>(ui.tasksListWidget->item(k));
-    JobOptions *joTasks = item->GetData();
-    if (joTasks->operation == JobOptions::Mount && joTasks->mountAutoStart) {
-      runItem(item->GetData(), "autostart",
-              QUuid::createUuid().toString());
-    }
-  }
 }
 
 // What the quit is still waiting for, in words.
