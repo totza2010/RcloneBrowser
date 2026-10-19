@@ -240,6 +240,17 @@ QList<Route> build() {
         "", "path: the folder, empty for the top", "",
         "200: the entries; 404: no such remote; 413: too many to list; 502: "
         "rclone could not list it"),
+      r("GET", "/api/v1/remotes/{name}/cat", kRemotes,
+        "The start of a file, to look at",
+        "Always application/octet-stream, so no browser shows it by itself; "
+        "X-Rb-View says how it can be shown (image, pdf, text, media, or "
+        "nothing) and X-Rb-Type as what. HTML is text: shown as a page it "
+        "would be a page of this program. X-Rb-Truncated: true when the file "
+        "goes on past the limit.",
+        "path: the file; limit: bytes to read -- unless said, all of a "
+        "picture or a PDF and 2 MiB of anything else; 64 MiB at most", "",
+        "200: the bytes; 400: no file named; 404: no such remote; 502: "
+        "rclone could not read it"),
       r("GET", "/api/v1/remotes/{name}/size", kRemotes,
         "How big a folder is", "", "path: the folder", "",
         "200: count and bytes; 502: rclone's own answer"),

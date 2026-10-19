@@ -140,6 +140,14 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 รองรับ `Range` · หยุดด้วย `POST /jobs/{requestId}/stop` แล้ว path เดิมได้ `404` · `502` คือ rclone ยังไม่ขึ้น (ลองใหม่ในอึดใจ)
 งานที่เป็น stream มี `stream: {path}` ใน `GET /jobs`
 
+### cat — `GET /api/v1/remotes/{name}/cat?path=…&limit=…`
+
+ไบต์ของไฟล์ (หรือส่วนต้น) สำหรับดูในหน้าเว็บ — **`Content-Type: application/octet-stream` เสมอ** browser จึงไม่แสดงเอง
+- `X-Rb-View`: `image` · `pdf` · `text` · `media` · ว่าง (แสดงไม่ได้) · `X-Rb-Type`: ชนิดที่ใช้แสดง · `X-Rb-Truncated`: `true` เมื่อไฟล์ยาวกว่าที่อ่าน
+- **HTML เป็น text เสมอ** — แสดงเป็นหน้าในหน้าของโปรแกรม มันจะกลายเป็นหน้าของโปรแกรม (อ่าน token ได้) · SVG เป็น image ใช้ใน `<img>` เท่านั้น
+- `limit` ไม่บอก: ภาพ/PDF อ่านทั้งไฟล์ · อื่นๆ 2 MiB · สูงสุด 64 MiB · rclone หยุดอ่านตรงนั้น (`cat --count`)
+- `400` ไม่ได้ระบุไฟล์ · `404` ไม่มีรีโหมด · `502` rclone อ่านไม่ได้ · ไม่มีประวัติ (เป็นคำถาม ไม่ใช่งาน)
+
 ### serve — `POST /api/v1/remotes/{name}/serve` (ระดับ admin)
 
 `{"path":"films","protocol":"webdav","port":8081,"everyone":false,"readOnly":true,"user":"rb","password":"…"}` →

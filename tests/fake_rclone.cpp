@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <thread>
 
 int main(int argc, char *argv[]) {
@@ -140,6 +141,26 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  // A file's bytes: FAKE_RCLONE_CAT, or a line saying so, as far as --count.
+  if (std::strcmp(command, "cat") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      std::fprintf(stderr, "ERROR : object not found\n");
+      return 3;
+    }
+    const char *given = std::getenv("FAKE_RCLONE_CAT");
+    std::string text = given != nullptr ? given : "hello from cat\n";
+    for (int i = 2; i + 1 < argc; ++i) {
+      if (std::strcmp(argv[i], "--count") == 0) {
+        const size_t count = size_t(std::atoll(argv[i + 1]));
+        if (text.size() > count) {
+          text.resize(count);
+        }
+      }
+    }
+    std::fwrite(text.data(), 1, text.size(), stdout);
+    return 0;
+  }
+
   if (std::strcmp(command, "copy") == 0 || std::strcmp(command, "sync") == 0 ||
       std::strcmp(command, "move") == 0 || std::strcmp(command, "mount") == 0 ||
       std::strcmp(command, "serve") == 0) {
@@ -152,7 +173,9 @@ int main(int argc, char *argv[]) {
             std::fprintf(file, "%s%s", i > 1 ? "\x1f" : "", argv[i]);
           }
           const char *pass = std::getenv("RCLONE_PASS");
-          std::fprintf(file, "\x1fRCLONE_PASS=%s\n", pass != nullptr ? pass : "");
+          const char *config = std::getenv("RCLONE_CONFIG_PASS");
+          std::fprintf(file, "\x1fRCLONE_PASS=%s\x1fRCLONE_CONFIG_PASS=%s\n",
+                       pass != nullptr ? pass : "", config != nullptr ? config : "");
           std::fclose(file);
         }
       }

@@ -952,6 +952,7 @@ function drawChosen() {
   $("remote-rename").disabled = !entry;
   $("remote-delete").disabled = !entry;
   $("remote-link").disabled = !entry;
+  $("remote-view").disabled = !entry || entry.isDir;
   $("remote-copy").disabled = !entry;
   $("remote-download").disabled = !entry;
   $("remote-move").disabled = !entry;
@@ -969,6 +970,17 @@ $("listing").addEventListener("click", (event) => {
   if (!row) return;
   browsing.chosen = browsing.chosen === row.dataset.entry ? "" : row.dataset.entry;
   drawChosen();
+});
+
+// A file opens in the viewer when double-clicked.
+$("listing").addEventListener("dblclick", (event) => {
+  if (event.target.closest("button")) return;
+  const row = event.target.closest("tr[data-entry]");
+  const entry = row && browsing.entries.find((e) => e.path === row.dataset.entry);
+  if (!entry || entry.isDir) return;
+  browsing.chosen = entry.path;
+  drawChosen();
+  viewFile(entry);
 });
 
 async function browse(remote, path) {
@@ -1066,7 +1078,93 @@ function showResult(title, html) {
 function closeResult() {
   $("resultbox").classList.add("hidden");
   $("result-body").innerHTML = "";
+  forgetViewed();
 }
+
+// ---- looking at a file ------------------------------------------------------
+
+// The address of what the viewer is showing, let go when it closes: until
+// then the browser keeps the whole file in memory.
+let viewedUrl = "";
+function forgetViewed() {
+  if (viewedUrl) URL.revokeObjectURL(viewedUrl);
+  viewedUrl = "";
+}
+
+// Fetched with the token like everything else -- an <img> or a frame could
+// not send it -- and shown from memory. The daemon answers with bytes and
+// says how they may be shown; a page from a remote is never shown as a page,
+// because inside this one it would be this one.
+async function viewFile(entry) {
+  const title = browsing.remote + ":" + entry.path;
+  showResult(title, '<p class="muted">reading ' + esc(entry.name) + "…</p>");
+  forgetViewed();
+  let response;
+  try {
+    response = await fetch("/api/v1" + remoteUrl("cat") + "?path=" + encodeURIComponent(entry.path),
+                           { headers: secret ? { Authorization: "Bearer " + secret } : {} });
+  } catch (e) {
+    showResult(title, '<p class="error">could not reach the daemon</p>');
+    return;
+  }
+  if (response.status !== 200) {
+    let reason = "rclone could not read it";
+    try { reason = (await response.json()).error || reason; } catch (e) { /* not JSON */ }
+    showResult(title, '<p class="error">' + esc(reason) + "</p>");
+    return;
+  }
+  const view = response.headers.get("X-Rb-View") || "";
+  const type = response.headers.get("X-Rb-Type") || "text/plain";
+  const truncated = response.headers.get("X-Rb-Truncated") === "true";
+  const data = await response.arrayBuffer();
+  if ($("resultbox").classList.contains("hidden")) return; // closed while reading
+
+  const asText = (note) => {
+    const text = new TextDecoder("utf-8").decode(data);
+    showResult(title,
+      (note ? '<p class="muted">' + esc(note) + "</p>" : "") +
+      (truncated ? '<p class="muted">The first ' + bytes(data.byteLength) + " of " +
+        bytes(entry.size) + " — Download it for the rest.</p>" : "") +
+      '<pre class="viewer-text">' + esc(text) + "</pre>");
+  };
+
+  if ((view === "image" || view === "pdf") && truncated) {
+    showResult(title, '<p class="muted">Too large to show here (' + bytes(entry.size) +
+      "). Download it to open it.</p>");
+    return;
+  }
+  if (view === "image") {
+    viewedUrl = URL.createObjectURL(new Blob([data], { type: type }));
+    showResult(title, '<img class="viewer-image" alt="" src="' + viewedUrl + '">');
+    return;
+  }
+  if (view === "pdf") {
+    viewedUrl = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
+    showResult(title, '<iframe class="viewer-pdf" title="' + esc(entry.name) + '" src="' + viewedUrl + '"></iframe>');
+    return;
+  }
+  if (view === "text") {
+    asText("");
+    return;
+  }
+  if (view === "media") {
+    showResult(title, '<p class="muted">A film or a song is played rather than shown.</p>' +
+      '<p><button id="viewer-play" class="small">Play it</button></p>');
+    $("viewer-play").addEventListener("click", () => {
+      closeResult();
+      $("remote-stream").click();
+    });
+    return;
+  }
+  showResult(title, '<p class="muted">This is not a kind of file this page can show.</p>' +
+    '<p><button id="viewer-as-text" class="ghost small">Show it as text anyway</button></p>');
+  $("viewer-as-text").addEventListener("click", () => asText("Shown as text, whatever it is."));
+}
+
+$("remote-view").addEventListener("click", () => {
+  const entry = browsing.entries.find((e) => e.path === browsing.chosen);
+  if (entry && !entry.isDir) viewFile(entry);
+});
 $("result-close").addEventListener("click", closeResult);
 
 function figures(rows) {

@@ -11,6 +11,7 @@
 #include "list_of_job_options.h"
 #include "mount_dialog.h"
 #include "serve_dialog.h"
+#include "file_view_dialog.h"
 #include "progress_dialog.h"
 #include "remote_folder_dialog.h"
 #include "transfer_dialog.h"
@@ -380,6 +381,29 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
             .arg(what, RemoteOps::ServeUrls(job->serveAddress())
                            .join(QLatin1Char('\n'))));
   });
+
+  // What the page's View does: a picture or a page of text, looked at
+  // without downloading it first. Double-clicking a file does the same.
+  QAction *viewAction = new QAction("View", this);
+  viewAction->setStatusTip("Look at a picture, a PDF or a text file - rclone cat");
+  const auto viewChosen = [=]() {
+    const QModelIndexList chosen = ui.tree->selectionModel()->selectedRows();
+    if (chosen.isEmpty()) {
+      return;
+    }
+    const QModelIndex index = chosen.front();
+    if (model->isFolder(index) || model->isLoading(index) ||
+        model->isTopLevel(index)) {
+      return;
+    }
+    auto *dialog = new FileViewDialog(remote, model->path(index).path(),
+                                      qint64(model->size(index)), this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+  };
+  QObject::connect(viewAction, &QAction::triggered, this, viewChosen);
+  QObject::connect(ui.tree, &QAbstractItemView::doubleClicked, this,
+                   [=](const QModelIndex &) { viewChosen(); });
 
   QMenu *menuMode = new QMenu(this);
   menuMode->addAction(serveAction);
@@ -1726,6 +1750,7 @@ RemoteWidget::RemoteWidget(IconCache *iconCache, const QString &remote,
                      menu.addAction(ui.purge);
                      menu.addSeparator();
                      menu.addAction(ui.actionNewMount);
+                     menu.addAction(viewAction);
                      menu.addAction(ui.stream);
                      menu.addAction(serveAction);
                      menu.addAction(ui.upload);

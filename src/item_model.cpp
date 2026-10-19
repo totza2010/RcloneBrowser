@@ -168,6 +168,10 @@ bool ItemModel::isFolder(const QModelIndex &index) const {
   return get(index)->isFolder;
 }
 
+quint64 ItemModel::size(const QModelIndex &index) const {
+  return get(index)->size;
+}
+
 QModelIndex ItemModel::addRoot(const QString &name, const QString &path) {
   emit layoutAboutToBeChanged();
 

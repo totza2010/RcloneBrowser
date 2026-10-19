@@ -2746,6 +2746,8 @@ private slots:
     const QString record = scratch.filePath(QStringLiteral("said.txt"));
     qputenv("FAKE_RCLONE_RECORD", record.toLocal8Bit());
     qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+    // An encrypted config: its password has to reach the serve too.
+    SetRclonePassword(QStringLiteral("config-secret"));
 
     // A port nothing is on, as the program would choose one.
     quint16 port = 0;
@@ -2775,8 +2777,10 @@ private slots:
     QVERIFY(said.contains("127.0.0.1:" + QByteArray::number(port))); // this machine only
     QVERIFY(said.contains("--read-only"));
     QVERIFY(said.contains("rb"));
-    QCOMPARE(said.last(), QByteArray("RCLONE_PASS=sekret"));
-    QVERIFY(!said.mid(0, said.size() - 1).contains("sekret"));
+    QCOMPARE(said.at(said.size() - 2), QByteArray("RCLONE_PASS=sekret"));
+    QCOMPARE(said.last(), QByteArray("RCLONE_CONFIG_PASS=config-secret"));
+    SetRclonePassword(QString());
+    QVERIFY(!said.mid(0, said.size() - 2).contains("sekret"));
 
     // Said by the job -- and the password by nothing.
     const QByteArray jobs = ask("GET", "/api/v1/jobs", mToken);
@@ -2831,6 +2835,37 @@ private slots:
 
     qunsetenv("FAKE_RCLONE_RECORD");
     qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
+  // The start of a file, to look at, said as bytes and nothing a browser
+  // would show by itself.
+  void aFileCanBeLookedAt() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_CAT", "<script>alert(1)</script>");
+
+    const QByteArray page = ask("GET", "/api/v1/remotes/fake/cat?path=films/a.html", mToken);
+    QCOMPARE(statusOf(page), 200);
+    QVERIFY(page.contains("Content-Type: application/octet-stream"));
+    QVERIFY(page.contains("X-Rb-View: text")); // never a page
+    QVERIFY(page.contains("X-Rb-Type: text/plain; charset=utf-8"));
+    QVERIFY(page.contains("X-Rb-Truncated: false"));
+    QVERIFY(page.endsWith("<script>alert(1)</script>"));
+
+    // Only as far as asked: rclone stops there.
+    const QByteArray part = ask("GET", "/api/v1/remotes/fake/cat?path=a.txt&limit=8", mToken);
+    QVERIFY(part.contains("X-Rb-Truncated: true"));
+    QVERIFY(part.endsWith("\r\n\r\n<script>"));
+
+    QVERIFY(ask("GET", "/api/v1/remotes/fake/cat?path=a.png", mToken).contains("X-Rb-View: image"));
+    QVERIFY(ask("GET", "/api/v1/remotes/fake/cat?path=a.pdf", mToken).contains("X-Rb-View: pdf"));
+    QVERIFY(ask("GET", "/api/v1/remotes/fake/cat?path=a.mkv", mToken).contains("X-Rb-View: media"));
+
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/cat?path=", mToken)), 400);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/nothing/cat?path=a.txt", mToken)), 404);
+    qputenv("FAKE_RCLONE_FAIL", "1");
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/cat?path=gone.txt", mToken)), 502);
+    qunsetenv("FAKE_RCLONE_FAIL");
+    qunsetenv("FAKE_RCLONE_CAT");
   }
 
   void aMountNeedsSomewhereToGo() {

@@ -147,6 +147,9 @@ private:
   // does. See docs/WEB-UI.md.
   void listDirectory(QTcpSocket *socket, const HttpRequest &request,
                      const QString &remote, const QString &path);
+  // The start of a file, for the page to show. Held open the same way.
+  void readFile(QTcpSocket *socket, const HttpRequest &request,
+                const QString &remote);
 
   // Something done to a remote's files: answered when rclone has finished,
   // with what it said if it did not manage. Held open like a listing, for

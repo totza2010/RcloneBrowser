@@ -3,6 +3,7 @@
 #include "api_routes.h"
 #include "app_core.h"
 #include "directory_listing.h"
+#include "file_reader.h"
 #include "extra_flags.h"
 #include "debug_log.h"
 #include "http_message.h"
@@ -698,6 +699,85 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
 
   qCDebug(rbApp) << "API listing" << remote << path << "limit=" << limit;
   listing->start();
+}
+
+void ApiServer::readFile(QTcpSocket *socket, const HttpRequest &request,
+                         const QString &remote) {
+  QString path = request.queryValue(QStringLiteral("path"));
+  while (path.startsWith(QLatin1Char('/'))) {
+    path.remove(0, 1);
+  }
+  if (path.isEmpty() || path.endsWith(QLatin1Char('/'))) {
+    socket->write(FormatHttpResponse(400, problem(QStringLiteral("name a file"))));
+    return;
+  }
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    socket->write(
+        FormatHttpResponse(404, problem(QStringLiteral("no such remote"))));
+    return;
+  }
+
+  // Unless asked: a picture or a PDF is no use cut short, so all of it up to
+  // the most; anything else is looked at from its start. Held in memory
+  // until it is sent, hence the most.
+  const QString name = path.section(QLatin1Char('/'), -1);
+  const QString view = FileReader::ViewOf(name);
+  const qint64 most = 64LL * 1024 * 1024;
+  const bool whole =
+      view == QLatin1String("image") || view == QLatin1String("pdf");
+  bool readable = true;
+  const qint64 wanted =
+      request.queryValue(QStringLiteral("limit")).toLongLong(&readable);
+  const qint64 limit = readable && wanted > 0 ? qMin(wanted, most)
+                       : whole                ? most
+                                              : 2LL * 1024 * 1024;
+  auto *reader = new FileReader(remote, path, limit, this);
+  auto answered = QSharedPointer<bool>::create(false);
+  const auto respond = [socket, reader, answered](const QByteArray &response) {
+    if (*answered) {
+      return;
+    }
+    *answered = true;
+    socket->write(response);
+    reader->cancel();
+    reader->deleteLater();
+  };
+
+  QObject::connect(
+      reader, &FileReader::finished, socket,
+      [=](const QByteArray &data, bool truncated) {
+        QHash<QString, QString> about;
+        about.insert(QStringLiteral("X-Rb-View"), FileReader::ViewOf(name));
+        about.insert(QStringLiteral("X-Rb-Type"), FileReader::TypeOf(name));
+        about.insert(QStringLiteral("X-Rb-Truncated"),
+                     truncated ? QStringLiteral("true") : QStringLiteral("false"));
+        respond(FormatHttpResponse(200, data, "application/octet-stream", about));
+      });
+  QObject::connect(reader, &FileReader::failed, socket,
+                   [=](const QString &reason) {
+                     qCDebug(rbApp) << "reading" << remote << path
+                                    << "failed:" << reason;
+                     respond(FormatHttpResponse(502, problem(reason)));
+                   });
+
+  // The same backstop as a listing's.
+  auto *deadline = new QTimer(reader);
+  deadline->setSingleShot(true);
+  deadline->setInterval(120000);
+  QObject::connect(deadline, &QTimer::timeout, socket, [=]() {
+    respond(FormatHttpResponse(
+        504, problem(QStringLiteral(
+                 "the remote did not answer within two minutes"))));
+  });
+  deadline->start();
+
+  QObject::connect(socket, &QTcpSocket::disconnected, reader, [reader]() {
+    reader->cancel();
+    reader->deleteLater();
+  });
+
+  qCDebug(rbApp) << "API reading" << remote << path << "limit=" << limit;
+  reader->start();
 }
 
 void ApiServer::answerWhenDone(QTcpSocket *socket, RunningJob *job,
@@ -2318,6 +2398,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
       }
       listDirectory(socket, asked, parts.at(1),
                     asked.queryValue(QStringLiteral("path")));
+      return;
+    }
+    if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("cat")) {
+      readFile(socket, asked, parts.at(1));
       return;
     }
   }

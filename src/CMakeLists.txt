@@ -76,6 +76,7 @@ set(CORE_SOURCE
   job_stats.cpp
   lsjson_parser.cpp
   directory_listing.cpp
+  file_reader.cpp
   rc_client.cpp
   qcron.cpp
   qcronfield.cpp
@@ -119,6 +120,7 @@ set(CORE_HEADER
   job_stats.h
   lsjson_parser.h
   directory_listing.h
+  file_reader.h
   rc_client.h
   qcron.h
   qcronfield.h
@@ -182,6 +184,7 @@ set(MOC
   script_editor_dialog.h
   remote_settings_dialog.h
   serve_dialog.h
+  file_view_dialog.h
 )
 
 set(OTHER
@@ -220,6 +223,7 @@ set(SOURCE
   script_editor_dialog.cpp
   remote_settings_dialog.cpp
   serve_dialog.cpp
+  file_view_dialog.cpp
 )
 
 if(WIN32)

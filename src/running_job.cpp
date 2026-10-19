@@ -170,7 +170,12 @@ bool RunningJob::start() {
   // mProcess can already be null by the time start() returns.
   QProcess *process = mProcess;
   if (!mEnvironment.isEmpty()) {
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    // On top of what is already set -- the config password and the
+    // remote-control login -- not instead of it.
+    QProcessEnvironment environment = process->processEnvironment();
+    if (environment.isEmpty()) {
+      environment = QProcessEnvironment::systemEnvironment();
+    }
     for (auto it = mEnvironment.cbegin(); it != mEnvironment.cend(); ++it) {
       environment.insert(it.key(), it.value());
     }

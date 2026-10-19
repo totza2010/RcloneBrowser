@@ -54,6 +54,7 @@ public:
   void rename(const QModelIndex &index, const QString &name);
   bool isTopLevel(const QModelIndex &index) const;
   bool isFolder(const QModelIndex &index) const;
+  quint64 size(const QModelIndex &index) const;
 
   QModelIndex addRoot(const QString &name, const QString &path);
 
