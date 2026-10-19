@@ -2053,6 +2053,18 @@ marker: `apiProblem` · `Try now` · "trying again every 15 seconds"
 | 2 | ระหว่างที่พอร์ตยังไม่ว่าง | status bar บอกเหตุ · Help → Open web interface บอกเหตุ + Try now | ⬜ | |
 | 3 | `RB_API_ENABLED=0` | ไม่ลองใหม่ · ไม่มีข้อความรบกวน | ⬜ | |
 
+### V-66 · ที่อยู่ของแต่ละหน้า
+
+marker: `route()` · `setAddress` · `#/history/<id>`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | กดแท็บ Jobs → History → Back → Back | กลับ Jobs แล้ว Remotes · ที่อยู่ตาม | ⬜ | |
+| 2 | เปิดโฟลเดอร์ลึกสองชั้น · Back | กลับโฟลเดอร์ก่อนหน้า | ⬜ | |
+| 3 | คัดลอกที่อยู่ `#/remotes/gdrive/films` ไปแท็บใหม่ | เปิดโฟลเดอร์นั้นหลัง sign in | ⬜ | |
+| 4 | คลิกแถวประวัติ · ที่อยู่ · Back | `#/history/<id>` · Back ปิดกล่อง | ⬜ | |
+| 5 | F5 บนแท็บ Schedules | ยังอยู่ Schedules | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

@@ -20,6 +20,8 @@ const THEME_KEY = "rb.theme";
 
 let secret = localStorage.getItem(KEY) || "";
 let tab = "remotes";
+// Whether the box on screen was opened by an address, and so goes with it.
+let routedBox = false;
 let logFor = "";
 let auth = { passwordSet: false, user: "admin" };
 
@@ -1031,9 +1033,13 @@ async function historyOlder() {
   drawHistory();
 }
 
-async function openRun(requestId) {
+async function openRun(requestId, fromAddress) {
+  if (!fromAddress) setAddress("#/history/" + encodeURIComponent(requestId), true);
   const answer = await api("GET", "/history/" + encodeURIComponent(requestId));
-  if (answer.status !== 200) return toast(reasonFrom(answer));
+  if (answer.status !== 200) {
+    setAddress("#/history", false);
+    return toast(reasonFrom(answer));
+  }
   const r = answer.data;
   showResult(r.taskName || r.info || r.kind,
     figures([
@@ -1051,6 +1057,7 @@ async function openRun(requestId) {
     (r.hasLog
       ? '<p><button class="ghost small" data-log="' + esc(r.requestId) + '">Log — the command and what rclone printed</button></p>'
       : '<p class="muted">No log is kept for it.</p>'));
+  routedBox = true; // closing this box takes #/history/<id> with it
 }
 
 function drawHistory() {
@@ -1457,9 +1464,17 @@ function drawCapabilities() {
   drawChosen();
 }
 
-async function browse(remote, path) {
+async function browse(remote, path, fromAddress) {
   const another = remote !== browsing.remote;
   browsing.remote = remote;
+  // A folder opened is a step Back returns to -- unless it was the address
+  // that asked for it.
+  if (!fromAddress) {
+    const was = browsing.path;
+    browsing.path = path || "";
+    setAddress(remotesAddress(), true);
+    browsing.path = was;
+  }
   // Drawn for this remote at once -- from what is known of it, or as "yes"
   // until it is -- not left as the last remote's.
   if (another) {
@@ -1581,6 +1596,8 @@ async function deleteMany(all) {
 // when the answer comes -- or says why there is none.
 
 function showResult(title, html) {
+  // Any other box is not a run's, and its address is the tab's.
+  routedBox = false;
   $("result-title").textContent = title;
   $("result-body").innerHTML = html;
   $("resultbox").classList.remove("hidden");
@@ -1591,6 +1608,10 @@ function closeResult() {
   $("resultbox").classList.add("hidden");
   $("result-body").innerHTML = "";
   forgetViewed();
+  if (routedBox) {
+    routedBox = false;
+    if (/^#\/history\/./.test(location.hash)) setAddress("#/history", false);
+  }
 }
 
 // ---- looking at a file ------------------------------------------------------
@@ -4356,24 +4377,74 @@ document.addEventListener("click", async (event) => {
   }
 
   if (d.tab) {
-    tab = d.tab;
-    if (tab === "api") drawApi();
-    // The tab bar's own buttons: the transfer form has a bar of its own.
-    for (const b of document.querySelectorAll("#tabs button")) {
-      b.classList.toggle("on", b.dataset.tab === tab);
-    }
-    for (const section of document.querySelectorAll(".tab")) {
-      section.classList.toggle("on", section.id === "tab-" + tab);
-    }
+    showTab(d.tab);
+    setAddress(d.tab === "remotes" && browsing.remote ? remotesAddress() : "#/" + d.tab, true);
   }
 });
+
+function showTab(name) {
+  tab = name;
+  if (tab === "api") drawApi();
+  // The tab bar's own buttons: the transfer form has a bar of its own.
+  for (const b of document.querySelectorAll("#tabs button")) {
+    b.classList.toggle("on", b.dataset.tab === tab);
+  }
+  for (const section of document.querySelectorAll(".tab")) {
+    section.classList.toggle("on", section.id === "tab-" + tab);
+  }
+}
+
+// ---- the address of what is on screen -------------------------------------
+//
+// Every tab has one, and so do a remote's folder and a run in full:
+//   #/jobs   #/history   #/history/<requestId>   #/remotes/<remote>/<path>
+// so a place can be kept, sent, opened in another tab and gone back to, and
+// the browser's Back and Forward walk the tabs and folders as they were seen.
+
+const TABS = ["remotes", "jobs", "queue", "tasks", "schedules", "history", "api"];
+
+function remotesAddress() {
+  const parts = ["remotes", browsing.remote].concat(browsing.path ? browsing.path.split("/") : []);
+  return "#/" + parts.map(encodeURIComponent).join("/");
+}
+
+// Changes the address without the page acting on it: the page is already
+// where it says. A step the browser's Back can return to when `step`.
+function setAddress(hash, step) {
+  if (location.hash === hash) return;
+  try {
+    if (step) history.pushState(null, "", hash);
+    else history.replaceState(null, "", hash);
+  } catch (e) {
+    /* a page opened from a file, say: the address is not this page's to set */
+  }
+}
+
+// The page made to show what the address says.
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter((p) => p !== "")
+    .map((p) => { try { return decodeURIComponent(p); } catch (e) { return p; } });
+  const name = TABS.includes(parts[0]) ? parts[0] : "remotes";
+  showTab(name);
+  // Back from a run in full is back to the list: the box goes with it.
+  if (!(name === "history" && parts[1])) {
+    if (!$("resultbox").classList.contains("hidden") && routedBox) closeResult();
+  }
+  if (name === "remotes" && parts[1]) {
+    const path = parts.slice(2).join("/");
+    if (parts[1] !== browsing.remote || path !== browsing.path) browse(parts[1], path, true);
+  }
+  if (name === "history" && parts[1]) openRun(parts[1], true);
+}
+
+window.addEventListener("popstate", route);
 
 // ---- start ----------------------------------------------------------------
 
 function start() {
   $("gate").classList.add("hidden");
   $("app").classList.remove("hidden");
-  refresh();
+  refresh().then(route, route);
   listen();
 
   // Slowly, for the things no event announces: the next run of a schedule
