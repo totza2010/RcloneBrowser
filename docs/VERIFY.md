@@ -1999,6 +1999,16 @@ marker: `RunHistory::search` · `GET /api/v1/history/{requestId}` · `Load older
 | 5 | หน้าต่าง · History · ค้น · กรองผล/ชนิด · Load older | ตรงกับหน้าเว็บ · หางานที่เก่ากว่า 500 รายการเจอ | ⬜ | |
 | 6 | หน้าต่าง · ดับเบิลคลิกแถว | กล่องรายละเอียด · Open log | ⬜ | |
 
+### V-61 · ความสามารถของรีโหมดบนหน้าเว็บ
+
+marker: `GET /api/v1/remotes/{name}/capabilities` · `drawCapabilities`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: fake (แบบ teldrive) · ถามซ้ำ · ไม่มีรีโหมด | link ได้ · cleanup/dedupe ไม่ได้ · ไม่มี hash · 404 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | หน้าเว็บ · เปิดรีโหมด teldrive | Dedupe · Cleanup ปิดพร้อมเหตุผล · Check บอกว่าไม่มี hash · ตรงกับหน้าต่าง | ⬜ | |
+| 3 | สลับ teldrive ↔ gdrive | ปุ่มเปลี่ยนตามรีโหมดทันที | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

@@ -18,6 +18,7 @@
 #include "local_files.h"
 #include "remote_ops.h"
 #include "rclone_config.h"
+#include "rclone_capabilities.h"
 #include "rclone_flags.h"
 #include "remote_registry.h"
 #include "run_history.h"
@@ -664,6 +665,63 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
 
   qCDebug(rbApp) << "API listing" << remote << path << "limit=" << limit;
   listing->start();
+}
+
+void ApiServer::remoteCapabilities(QTcpSocket *socket, const QString &remote) {
+  if (RemoteRegistry::instance().find(remote) == nullptr) {
+    socket->write(
+        FormatHttpResponse(404, problem(QStringLiteral("no such remote"))));
+    return;
+  }
+  const auto said = [remote](const RcloneCapabilities &caps) {
+    QJsonObject object;
+    object.insert(QStringLiteral("remote"), remote);
+    object.insert(QStringLiteral("known"), caps.known);
+    object.insert(QStringLiteral("about"), !caps.known || caps.about);
+    object.insert(QStringLiteral("cleanUp"), !caps.known || caps.cleanUp);
+    object.insert(QStringLiteral("copy"), !caps.known || caps.copy);
+    object.insert(QStringLiteral("move"), !caps.known || caps.move);
+    object.insert(QStringLiteral("publicLink"), !caps.known || caps.publicLink);
+    object.insert(QStringLiteral("purge"), !caps.known || caps.purge);
+    object.insert(QStringLiteral("duplicateFiles"), !caps.known || caps.duplicateFiles);
+    object.insert(QStringLiteral("listR"), caps.listR);
+    object.insert(QStringLiteral("putStream"), !caps.known || caps.putStream);
+    object.insert(QStringLiteral("hashes"), QJsonArray::fromStringList(caps.hashes));
+    object.insert(QStringLiteral("precisionNs"), double(caps.precisionNs));
+    return toJson(object);
+  };
+
+  RcloneCapabilityRegistry &registry = RcloneCapabilityRegistry::instance();
+  const RcloneCapabilities cached = registry.get(remote); // asks, if not yet
+  if (cached.known) {
+    socket->write(FormatHttpResponse(200, said(cached)));
+    return;
+  }
+
+  // Held until rclone has said, or a while has passed: unknown is an answer
+  // too, and one that keeps every button on.
+  socket->setProperty("stream", true);
+  QPointer<QTcpSocket> held(socket);
+  auto answered = QSharedPointer<bool>::create(false);
+  auto *wait = new QTimer(socket);
+  wait->setSingleShot(true);
+  QObject::connect(wait, &QTimer::timeout, socket, [held, answered, said]() {
+    if (held && !*answered) {
+      *answered = true;
+      held->write(FormatHttpResponse(200, said(RcloneCapabilities())));
+    }
+  });
+  QObject::connect(&registry, &RcloneCapabilityRegistry::capabilitiesChanged, socket,
+                   [held, answered, said, remote, wait](const QString &which,
+                                                        const RcloneCapabilities &caps) {
+                     if (which != remote || !held || *answered) {
+                       return;
+                     }
+                     *answered = true;
+                     wait->stop();
+                     held->write(FormatHttpResponse(200, said(caps)));
+                   });
+  wait->start(20000);
 }
 
 void ApiServer::testWebhook(QTcpSocket *socket, const QString &id) {
@@ -2420,6 +2478,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   // Nor this: how a remote is set up is read from rclone each time.
   {
     const QStringList parts = segmentsOf(asked.path);
+    if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
+        parts.at(0) == QLatin1String("remotes") &&
+        parts.at(2) == QLatin1String("capabilities")) {
+      remoteCapabilities(socket, parts.at(1));
+      return;
+    }
     if (asked.method == QLatin1String("GET") && parts.size() == 3 &&
         parts.at(0) == QLatin1String("remotes") &&
         parts.at(2) == QLatin1String("config")) {

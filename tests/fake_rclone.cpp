@@ -36,6 +36,20 @@ int main(int argc, char *argv[]) {
   // config providers  one backend, "fake", with a sensitive option, a
   //                   password, an ordinary one and an advanced one
   // config dump       the one remote, secrets and all, as rclone gives it
+  // backend features: what "fake" can do -- links and cleanup, no duplicates,
+  // no hashes (the shape teldrive has).
+  if (std::strcmp(command, "backend") == 0 && argc > 2 &&
+      std::strcmp(argv[2], "features") == 0) {
+    if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
+      return 1;
+    }
+    std::printf("{\"Name\":\"fake\",\"Hashes\":[],\"Precision\":1000000000,"
+                "\"Features\":{\"About\":true,\"CleanUp\":false,\"Copy\":true,"
+                "\"Move\":true,\"PublicLink\":true,\"DuplicateFiles\":false,"
+                "\"Purge\":true,\"ListR\":false,\"PutStream\":true}}\n");
+    return 0;
+  }
+
   if (std::strcmp(command, "config") == 0 && argc > 2) {
     if (std::getenv("FAKE_RCLONE_FAIL") != nullptr) {
       std::fprintf(stderr, "Failed to load config file: not this time\n");

@@ -15,6 +15,7 @@
 #include "utils.h"
 #include "webhooks.h"
 #include "folder_watches.h"
+#include "rclone_capabilities.h"
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
@@ -3340,6 +3341,25 @@ private slots:
     QCOMPARE(ids("?limit=1&before=" + QUrl::toPercentEncoding(newest)),
              (QStringList{"{quick-0}"}));
     RunHistory::clear();
+  }
+
+  // What a backend can do, from rclone backend features, for the page to
+  // grey its buttons by as the window does.
+  void aRemoteSaysWhatItsBackendCanDo() {
+    QVERIFY(useFakeRclone(1));
+    RcloneCapabilityRegistry::instance().invalidate(QStringLiteral("fake"));
+    const QByteArray asked = ask("GET", "/api/v1/remotes/fake/capabilities", mToken);
+    QCOMPARE(statusOf(asked), 200);
+    const QJsonObject caps = bodyOf(asked).object();
+    QCOMPARE(caps.value(QStringLiteral("known")).toBool(), true);
+    QCOMPARE(caps.value(QStringLiteral("publicLink")).toBool(), true);
+    QCOMPARE(caps.value(QStringLiteral("cleanUp")).toBool(), false);
+    QCOMPARE(caps.value(QStringLiteral("duplicateFiles")).toBool(), false);
+    QCOMPARE(caps.value(QStringLiteral("hashes")).toArray().size(), 0);
+    // Asked again: kept, and answered at once.
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/remotes/fake/capabilities", mToken)).object()
+                 .value(QStringLiteral("cleanUp")).toBool(), false);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/nothing/capabilities", mToken)), 404);
   }
 
   void aMountNeedsSomewhereToGo() {

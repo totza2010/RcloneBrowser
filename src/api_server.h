@@ -147,6 +147,9 @@ private:
   // does. See docs/WEB-UI.md.
   void listDirectory(QTcpSocket *socket, const HttpRequest &request,
                      const QString &remote, const QString &path);
+  // What a remote's backend can do, answered when rclone has said.
+  void remoteCapabilities(QTcpSocket *socket, const QString &remote);
+
   // A test event to a webhook, answered when the address has answered.
   void testWebhook(QTcpSocket *socket, const QString &id);
 

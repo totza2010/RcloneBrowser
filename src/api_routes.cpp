@@ -297,6 +297,15 @@ QList<Route> build() {
         "picture or a PDF and 2 MiB of anything else; 64 MiB at most", "",
         "200: the bytes; 400: no file named; 404: no such remote; 502: "
         "rclone could not read it"),
+      r("GET", "/api/v1/remotes/{name}/capabilities", kRemotes,
+        "What the remote's backend can do",
+        "From rclone backend features, asked once and kept while the program "
+        "runs -- the same answer the window greys its buttons by. known: "
+        "false when rclone did not say (within 20 seconds); then assume "
+        "everything works, as the window does. hashes empty: check can only "
+        "compare sizes, and cryptcheck cannot work.",
+        "", "",
+        "200: what it can do; 404: no such remote"),
       r("GET", "/api/v1/remotes/{name}/size", kRemotes,
         "How big a folder is", "", "path: the folder", "",
         "200: count and bytes; 502: rclone's own answer"),

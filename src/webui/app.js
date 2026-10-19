@@ -1193,7 +1193,7 @@ function drawChosen() {
   const entry = browsing.entries.find((e) => e.path === browsing.chosen);
   $("remote-rename").disabled = !entry;
   $("remote-delete").disabled = !entry;
-  $("remote-link").disabled = !entry;
+  $("remote-link").disabled = !entry || !can("publicLink");
   $("remote-view").disabled = !entry || entry.isDir;
   $("remote-copy").disabled = !entry;
   $("remote-download").disabled = !entry;
@@ -1225,8 +1225,52 @@ $("listing").addEventListener("dblclick", (event) => {
   viewFile(entry);
 });
 
+// What the backend of the remote being browsed can do. Unknown is "yes":
+// a slow or failed question never hides a button that works -- the window's
+// rule.
+const capabilities = {};
+
+function can(feature) {
+  const caps = capabilities[browsing.remote];
+  return !caps || !caps.known || caps[feature] !== false;
+}
+
+async function readCapabilities(remote) {
+  if (capabilities[remote]) return;
+  capabilities[remote] = { known: false };
+  const answer = await api("GET", "/remotes/" + encodeURIComponent(remote) + "/capabilities").catch(() => null);
+  if (answer && answer.status === 200) capabilities[remote] = answer.data;
+  if (remote === browsing.remote) drawCapabilities();
+}
+
+// The buttons that hang on the backend, said why when they are off.
+function drawCapabilities() {
+  const rule = (id, feature, why) => {
+    const button = $(id);
+    if (!button) return;
+    const ok = can(feature);
+    if (id !== "remote-link") button.disabled = !ok; // Link also needs a file chosen
+    button.title = ok ? "" : why;
+  };
+  rule("remote-about", "about", "this backend does not report storage usage");
+  rule("remote-cleanup", "cleanUp", "this backend has nothing to clean up");
+  rule("remote-dedupe", "duplicateFiles", "this backend cannot hold duplicate files, so there is nothing to deduplicate");
+  rule("remote-link", "publicLink", "public links are not supported by this backend");
+  const caps = capabilities[browsing.remote];
+  $("remote-check").title = caps && caps.known && !(caps.hashes || []).length
+    ? "this backend gives no hashes, so only sizes can be compared" : "";
+  drawChosen();
+}
+
 async function browse(remote, path) {
+  const another = remote !== browsing.remote;
   browsing.remote = remote;
+  // Drawn for this remote at once -- from what is known of it, or as "yes"
+  // until it is -- not left as the last remote's.
+  if (another) {
+    drawCapabilities();
+    readCapabilities(remote);
+  }
   browsing.path = path || "";
   browsing.chosen = "";
   browsing.entries = [];
