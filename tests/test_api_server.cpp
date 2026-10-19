@@ -156,7 +156,9 @@ private:
     task->description = name;
     task->operation = JobOptions::Copy;
     task->jobType = JobOptions::Upload;
-    task->source = QStringLiteral("C:/nowhere");
+    // Absolute on every system: "C:/nowhere" is not, on Linux, and a task
+    // whose end on this machine is not absolute is refused (403).
+    task->source = QDir::rootPath() + QStringLiteral("nowhere");
     task->dest = QStringLiteral("nowhere:");
     task->isFolder = true;
     task->uniqueId = QUuid::createUuid();

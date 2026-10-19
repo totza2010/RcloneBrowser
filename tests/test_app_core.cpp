@@ -24,6 +24,15 @@
 // a job needs to know where rclone is.
 //
 // See docs/LAYER-SPLIT.md and VERIFY.md V-24 item 6.4.
+// Somewhere rclone could be, written as an absolute path on the system the
+// test runs on: "C:/..." is not absolute on Linux, and GetRclone() then
+// takes it as under the current folder.
+#if defined(Q_OS_WIN)
+static const QString kSomewhere = QStringLiteral("C:/somewhere/rclone.exe");
+#else
+static const QString kSomewhere = QStringLiteral("/somewhere/rclone");
+#endif
+
 class TestAppCore : public QObject {
   Q_OBJECT
 
@@ -70,7 +79,7 @@ private slots:
     // stops there.
     GetSettings()->setValue(QStringLiteral("Settings/queueStatus"), "false");
     GetSettings()->setValue(QStringLiteral("Settings/rclone"),
-                            QStringLiteral("C:/somewhere/rclone.exe"));
+                            kSomewhere);
     GetSettings()->sync();
   }
 
@@ -95,7 +104,7 @@ private slots:
 
     AppCore::instance().start();
 
-    QCOMPARE(GetRclone(), QStringLiteral("C:/somewhere/rclone.exe"));
+    QCOMPARE(GetRclone(), kSomewhere);
   }
 
   // Reading the stored state is start()'s job, and it has to have happened

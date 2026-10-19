@@ -457,6 +457,11 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
   (`ApiKeysDialog` บน `ApiAuth::Keys` ตัวเดียวกับหน้าเว็บ · ทำ · เอาคืน · key แสดงครั้งเดียวพร้อม Copy · ระดับเริ่มต้น control)
 
 **Docker · build · test**
+- ⚠ **CI (Linux) แดงมาตลอด** ตั้งแต่ราว 2026-10-17 — งานทุกชิ้นหลังจากนั้น build ผ่านบน Windows แต่ไม่เคยผ่าน CI บน Linux (Qt 6.4 ของ Ubuntu) ·
+  พบ 2026-10-19 · สาเหตุที่เห็นจาก log: (1) `test_schedule_json` ใช้ `QTimeZone::fromSecondsAheadOfUtc`/`UTC` ซึ่งมีตั้งแต่ Qt 6.5 → compile ไม่ผ่าน ·
+  (2) `test_app_core` ใช้ path `C:/…` ซึ่งบน Linux ไม่ใช่ absolute · (3) `test_api_server` task ทดสอบมีต้นทาง `C:/nowhere` → 403 บน Linux ·
+  (4) `test_directory_listing` สัญญาณ "หา rclone ไม่เจอ" มาช้ากว่าบน Linux · **แก้ทั้งสี่แล้ว (ยังไม่ได้ยืนยันบน Linux)** — อาจมีความล้มเหลวอื่น
+  ที่ซ่อนหลัง compile error · ต้องดู CI หลัง push หรือรันใน container `ubuntu:24.04` ตามแบบ `ci.yml` (Docker Desktop ปิดอยู่ตอนนั้น)
 - ยังไม่ได้ลอง build/push ผ่าน workflow · arm64 · อิมเมจ web-only ขนาดเล็ก (ต้องย้ายไอคอนมา core)
 - ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test

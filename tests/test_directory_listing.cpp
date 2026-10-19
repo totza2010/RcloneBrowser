@@ -91,12 +91,14 @@ private slots:
     DirectoryListing listing(QStringLiteral("tgdrive"), QString());
     QSignalSpy failed(&listing, &DirectoryListing::failed);
 
+    // Waited for: on Windows a program that is not there fails inside
+    // start(), on Linux a moment later, through the event loop.
     listing.start();
-    QCOMPARE(failed.count(), 1);
+    QTRY_COMPARE(failed.count(), 1);
     QVERIFY2(!listing.isRunning(), "a listing that failed still calls itself running");
 
     listing.start();
-    QCOMPARE(failed.count(), 2);
+    QTRY_COMPARE(failed.count(), 2);
   }
 };
 

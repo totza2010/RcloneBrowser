@@ -131,16 +131,18 @@ private slots:
 
   // One way of writing a moment, on every system: Qt's own "t" says
   // "GMT+7" on Windows and "+07" on Linux.
+  // QTimeZone(seconds) and utc(), not fromSecondsAheadOfUtc() and UTC: those
+  // came in Qt 6.5, and the Linux CI builds with the distribution's Qt 6.4.
   void aMomentIsWrittenTheSameWayEverywhere() {
     const QDate day(2026, 10, 18);
     const QTime at(23, 54, 1);
-    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(7 * 3600))),
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone(7 * 3600))),
              QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT+7"));
-    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(19800))),
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone(19800))),
              QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT+5:30"));
-    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::fromSecondsAheadOfUtc(-4 * 3600))),
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone(-4 * 3600))),
              QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT-4"));
-    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::UTC)),
+    QCOMPARE(ScheduleStamp(QDateTime(day, at, QTimeZone::utc())),
              QStringLiteral("Sun, 18/Oct/2026 23:54:01 GMT"));
   }
 
