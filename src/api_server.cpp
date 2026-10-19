@@ -7,6 +7,7 @@
 #include "job_json.h"
 #include "backup_plan.h"
 #include "folder_watches.h"
+#include "program_settings.h"
 #include "webhooks.h"
 #include "extra_flags.h"
 #include "debug_log.h"
@@ -152,6 +153,20 @@ qint64 gStreamIdleOverrideMs = -1;
 
 QJsonObject describe(const RunningJob &job) {
   return JobJson::Write(job, int(ApiServer::streamIdleLimitMs() / 1000));
+}
+
+// The program's own settings, as the page and other programs see them.
+QJsonObject describeSettings() {
+  QJsonObject object;
+  object.insert(QStringLiteral("streamIdleMinutes"),
+                ProgramSettings::StreamIdleMinutes());
+  object.insert(QStringLiteral("streamIdleFromEnvironment"),
+                ProgramSettings::StreamIdleFromEnvironment());
+  object.insert(QStringLiteral("localRoots"),
+                QJsonArray::fromStringList(ProgramSettings::LocalRoots()));
+  object.insert(QStringLiteral("localRootsFromEnvironment"),
+                ProgramSettings::LocalRootsFromEnvironment());
+  return object;
 }
 
 // A webhook as it may be shown: everything but the secret.
@@ -418,12 +433,7 @@ qint64 ApiServer::streamIdleLimitMs() {
   if (gStreamIdleOverrideMs >= 0) {
     return gStreamIdleOverrideMs;
   }
-  bool readable = false;
-  int minutes = qEnvironmentVariableIntValue("RB_STREAM_IDLE_MINUTES", &readable);
-  if (!readable) {
-    minutes = GetSettings()->value("Settings/streamIdleMinutes", 30).toInt();
-  }
-  return qMax(0, minutes) * 60LL * 1000LL;
+  return ProgramSettings::StreamIdleMinutes() * 60LL * 1000LL;
 }
 
 void ApiServer::setStreamIdleLimitMs(qint64 ms) { gStreamIdleOverrideMs = ms; }
@@ -3048,6 +3058,35 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
     return 201;
   }
 
+  // ---- the program's own settings -------------------------------------------
+
+  if (put && parts.size() == 1 && parts.at(0) == QLatin1String("settings")) {
+    const QJsonObject given = options(request);
+    QString why;
+    if (given.contains(QStringLiteral("streamIdleMinutes"))) {
+      const QJsonValue minutes = given.value(QStringLiteral("streamIdleMinutes"));
+      if (!minutes.isDouble() ||
+          !ProgramSettings::SetStreamIdleMinutes(minutes.toInt(), &why)) {
+        return refuseTask(ProgramSettings::StreamIdleFromEnvironment() ? 409 : 400,
+                          QStringLiteral("bad_field"),
+                          why.isEmpty() ? QStringLiteral("a number of minutes") : why);
+      }
+    }
+    if (given.contains(QStringLiteral("localRoots"))) {
+      QStringList roots;
+      for (const QJsonValue &root : given.value(QStringLiteral("localRoots")).toArray()) {
+        roots << root.toString();
+      }
+      if (!ProgramSettings::SetLocalRoots(roots, &why)) {
+        return refuseTask(ProgramSettings::LocalRootsFromEnvironment() ? 409 : 400,
+                          QStringLiteral("bad_field"), why);
+      }
+    }
+    qCDebug(rbApp) << "API changed the program's settings";
+    *body = toJson(describeSettings());
+    return 200;
+  }
+
   // ---- webhooks -------------------------------------------------------------
 
   if (post && parts.size() == 1 && parts.at(0) == QLatin1String("webhooks")) {
@@ -3510,6 +3549,11 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     object.insert(QStringLiteral("prefix"), provider->prefix);
     object.insert(QStringLiteral("options"), options);
     *body = toJson(object);
+    return 200;
+  }
+
+  if (path == QLatin1String("/api/v1/settings")) {
+    *body = toJson(describeSettings());
     return 200;
   }
 

@@ -2205,6 +2205,7 @@ async function drawApi() {
       ", for Swagger, Postman, a generated client · " + esc(origin) + "</span></p>" +
       '<div id="api-keys" class="api-keys"></div>' +
       '<div id="api-hooks" class="api-keys"></div>' +
+      '<div id="api-settings" class="api-keys"></div>' +
       '<input id="api-filter" type="text" placeholder="filter: tasks, schedule, stream…" autocomplete="off">' +
     "</div>",
   ];
@@ -2250,6 +2251,7 @@ async function drawApi() {
   box.innerHTML = parts.join("");
   drawKeys();
   drawHooks();
+  drawSettings();
 
   $("api-filter").addEventListener("input", () => {
     const words = $("api-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -2335,6 +2337,53 @@ async function drawKeys(made) {
       return;
     }
     drawKeys(result.data);
+  });
+}
+
+// ---- the program's own settings ---------------------------------------------------
+
+async function drawSettings() {
+  const box = $("api-settings");
+  if (!box) return;
+  const answer = await api("GET", "/settings").catch(() => null);
+  if (!answer) return;
+  if (answer.status === 403) {
+    box.innerHTML = '<p class="muted">The settings of the program are changed by an administrator.</p>';
+    return;
+  }
+  if (answer.status !== 200) return;
+  const s = answer.data;
+  const fixed = (yes, name) => yes ? ' disabled title="' + name + ' sets it: change it where the program is started"' : "";
+  box.innerHTML =
+    "<h3>Program settings</h3>" +
+    '<form id="settings-form" class="settings-form">' +
+      '<p><label>A stream stops itself after it has not been played for (minutes, 0 for never)' +
+        '<input id="set-idle" type="number" min="0" max="10080" value="' + esc(s.streamIdleMinutes) + '"' +
+        fixed(s.streamIdleFromEnvironment, "RB_STREAM_IDLE_MINUTES") + "></label></p>" +
+      '<p><label>The folders of the machine the program runs on that the API may use — one a line; empty: every folder' +
+        '<textarea id="set-roots" rows="4"' + fixed(s.localRootsFromEnvironment, "RB_LOCAL_ROOTS") + ">" +
+        esc((s.localRoots || []).join("\n")) + "</textarea></label></p>" +
+      ((s.streamIdleFromEnvironment || s.localRootsFromEnvironment)
+        ? '<p class="muted">What the environment sets is shown, and is changed where the program is started.</p>' : "") +
+      '<p><button type="submit" class="small">Save</button> <span id="settings-state" class="error"></span></p>' +
+    "</form>";
+  $("settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {};
+    if (!s.streamIdleFromEnvironment) body.streamIdleMinutes = Number($("set-idle").value);
+    if (!s.localRootsFromEnvironment) {
+      body.localRoots = $("set-roots").value.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (!body.localRoots.length && (s.localRoots || []).length &&
+          !await askYes("Let the API use every folder of the machine?\n\n" +
+                        "Keys and the page will be able to read and write anywhere the program can.")) return;
+    }
+    const result = await api("PUT", "/settings", body).catch(() => null);
+    if (!result || result.status !== 200) {
+      $("settings-state").textContent = result ? reasonFrom(result) : "could not reach the daemon";
+      return;
+    }
+    toast("saved");
+    drawSettings();
   });
 }
 

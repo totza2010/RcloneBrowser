@@ -442,7 +442,10 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
   (เลือกรีโหมดปลายทาง · โฟลเดอร์ · Move · Dry run · ทุกรายการที่เลือก งานละรายการ ผ่าน `RemoteOps::CopyInto` ตัวเดียวกับหน้าเว็บ ·
   Copy/Move เดิมของหน้าต่างยังอยู่ในรีโหมดเดียวกัน) · mount จาก task ไม่ได้ `Settings/mount`
 - ค่าเริ่มต้นของฟอร์มอยู่สองที่ · การ์ดตารางเวลาควรอ่านจากที่เก็บ
-- ตั้งค่า stream idle / ขอบเขตโฟลเดอร์ จาก Preferences และหน้าเว็บ · ~~จัดการ API key ในหน้าต่าง~~ — **ทำแล้ว 2026-10-19**: File → **API keys…**
+- ~~ตั้งค่า stream idle / ขอบเขตโฟลเดอร์ จาก Preferences และหน้าเว็บ~~ — **ทำแล้ว 2026-10-19**: `ProgramSettings` (core) ·
+  `GET/PUT /api/v1/settings` (**admin** ทั้งอ่านและเขียน — ขอบเขตโฟลเดอร์คือเส้นที่ทุก key ถูกจำกัด) · หน้าเว็บ แท็บ API → **Program settings** ·
+  หน้าต่าง Preferences → แท็บ **Web page** (มี Add folder…) · ค่าที่ environment ตั้ง (`RB_STREAM_IDLE_MINUTES` `RB_LOCAL_ROOTS`) แสดงแต่แก้ไม่ได้ → 409 ·
+  ล้างขอบเขตบนหน้าเว็บถามยืนยันก่อน · ⚠ path ที่มี `;` ใช้ไม่ได้ (ตัวคั่นเดียวกับ RB_LOCAL_ROOTS) · Docker dev ตั้ง `RB_LOCAL_ROOTS=/media` จึงแสดงเป็นค่าตายตัว · ~~จัดการ API key ในหน้าต่าง~~ — **ทำแล้ว 2026-10-19**: File → **API keys…**
   (`ApiKeysDialog` บน `ApiAuth::Keys` ตัวเดียวกับหน้าเว็บ · ทำ · เอาคืน · key แสดงครั้งเดียวพร้อม Copy · ระดับเริ่มต้น control)
 
 **Docker · build · test**

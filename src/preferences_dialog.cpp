@@ -1,5 +1,12 @@
 #include "preferences_dialog.h"
 #include "window_language.h"
+#include "program_settings.h"
+#include <QFileDialog>
+#include <QHBoxLayout>
+#include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QSpinBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -38,6 +45,63 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
     ui.tabWidget->addTab(page, tr("Language"));
     QObject::connect(this, &QDialog::accepted, this, [choice]() {
       WindowLanguage::Choose(choice->currentData().toString());
+    });
+  }
+
+  // The page's "Program settings", here too: the same two values, kept in
+  // one place (ProgramSettings), and shown but fixed when the environment
+  // sets them.
+  {
+    auto *page = new QWidget(this);
+    auto *layout = new QFormLayout(page);
+    auto *idle = new QSpinBox(page);
+    idle->setRange(0, 10080);
+    idle->setSuffix(tr(" minutes"));
+    idle->setSpecialValueText(tr("never"));
+    idle->setValue(ProgramSettings::StreamIdleMinutes());
+    idle->setEnabled(!ProgramSettings::StreamIdleFromEnvironment());
+    if (!idle->isEnabled()) {
+      idle->setToolTip(tr("RB_STREAM_IDLE_MINUTES sets it"));
+    }
+    layout->addRow(tr("A stream stops after not being played for"), idle);
+
+    auto *roots = new QPlainTextEdit(page);
+    roots->setPlainText(ProgramSettings::LocalRoots().join('\n'));
+    roots->setEnabled(!ProgramSettings::LocalRootsFromEnvironment());
+    roots->setPlaceholderText(tr("empty: every folder of this machine"));
+    auto *add = new QPushButton(tr("Add folder…"), page);
+    add->setEnabled(roots->isEnabled());
+    QObject::connect(add, &QPushButton::clicked, this, [this, roots]() {
+      const QString folder = QFileDialog::getExistingDirectory(
+          this, tr("A folder the API may use"));
+      if (!folder.isEmpty()) {
+        roots->appendPlainText(folder);
+      }
+    });
+    auto *rootsBox = new QVBoxLayout();
+    rootsBox->addWidget(roots);
+    rootsBox->addWidget(add, 0, Qt::AlignLeft);
+    layout->addRow(tr("Folders the web page and API may use"), rootsBox);
+    auto *note = new QLabel(
+        tr("One folder a line. Keys and the web page reach no folder of this "
+           "machine outside them; with none, they reach every folder. "
+           "What RB_STREAM_IDLE_MINUTES or RB_LOCAL_ROOTS sets is fixed here."),
+        page);
+    note->setWordWrap(true);
+    layout->addRow(note);
+    ui.tabWidget->addTab(page, tr("Web page"));
+
+    QObject::connect(this, &QDialog::accepted, this, [this, idle, roots]() {
+      QString why;
+      if (idle->isEnabled() &&
+          !ProgramSettings::SetStreamIdleMinutes(idle->value(), &why)) {
+        QMessageBox::warning(this, tr("Web page"), why);
+      }
+      if (roots->isEnabled() &&
+          !ProgramSettings::SetLocalRoots(
+              roots->toPlainText().split('\n', Qt::SkipEmptyParts), &why)) {
+        QMessageBox::warning(this, tr("Web page"), why);
+      }
     });
   }
 

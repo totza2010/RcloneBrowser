@@ -80,6 +80,7 @@ set(CORE_SOURCE
   job_json.cpp
   backup_plan.cpp
   folder_watches.cpp
+  program_settings.cpp
   webhooks.cpp
   rc_client.cpp
   qcron.cpp
@@ -128,6 +129,7 @@ set(CORE_HEADER
   job_json.h
   backup_plan.h
   folder_watches.h
+  program_settings.h
   webhooks.h
   rc_client.h
   qcron.h

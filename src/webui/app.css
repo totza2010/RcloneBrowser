@@ -533,6 +533,7 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .bar { flex: 0 0 160px; }
 
 tr.clickable { cursor: pointer; }
+.settings-form textarea { width: 100%; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; }
 
 /* How full the remote is, beside where in it the page is. */
 .crumbs-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

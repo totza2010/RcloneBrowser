@@ -15,6 +15,7 @@
 #include "utils.h"
 #include "webhooks.h"
 #include "folder_watches.h"
+#include "local_files.h"
 #include "rclone_capabilities.h"
 
 #include <QCoreApplication>
@@ -3433,6 +3434,50 @@ private slots:
              200);
     QCOMPARE(RunHistory::count(), 1);
     RunHistory::clear();
+  }
+
+  // The program's own settings, changed by the owner, and not where the
+  // environment says otherwise.
+  void theProgramsSettingsAreTheOwnersToChange() {
+    qunsetenv("RB_LOCAL_ROOTS");
+    qunsetenv("RB_STREAM_IDLE_MINUTES");
+    QTemporaryDir folder;
+    const QByteArray changed = send(
+        "PUT", "/api/v1/settings", mToken,
+        "{\"streamIdleMinutes\":12,\"localRoots\":[\"" + folder.path().toUtf8() + "\"]}");
+    QCOMPARE(statusOf(changed), 200);
+    const QJsonObject now = bodyOf(changed).object();
+    QCOMPARE(now.value(QStringLiteral("streamIdleMinutes")).toInt(), 12);
+    QCOMPARE(now.value(QStringLiteral("localRoots")).toArray().size(), 1);
+    QCOMPARE(ApiServer::streamIdleLimitMs(), 12 * 60 * 1000LL);
+    QVERIFY(LocalFiles::IsRestricted()); // the line keys are held to, now
+
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken,
+                           "{\"localRoots\":[\"C:/no/such/folder\"]}")),
+             400);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"streamIdleMinutes\":-3}")),
+             400);
+    // Set by the environment: said, and refused.
+    qputenv("RB_STREAM_IDLE_MINUTES", "5");
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/settings", mToken)).object()
+                 .value(QStringLiteral("streamIdleFromEnvironment")).toBool(), true);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"streamIdleMinutes\":9}")),
+             409);
+    qunsetenv("RB_STREAM_IDLE_MINUTES");
+
+    // Only the owner: which folders keys may reach is not a key's to move.
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray writer =
+        bodyOf(send("POST", "/api/v1/keys", mToken, "{\"name\":\"w\",\"scope\":\"write\"}"))
+            .object().value(QStringLiteral("key")).toString().toUtf8();
+    QCOMPARE(statusOf(ask("GET", "/api/v1/settings", writer)), 403);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", writer, "{\"localRoots\":[]}")), 403);
+    ApiAuth::Keys::instance().forgetAll();
+
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken,
+                           "{\"streamIdleMinutes\":30,\"localRoots\":[]}")),
+             200);
+    QVERIFY(!LocalFiles::IsRestricted());
   }
 
   void aMountNeedsSomewhereToGo() {

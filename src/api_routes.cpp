@@ -203,6 +203,19 @@ QList<Route> build() {
       r("GET", "/api/v1/schedules", kSchedules, "Every schedule",
         "In words, with when each next comes due by the clock of the machine "
         "the program runs on."),
+      r("GET", "/api/v1/settings", kSystem, "The program's own settings",
+        "streamIdleMinutes: how long a stream may sit unplayed before it "
+        "stops itself (0: never). localRoots: the folders of this machine "
+        "the API may use, as written; empty, every folder. Each says "
+        "whether the environment sets it (RB_STREAM_IDLE_MINUTES, "
+        "RB_LOCAL_ROOTS) -- then it is changed there, not here.",
+        "", "", "200: the settings"),
+      r("PUT", "/api/v1/settings", kSystem, "Change the program's own settings",
+        "Only what is given changes. A value the environment sets is "
+        "refused. An empty localRoots is every folder of this machine.",
+        "", R"({"streamIdleMinutes":30,"localRoots":["/media","/downloads"]})",
+        "200: the settings now; 400: not a number of minutes, or not a "
+        "folder; 409: the environment sets it"),
       r("GET", "/api/v1/watches", kTasks, "Tasks that run when their folder changes",
         "Each with how long its folder has to be quiet first, and -- since the "
         "program started -- when a change was last seen and when it last "
@@ -550,6 +563,7 @@ QString scopeOf(const Route &route) {
     // The webhooks too: an address can carry a token of whoever receives it.
     return route.path.startsWith(QLatin1String("/api/v1/keys")) ||
                    route.path.startsWith(QLatin1String("/api/v1/webhooks")) ||
+                   route.path == QLatin1String("/api/v1/settings") ||
                    route.path == QLatin1String("/api/v1/remotes/{name}/config")
                ? QStringLiteral("admin")
                : QStringLiteral("read");
@@ -587,6 +601,8 @@ QString scopeOf(const Route &route) {
       // is not the owner's should be able to give away.
       QStringLiteral("POST /api/v1/remotes/{name}/serve"),
       // Where this program sends news of every job, and with what.
+      // Which folders the API may use is the line every key is held to.
+      QStringLiteral("PUT /api/v1/settings"),
       QStringLiteral("POST /api/v1/webhooks"),
       QStringLiteral("PUT /api/v1/webhooks/{id}"),
       QStringLiteral("DELETE /api/v1/webhooks/{id}"),
