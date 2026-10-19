@@ -71,6 +71,14 @@ enum class JobState {
 // that has to write them down.
 QString JobKindToString(JobKind kind);
 
+// A question: something only read -- how big, how full, what is in it -- and
+// answered at once to whoever asked. It leaves no history row and no log
+// file: the page asks how full a remote is every time it is opened, and a
+// history of that is a history nobody can find their transfers in.
+// Everything that does something (check, link, dedupe, cleanup, a transfer)
+// is kept.
+bool JobKindIsQuestion(JobKind kind);
+
 // What the job is, in words, for whoever is showing it. Derived from the task
 // when the job is created; kept here so an API can report it without asking
 // the window.

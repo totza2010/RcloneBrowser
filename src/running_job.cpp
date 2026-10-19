@@ -43,6 +43,11 @@ bool RunningJob::isDryRun() const {
   return false;
 }
 
+bool JobKindIsQuestion(JobKind kind) {
+  return kind == JobKind::About || kind == JobKind::Size ||
+         kind == JobKind::Tree;
+}
+
 QString JobKindToString(JobKind kind) {
   switch (kind) {
   case JobKind::Transfer:
@@ -127,7 +132,9 @@ bool RunningJob::start() {
                      &RunningJob::progressUnavailable);
   }
 
-  if (JobLogWriter::isEnabled()) {
+  // A question's answer goes to whoever asked; a log of it would be a file
+  // with no history row to find it by. See JobKindIsQuestion().
+  if (JobLogWriter::isEnabled() && !JobKindIsQuestion(mKind)) {
     // args[0] is the rclone subcommand ("copy", "sync", "move").
     // transferMode is often empty and describes the queue, not the operation.
     // The redacted form is what gets written; the log outlives the window.

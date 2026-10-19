@@ -1574,6 +1574,14 @@ private slots:
     QVERIFY2(waitFor(&stream, &seen, "event: queue"),
              "starting the queue was not announced");
 
+    // The remotes read again -- as after one is made, changed or deleted --
+    // is said too, with their names.
+    QVERIFY(useFakeRclone(1));
+    RemoteRegistry::instance().refresh();
+    QVERIFY2(waitFor(&stream, &seen, "event: remotes"),
+             "the remotes being read again was not announced");
+    QVERIFY(seen.contains("\"remotes\":[") && seen.contains("\"fake\""));
+
     ask("POST", "/api/v1/queue/pause", mToken);
     stream.disconnectFromHost();
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
@@ -2051,10 +2059,11 @@ private slots:
     QCOMPARE(object.value(QStringLiteral("path")).toString(),
              QStringLiteral("films"));
 
-    // It ran as a job, so it is in the history like any other.
-    QCOMPARE(RunHistory::find(object.value(QStringLiteral("requestId")).toString())
-                 .kind,
-             QStringLiteral("size"));
+    // It ran as a job, but a question is not kept: the history is for what
+    // was done. See JobKindIsQuestion() and aQuestionLeavesNoHistory().
+    QVERIFY(!object.value(QStringLiteral("requestId")).toString().isEmpty());
+    QVERIFY(RunHistory::find(object.value(QStringLiteral("requestId")).toString())
+                .requestId.isEmpty());
   }
 
   // rclone prints the quota over several lines and may say something else
@@ -3407,6 +3416,23 @@ private slots:
     ApiAuth::Keys::instance().forgetAll();
     qputenv("FAKE_RCLONE_SLEEP_MS", "0");
     ListOfJobOptions::getInstance()->Forget(task);
+  }
+
+  // A question -- how big, how full -- is answered and forgotten: no row in
+  // the history to bury the transfers under. Something done is kept.
+  void aQuestionLeavesNoHistory() {
+    QVERIFY(useFakeRclone(1));
+    RunHistory::clear();
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/size?path=films", mToken)), 200);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/about", mToken)), 200);
+    QCOMPARE(RunHistory::count(), 0);
+
+    // A folder made is something done, and stays.
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mkdir", mToken,
+                           "{\"path\":\"\",\"name\":\"kept\"}")),
+             200);
+    QCOMPARE(RunHistory::count(), 1);
+    RunHistory::clear();
   }
 
   void aMountNeedsSomewhereToGo() {

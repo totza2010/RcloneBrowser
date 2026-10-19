@@ -190,12 +190,19 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
       new RunningJob(kind, args, description, taskId, transferMode, id, this);
   mJobs.append(job);
 
-  QObject::connect(job, &RunningJob::finished, this, [this, job](JobState) {
+  // A question is not kept: see JobKindIsQuestion().
+  const bool kept = !JobKindIsQuestion(kind);
+
+  QObject::connect(job, &RunningJob::finished, this, [this, job, kept](JobState) {
     qCDebug(rbJob) << "job ended" << JobKindToString(job->kind())
                    << "request=" << job->requestId()
                    << "status=" << job->finalStatus()
                    << "exit=" << job->exitCode()
                    << "bytes=" << job->stats().bytes;
+    if (!kept) {
+      emit jobFinished(job);
+      return;
+    }
     JobRunRecord record = recordFor(job);
     record.state = job->finalStatus();
     record.exitCode = job->exitCode();
@@ -214,15 +221,17 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
   // Written before rclone is started rather than after it ends, so a job that
   // dies with the machine still leaves a row saying it was running -- which is
   // the case the history existed to cover in the first place.
-  RunHistory::recordStarted(recordFor(job));
+  if (kept) {
+    RunHistory::recordStarted(recordFor(job));
+  }
 
   // The log file does not exist until rclone prints its first line, so the row
   // above cannot name it. Filling it in at the first line rather than at the
   // end means the log of a job that never got to finish is still reachable.
   auto named = std::make_shared<bool>(false);
   QObject::connect(job, &RunningJob::outputLine, this,
-                   [job, named](const QString &) {
-                     if (*named || job->logPath().isEmpty()) {
+                   [job, named, kept](const QString &) {
+                     if (!kept || *named || job->logPath().isEmpty()) {
                        return;
                      }
                      *named = true;
