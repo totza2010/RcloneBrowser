@@ -152,6 +152,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # arm64 is built by emulation, so only for what is published: a Raspberry
+      # Pi or an ARM NAS pulls the same tag and gets its own image. Slow --
+      # every source file compiled under QEMU -- which is why ordinary pushes
+      # build and check amd64 alone.
+      - uses: docker/setup-qemu-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          platforms: arm64
+
       # Published only from a version tag. Ordinary pushes build and check
       # without publishing anything.
       - name: Publish
@@ -160,6 +169,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.tags.outputs.exact }}

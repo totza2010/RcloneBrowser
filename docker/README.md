@@ -16,8 +16,9 @@ docker compose -f docker/compose.yaml up -d
 The **web interface** is the application's own: queue, tasks, schedules,
 history, remotes. It asks for the token the container prints when it starts
 (`docker logs rclonebrowser`), and for the administrator password once one
-has been set. It cannot yet create or edit a task or a remote, which is what
-the window is still needed for.
+has been set. It does what the window does -- make and change tasks, remotes,
+schedules and backups, serve and mount, look at files -- so `web` is enough
+on its own.
 
 The **streamed window** is the desktop application itself, drawn inside the
 container and sent as video by [Selkies](https://docs.linuxserver.io/selkies).
@@ -28,7 +29,12 @@ In `both`, the window and the web interface are two views of one running
 program: start a transfer in one and it appears in the other.
 
 Published to `ghcr.io/totza2010/rclonebrowser`. Nothing is pushed except
-from a `v*` tag.
+from a `v*` tag, and by the daily rebuild when a new rclone comes out.
+
+Each tag is for **amd64 and arm64**: a PC or an Intel/AMD NAS, and a
+Raspberry Pi 4/5, an ARM NAS or a Mac with Apple silicon, pull the same tag
+and each gets its own image. (arm64 is built by emulation, so only for what
+is published; ordinary pushes check amd64.)
 
 ## Which rclone, and which tag
 
@@ -341,7 +347,7 @@ reporting that it cannot determine the rclone version:
 
 ```
 WARNING: /opt/rclone/rclone will not run here and was ignored
-WARNING: it has to be a Linux x86_64 binary
+WARNING: it has to be a Linux x86_64 binary   (aarch64 on an arm64 machine)
 WARNING: continuing with the bundled rclone v1.73.1
 ```
 

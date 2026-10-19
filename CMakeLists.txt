@@ -67,7 +67,19 @@ else()
   # OpenSSF-recommended hardening for GCC/Clang builds (Linux, macOS, BSD).
   add_compile_options(-fstack-protector-strong)
   if(NOT APPLE)
-    add_compile_options(-fcf-protection=full)
+    # Control-flow protection is per architecture: -fcf-protection is Intel
+    # CET and refused outright on anything else ("not supported for this
+    # target"), which stopped the arm64 image from building at all;
+    # -mbranch-protection is its counterpart on arm64. Each is added where
+    # the compiler takes it.
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag(-fcf-protection=full RB_HAS_CF_PROTECTION)
+    check_cxx_compiler_flag(-mbranch-protection=standard RB_HAS_BRANCH_PROTECTION)
+    if(RB_HAS_CF_PROTECTION)
+      add_compile_options(-fcf-protection=full)
+    elseif(RB_HAS_BRANCH_PROTECTION)
+      add_compile_options(-mbranch-protection=standard)
+    endif()
     add_link_options(-Wl,-z,relro,-z,now)
   endif()
   # Some toolchains, Alpine's among them, already define _FORTIFY_SOURCE (at

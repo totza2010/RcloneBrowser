@@ -24,6 +24,14 @@ mkdir -p /config
 # "WebSocket disconnected".
 chown -R abc:abc /config
 
+# Alpine's empty cdrom, floppy and usb folders. The image no longer has them,
+# but a /media volume made from an older image was handed a copy, and they
+# show in the page's folder chooser as if they were something. rmdir: one that
+# has anything in it is somebody's, and stays.
+for folder in /media/cdrom /media/floppy /media/usb; do
+    rmdir "$folder" 2>/dev/null || true
+done
+
 # Use the rclone.conf this machine already has, if there is one.
 #
 # compose mounts the platform's usual rclone directory at /rclone-config --

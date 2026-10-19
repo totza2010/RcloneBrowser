@@ -116,9 +116,13 @@ COPY --from=build /build/build/rclone-browser /usr/bin/rclone-browser
 
 COPY docker/rootfs/ /
 COPY VERSION /
+# Alpine's empty cdrom, floppy and usb in /media mean nothing in a container,
+# and /media is what the page's folder chooser shows first. rmdir, so only
+# while empty.
 RUN chmod +x /rb-init /usr/bin/rb-desktop \
         /etc/s6-overlay/s6-rc.d/init-rclonebrowser/run \
-        /etc/s6-overlay/s6-rc.d/svc-rclonebrowser/run
+        /etc/s6-overlay/s6-rc.d/svc-rclonebrowser/run \
+    && (rmdir /media/cdrom /media/floppy /media/usb 2>/dev/null || true)
 
 # TITLE is what the streamed page calls itself.
 #

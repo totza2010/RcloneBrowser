@@ -463,8 +463,13 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
   (4) `test_directory_listing` สัญญาณ "หา rclone ไม่เจอ" มาช้ากว่าบน Linux · **แก้ทั้งสี่แล้ว** (`e63ffd2`) ·
   **ยืนยันแล้ว**: รันแบบ CI ใน container `ubuntu:24.04` (Qt 6.4.2) → build ผ่าน · **เทสต์ 32/32 ผ่าน** · ไม่มีความล้มเหลวอื่นซ่อนอยู่ ·
   เพิ่ม **`scripts/ci_linux_local.sh`** — รันงาน Linux ของ CI บนเครื่อง (container ทิ้งหลังจบ ไม่ติดตั้งอะไร) ใช้ก่อน push ทุกครั้งที่แตะเทสต์หรือ Qt API
-- ยังไม่ได้ลอง build/push ผ่าน workflow · arm64 · อิมเมจ web-only ขนาดเล็ก (ต้องย้ายไอคอนมา core)
-- ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
+- ยังไม่ได้ลอง build/push ผ่าน workflow · ~~arm64~~ — **ทำแล้ว 2026-10-19**: ขั้น Publish ของ `docker.yml` (tag `v*`) และ
+  `docker-rclone-watch.yml` (รายวัน) build `linux/amd64,linux/arm64` ผ่าน QEMU (`setup-qemu-action`) · push ธรรมดาตรวจแค่ amd64 (arm64 ใต้ QEMU ช้า) ·
+  base image selkies/alpine และ rclone ของ tgdrive มี arm64 ครบ · **build arm64 บนเครื่องเจอบั๊กจริง**: `-fcf-protection=full` (Intel CET)
+  มีแต่บน x86 → arm64 compile ไม่ได้เลย · แก้: ใส่เมื่อ compiler รับ (`check_cxx_compiler_flag`) และ `-mbranch-protection=standard` บน arm64 ·
+  · อิมเมจ web-only ขนาดเล็ก (ต้องย้ายไอคอนมา core)
+- ~~ลบโฟลเดอร์ของ Alpine ใน `/media`~~ — **ทำแล้ว 2026-10-19**: image ไม่มี `cdrom` `floppy` `usb` · volume เก่าลบตอนเริ่ม container
+  (`rmdir` — เฉพาะที่ว่าง) · ยืนยันใน dev container: เหลือ `films` · ~~รัน test บน Linux (CI)~~ — CI เขียวแล้ว ดูบรรทัด CI ข้างบน
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test
 - `docs/VERIFY.md` มี 164 แถวที่ยังไม่มีใครลอง
 

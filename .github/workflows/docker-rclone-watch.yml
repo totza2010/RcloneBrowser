@@ -173,12 +173,20 @@ jobs:
             fi
           '
 
+      # arm64 by emulation, as docker.yml publishes it: one tag, the image for
+      # whichever machine pulls it.
+      - uses: docker/setup-qemu-action@v3
+        if: steps.check.outputs.build == 'true'
+        with:
+          platforms: arm64
+
       - name: Publish
         if: steps.check.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           # The exact tag is a record and never moves; the other two are what
           # a compose file follows.
