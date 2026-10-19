@@ -1,4 +1,8 @@
 #include "preferences_dialog.h"
+#include "window_language.h"
+#include <QComboBox>
+#include <QFormLayout>
+#include <QLabel>
 #include "app_settings.h"
 #include "completers.h"
 #include "debug_log.h"
@@ -12,6 +16,30 @@
 PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   ui.setupUi(this);
+
+  // The language of the window's words. A tab of its own, made here: the
+  // .ui file has no place for it.
+  {
+    auto *page = new QWidget(this);
+    auto *layout = new QFormLayout(page);
+    auto *choice = new QComboBox(page);
+    choice->addItem(tr("The language this computer is set to"), QString());
+    for (const QString &language : WindowLanguage::Available()) {
+      choice->addItem(WindowLanguage::NameOf(language), language);
+    }
+    choice->setCurrentIndex(qMax(0, choice->findData(WindowLanguage::Chosen())));
+    layout->addRow(tr("Language"), choice);
+    auto *note = new QLabel(
+        tr("Used from the next time the program is opened. The web page has "
+           "its own choice. To add a language, see docs/TRANSLATING.md."),
+        page);
+    note->setWordWrap(true);
+    layout->addRow(note);
+    ui.tabWidget->addTab(page, tr("Language"));
+    QObject::connect(this, &QDialog::accepted, this, [choice]() {
+      WindowLanguage::Choose(choice->currentData().toString());
+    });
+  }
 
   // hide elements used for testing only
 

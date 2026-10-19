@@ -11,6 +11,7 @@
 #include "scheduler_store.h"
 #include "script_runner.h"
 #include "webhooks.h"
+#include "folder_watches.h"
 #include "utils.h"
 
 #include <QDateTime>
@@ -151,6 +152,9 @@ void AppCore::start() {
   ScriptRunner::instance().install();
   // And whoever wants to be told when a job ends, however it was started.
   Webhooks::instance().install();
+  // And the tasks that run themselves when their folder changes. Before the
+  // queue starts moving: what is in the folders now counts as already sent.
+  FolderWatches::instance().install();
 
   // The queue keeps itself moving from here. This used to be switched on by
   // the window, which meant a queue left running only resumed if somebody

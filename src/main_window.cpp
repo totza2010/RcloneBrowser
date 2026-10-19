@@ -20,6 +20,8 @@
 #include "preferences_dialog.h"
 #include "webhooks_dialog.h"
 #include "backup_dialog.h"
+#include "folder_watches.h"
+#include <QInputDialog>
 #include "job_registry.h"
 #include "job_stats.h"
 #include "rclone_flags.h"
@@ -1099,6 +1101,37 @@ MainWindow::MainWindow() {
                 jo->resync = true;
                 runItem(jo, "task", QUuid::createUuid().toString(), false);
                 jo->resync = false;
+              });
+            }
+          }
+          // The page's Watch folder: an upload that runs itself whenever its
+          // folder changes, once the folder is quiet.
+          if (items.count() == 1) {
+            JobOptions *jo =
+                static_cast<JobOptionsListWidgetItem *>(items.first())->GetData();
+            if (FolderWatches::WhyNot(jo->uniqueId.toString()).isEmpty()) {
+              const QString id = jo->uniqueId.toString();
+              QAction *watch = menu.addAction("Watch folder for changes");
+              watch->setCheckable(true);
+              watch->setChecked(FolderWatches::instance().find(id) != nullptr);
+              watch->setStatusTip("Queue this task whenever its folder "
+                                  "changes, once the folder is quiet");
+              QObject::connect(watch, &QAction::toggled, this, [this, id](bool on) {
+                if (!on) {
+                  FolderWatches::instance().unwatch(id);
+                  return;
+                }
+                bool ok = false;
+                const int quiet = QInputDialog::getInt(
+                    this, "Watch folder",
+                    "Queue it once its folder has been quiet for how many "
+                    "seconds?\n\nEverything in the folder now counts as "
+                    "already sent.",
+                    30, 1, 86400, 1, &ok);
+                QString why;
+                if (ok && !FolderWatches::instance().watch(id, quiet, &why)) {
+                  QMessageBox::warning(this, "Watch folder", why);
+                }
               });
             }
           }

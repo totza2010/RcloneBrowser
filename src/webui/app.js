@@ -174,6 +174,57 @@ async function secretWorks() {
   }
 }
 
+// ---- the page's language ----------------------------------------------------
+//
+// The page is written in English. A language's file, /i18n/<language>.json,
+// says what to say instead: {"Run": "…", "Sign out": "…"}. Whatever it does
+// not have stays in English, so a translation can be done a part at a time.
+
+const i18n = { language: "en", words: {}, available: [] };
+
+function t(text) {
+  return Object.prototype.hasOwnProperty.call(i18n.words, text) ? i18n.words[text] : text;
+}
+
+async function startLanguage() {
+  try {
+    const answer = await fetch("/api/v1/languages");
+    i18n.available = answer.ok ? await answer.json() : [];
+  } catch (e) {
+    i18n.available = [];
+  }
+  let wanted = "";
+  try { wanted = localStorage.getItem("rb.language") || ""; } catch (e) { /* private window */ }
+  const names = i18n.available.map((l) => l.language);
+  if (!wanted) {
+    const own = (navigator.language || "en").replace("-", "_");
+    wanted = names.includes(own) ? own : names.includes(own.split("_")[0]) ? own.split("_")[0] : "en";
+  }
+  if (wanted !== "en" && names.includes(wanted)) {
+    try {
+      const answer = await fetch("/i18n/" + encodeURIComponent(wanted) + ".json");
+      if (answer.ok) {
+        i18n.words = await answer.json();
+        i18n.language = wanted;
+      }
+    } catch (e) {
+      /* stays in English */
+    }
+  }
+  document.documentElement.lang = i18n.language;
+  drawLanguageChoice();
+}
+
+// Only when there is more than one to choose from.
+function drawLanguageChoice() {
+  const box = $("language");
+  if (!box) return;
+  box.classList.toggle("hidden", i18n.available.length < 2);
+  box.innerHTML = i18n.available.map((l) =>
+    '<option value="' + esc(l.language) + '"' + (l.language === i18n.language ? " selected" : "") + ">" +
+    esc(l.name) + "</option>").join("");
+}
+
 async function readAuth() {
   try {
     const answer = await api("GET", "/auth");
@@ -433,7 +484,7 @@ $("tab-jobs").addEventListener("change", (event) => {
 // ---- reading the current state -------------------------------------------
 
 async function refresh() {
-  const [system, jobs, queue, tasks, schedules, history, remotes] =
+  const [system, jobs, queue, tasks, schedules, history, remotes, watches] =
     await Promise.all([
       api("GET", "/system"),
       api("GET", "/jobs"),
@@ -442,6 +493,7 @@ async function refresh() {
       api("GET", "/schedules"),
       api("GET", "/history?limit=100"),
       api("GET", "/remotes"),
+      api("GET", "/watches"),
     ]);
 
   if (system.status === 401) {
@@ -457,6 +509,7 @@ async function refresh() {
   state.schedules = schedules.data || [];
   state.history = history.data || [];
   state.remotes = remotes.data || [];
+  state.watches = (watches.data && watches.data.watches) || [];
   draw();
 }
 
@@ -641,6 +694,21 @@ function scheduledLine(task) {
     "<span>⏱ " + esc(whenText(s)) + (s.active ? "" : " (off)") + "</span>").join("") + "</div>";
 }
 
+function watchOf(task) {
+  return (state.watches || []).find((w) => w.taskId === task.id) || null;
+}
+
+// What a watch has seen, since the program started.
+function watchedLine(task) {
+  const watch = watchOf(task);
+  if (!watch) return "";
+  return '<div class="figures"><span>👁 runs once its folder has been quiet for ' +
+    seconds(watch.quietSeconds) + "</span>" +
+    (watch.lastQueued ? "<span>last queued " + esc(when(watch.lastQueued)) + "</span>" : "") +
+    (watch.lastChange ? "<span>last change " + esc(when(watch.lastChange)) + "</span>" : "") +
+    "</div>";
+}
+
 function drawTasks() {
   // A mount is a task too, and is not a transfer: it is shown, and left to
   // the window to change.
@@ -666,11 +734,18 @@ function drawTasks() {
             ? '<button class="ghost small" data-sched-new="' + esc(task.id) + '">Schedule</button>' +
               '<button class="ghost small" data-edit="' + esc(task.id) + '">Edit</button>'
             : "") +
+          // An upload can run itself whenever its folder changes.
+          (task.type === "upload" && editable(task)
+            ? (watchOf(task)
+                ? '<button class="ghost small" data-unwatch="' + esc(task.id) + '" title="stop running it when its folder changes">Watching ✓</button>'
+                : '<button class="ghost small" data-watch="' + esc(task.id) + '" title="run it whenever its folder changes, once the folder is quiet">Watch folder</button>')
+            : "") +
           '<button class="danger small" data-forget="' + esc(task.id) + '">Delete</button>' +
         "</div>" +
       "</div>" +
       '<div class="path">' + esc(task.source) + " → " + esc(task.dest) + "</div>" +
       scheduledLine(task) +
+      watchedLine(task) +
     "</div>"
   ));
 
@@ -3768,6 +3843,17 @@ document.addEventListener("click", async (event) => {
   if (d.run && (await command("POST", task(d.run, "/run")))) return refresh();
   if (d.dry && (await command("POST", task(d.dry, "/run?dryRun=1")))) return refresh();
   if (d.resync && (await command("POST", task(d.resync, "/run"), { resync: true }))) return refresh();
+  if (d.watch) {
+    const asked = prompt("Run it once its folder has been quiet for how many seconds?\n\n" +
+      "Everything in the folder now counts as already sent.", "30");
+    if (asked === null) return;
+    if (await command("POST", task(d.watch, "/watch"), { quietSeconds: Number(asked) || 30 })) {
+      toast("watching — a change is queued once the folder is quiet");
+      return refresh();
+    }
+    return;
+  }
+  if (d.unwatch && (await command("DELETE", task(d.unwatch, "/watch")))) return refresh();
   if (d.enqueue && (await command("POST", task(d.enqueue, "/enqueue")))) return refresh();
 
   if (d.newTask) return openTransfer(d.newTask, {});
@@ -3888,8 +3974,14 @@ function start() {
   setInterval(refresh, 30000);
 }
 
+$("language").addEventListener("change", (event) => {
+  try { localStorage.setItem("rb.language", event.target.value); } catch (e) { /* private window */ }
+  location.reload(); // every word on the page, said again
+});
+
 (async function () {
   startTheme();
+  await startLanguage();
   await readAuth();
   if (await secretWorks()) start();
   else showGate(secret ? "that no longer works" : "");

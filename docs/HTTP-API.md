@@ -148,6 +148,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 - `limit` ไม่บอก: ภาพ/PDF อ่านทั้งไฟล์ · อื่นๆ 2 MiB · สูงสุด 64 MiB · rclone หยุดอ่านตรงนั้น (`cat --count`)
 - `400` ไม่ได้ระบุไฟล์ · `404` ไม่มีรีโหมด · `502` rclone อ่านไม่ได้ · ไม่มีประวัติ (เป็นคำถาม ไม่ใช่งาน)
 
+### เฝ้าโฟลเดอร์ — `GET /api/v1/watches` · `POST/DELETE /api/v1/tasks/{id}/watch`
+
+task ที่ส่งโฟลเดอร์ของเครื่องนี้ (upload) เข้าคิวเองเมื่อโฟลเดอร์เปลี่ยนแล้วเงียบไป `quietSeconds` (ค่าเริ่ม 30)
+- `POST {"quietSeconds":30}` · สิ่งที่อยู่ในโฟลเดอร์ตอนเริ่มเฝ้านับว่าส่งแล้ว · download/mount → 400
+- GET: `{pollSeconds, watches:[{taskId, quietSeconds, lastChange, lastQueued}]}` (เวลาเฉพาะตั้งแต่เปิดโปรแกรม)
+- เข้า**คิว**เสมอ (ไม่รันซ้อน · คิวที่หยุดอยู่ก็รอ) · มีในคิวอยู่แล้ว = ไม่เพิ่ม · กำลังรัน = ดูใหม่รอบถัดไป
+
 ### backups — `POST /api/v1/backups` (ระดับ write)
 
 `{"name","source","dest","mirror":true,"keepVersions":true,"days":["mon",…],"time":"02:00"}` → `201 {task, schedule}`

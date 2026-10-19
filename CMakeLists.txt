@@ -30,6 +30,10 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 # sound, and is not packaged by every distribution. Treat it as optional so
 # the app still builds on Qt kits that do not ship it.
 find_package(Qt6 QUIET OPTIONAL_COMPONENTS Multimedia)
+# The window's translations are built with it when it is there. Without it,
+# or with no translations/*.ts, the window is in English. See
+# docs/TRANSLATING.md.
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS LinguistTools)
 
 if(APPLE)
   # macOS extras if needed

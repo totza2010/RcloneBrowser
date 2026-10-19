@@ -6,6 +6,7 @@
 #include "file_reader.h"
 #include "job_json.h"
 #include "backup_plan.h"
+#include "folder_watches.h"
 #include "webhooks.h"
 #include "extra_flags.h"
 #include "debug_log.h"
@@ -51,7 +52,10 @@
 // The resource is compiled into rbcore, and a static library's resources are
 // not registered unless something asks for them. Left out, the daemon serves
 // a blank page and nothing says why.
-static void InitWebUiResources() { Q_INIT_RESOURCE(webui); }
+static void InitWebUiResources() {
+  Q_INIT_RESOURCE(webui);
+  Q_INIT_RESOURCE(webui_i18n);
+}
 
 namespace {
 
@@ -2045,6 +2049,27 @@ bool ApiServer::serveWebUi(const HttpRequest &request, QByteArray *body,
       {QStringLiteral("/app.js"), QStringLiteral(":/webui/app.js")},
   };
 
+  // The page's words in another language: /i18n/<language>.json. Held to a
+  // language's name, and opened from the compiled-in resource, the same as
+  // the pictures below.
+  if (request.path.startsWith(QLatin1String("/i18n/")) &&
+      request.path.endsWith(QLatin1String(".json"))) {
+    QString name = request.path.mid(6);
+    name.chop(5);
+    static const QRegularExpression language(
+        QStringLiteral("^[a-z]{2,3}(_[A-Z]{2})?$"));
+    QFile words(QStringLiteral(":/webui/i18n/%1.json").arg(name));
+    if (!language.match(name).hasMatch() || !words.open(QIODevice::ReadOnly)) {
+      *status = 404;
+      *body = problem(QStringLiteral("no such language"));
+      return true;
+    }
+    *status = 200;
+    *body = words.readAll();
+    *contentType = "application/json";
+    return true;
+  }
+
   // The pictures the window puts beside each kind of remote, so the page can
   // show the same ones. They are in the application's resources rather than
   // the web interface's, so a build without the window has none and says
@@ -2327,10 +2352,12 @@ void ApiServer::answer(QTcpSocket *socket, const HttpRequest &request) {
   //   /login  is how the password is turned into a session in the first place
   //   /openapi.json  describes the routes and nothing of this installation;
   //           tools that read one expect to fetch it before they have a key
+  //   /languages  the languages the page is in: the sign-in form is in one
   static const QStringList open = {QStringLiteral("/api/v1/ping"),
                                    QStringLiteral("/api/v1/auth"),
                                    QStringLiteral("/api/v1/login"),
-                                   QStringLiteral("/api/v1/openapi.json")};
+                                   QStringLiteral("/api/v1/openapi.json"),
+                                   QStringLiteral("/api/v1/languages")};
 
   // Every request is looked up in the list the documentation is made from,
   // and one that is not there is noted. Nothing else changes: this only
@@ -2848,6 +2875,35 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
   }
 
   // tasks/{id}/run and tasks/{id}/enqueue
+  // tasks/{id}/watch -- run it when its folder changes, or stop
+  if ((post || del) && parts.size() == 3 && parts.at(0) == QLatin1String("tasks") &&
+      parts.at(2) == QLatin1String("watch")) {
+    const QString id = parts.at(1);
+    if (ListOfJobOptions::getInstance()->find(id) == nullptr) {
+      return refuseTask(404, QStringLiteral("no_such_task"),
+                        QStringLiteral("there is no such task"));
+    }
+    if (del) {
+      if (!FolderWatches::instance().unwatch(id)) {
+        return refuseTask(404, QStringLiteral("not_watched"),
+                          QStringLiteral("its folder is not being watched"));
+      }
+    } else {
+      QString why;
+      if (!FolderWatches::instance().watch(
+              id, options(request).value(QStringLiteral("quietSeconds")).toInt(30),
+              &why)) {
+        return refuseTask(400, QStringLiteral("cannot_watch"), why);
+      }
+      qCDebug(rbApp) << "API watching the folder of task" << id;
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("taskId"), id);
+    object.insert(QStringLiteral("watched"), !del);
+    *body = toJson(object);
+    return 200;
+  }
+
   if (post && parts.size() == 3 && parts.at(0) == QLatin1String("tasks")) {
     const QString id = parts.at(1);
     const QString verb = parts.at(2);
@@ -3381,6 +3437,47 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     object.insert(QStringLiteral("description"), provider->description);
     object.insert(QStringLiteral("prefix"), provider->prefix);
     object.insert(QStringLiteral("options"), options);
+    *body = toJson(object);
+    return 200;
+  }
+
+  // The languages the page can be shown in. Open: a sign-in page is in one.
+  if (path == QLatin1String("/api/v1/languages")) {
+    QJsonArray languages;
+    const QStringList found = QDir(QStringLiteral(":/webui/i18n"))
+                                  .entryList({QStringLiteral("*.json")}, QDir::Files,
+                                             QDir::Name);
+    for (QString name : found) {
+      name.chop(5);
+      const QLocale locale(name);
+      QJsonObject one;
+      one.insert(QStringLiteral("language"), name);
+      const QString own = locale.nativeLanguageName();
+      one.insert(QStringLiteral("name"),
+                 own.isEmpty() ? name : own.left(1).toUpper() + own.mid(1));
+      languages.append(one);
+    }
+    *body = toJson(languages);
+    return 200;
+  }
+
+  if (path == QLatin1String("/api/v1/watches")) {
+    QJsonArray array;
+    for (const FolderWatch &watch : FolderWatches::instance().list()) {
+      QJsonObject object;
+      object.insert(QStringLiteral("taskId"), watch.taskId);
+      object.insert(QStringLiteral("quietSeconds"), watch.quietSeconds);
+      object.insert(QStringLiteral("lastChange"),
+                    watch.lastChange.isValid() ? watch.lastChange.toString(Qt::ISODate)
+                                               : QString());
+      object.insert(QStringLiteral("lastQueued"),
+                    watch.lastQueued.isValid() ? watch.lastQueued.toString(Qt::ISODate)
+                                               : QString());
+      array.append(object);
+    }
+    QJsonObject object;
+    object.insert(QStringLiteral("pollSeconds"), FolderWatches::PollSeconds());
+    object.insert(QStringLiteral("watches"), array);
     *body = toJson(object);
     return 200;
   }

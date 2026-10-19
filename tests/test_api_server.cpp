@@ -14,6 +14,7 @@
 #include "schedule.h"
 #include "utils.h"
 #include "webhooks.h"
+#include "folder_watches.h"
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
@@ -3127,6 +3128,88 @@ private slots:
           ListOfJobOptions::getInstance()->find(one.value(QStringLiteral("id")).toString()));
     }
     qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // A task that sends a folder runs itself once the folder has changed and
+  // gone quiet -- through the queue, once however much changed.
+  void aWatchedFolderQueuesItsTask() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir folder;
+    JobOptions *task = makeTask(QStringLiteral("watched"));
+    task->source = folder.path();
+    ListOfJobOptions::getInstance()->Persist(task);
+    const QByteArray path =
+        "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString()) + "/watch";
+    JobQueue::instance().pause(); // so what is queued stays to be seen
+    JobQueue::instance().clear();
+
+    QCOMPARE(statusOf(send("POST", path, mToken, "{\"quietSeconds\":1}")), 200);
+    const QJsonObject listed = bodyOf(ask("GET", "/api/v1/watches", mToken)).object();
+    QCOMPARE(listed.value(QStringLiteral("watches")).toArray().size(), 1);
+    QCOMPARE(listed.value(QStringLiteral("watches")).toArray().at(0).toObject()
+                 .value(QStringLiteral("quietSeconds")).toInt(), 1);
+
+    // What was there already counts as sent.
+    FolderWatches::instance().checkAll();
+    QCOMPARE(JobQueue::instance().count(), 0);
+
+    QFile file(QDir(folder.path()).filePath(QStringLiteral("new.txt")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("x");
+    file.close();
+    FolderWatches::instance().checkAll(); // seen changing: waits for quiet
+    QCOMPARE(JobQueue::instance().count(), 0);
+    FolderWatches::instance().checkAll(); // the same as last look: quiet
+    QCOMPARE(JobQueue::instance().count(), 1);
+    QCOMPARE(JobQueue::instance().entries().first().taskId, task->uniqueId.toString());
+    FolderWatches::instance().checkAll(); // nothing new: not queued again
+    QCOMPARE(JobQueue::instance().count(), 1);
+
+    // Changed again while it waits in the queue: that run sends it.
+    QVERIFY(file.open(QIODevice::Append));
+    file.write("more");
+    file.close();
+    FolderWatches::instance().checkAll();
+    FolderWatches::instance().checkAll();
+    QCOMPARE(JobQueue::instance().count(), 1);
+
+    QCOMPARE(statusOf(ask("DELETE", path, mToken)), 200);
+    QCOMPARE(statusOf(ask("DELETE", path, mToken)), 404);
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/watches", mToken)).object()
+                 .value(QStringLiteral("watches")).toArray().size(), 0);
+
+    // Only a task that sends a folder of this machine.
+    auto *download = new JobOptions(true);
+    download->description = QStringLiteral("down");
+    download->operation = JobOptions::Copy;
+    download->source = QStringLiteral("fake:films");
+    download->dest = folder.path();
+    download->uniqueId = QUuid::createUuid();
+    ListOfJobOptions::getInstance()->Persist(download);
+    QCOMPARE(statusOf(send("POST",
+                           "/api/v1/tasks/" + QUrl::toPercentEncoding(download->uniqueId.toString()) +
+                               "/watch",
+                           mToken, "{}")),
+             400);
+    QCOMPARE(statusOf(send("POST", "/api/v1/tasks/nothing/watch", mToken, "{}")), 404);
+
+    JobQueue::instance().clear();
+    ListOfJobOptions::getInstance()->Forget(task);
+    ListOfJobOptions::getInstance()->Forget(download);
+  }
+
+  // The languages the page can be in, asked before anyone has signed in,
+  // and the words of one -- by a language's name only.
+  void thePageSaysWhichLanguagesItHas() {
+    const QByteArray listed = ask("GET", "/api/v1/languages", QByteArray());
+    QCOMPARE(statusOf(listed), 200);
+    const QJsonArray languages = bodyOf(listed).array();
+    QVERIFY(!languages.isEmpty());
+    QCOMPARE(languages.at(0).toObject().value(QStringLiteral("language")).toString(),
+             QStringLiteral("en"));
+    QCOMPARE(statusOf(ask("GET", "/i18n/en.json", QByteArray())), 200);
+    QCOMPARE(statusOf(ask("GET", "/i18n/xx.json", QByteArray())), 404);
+    QCOMPARE(statusOf(ask("GET", "/i18n/..%2Fapp.json", QByteArray())), 404);
   }
 
   void aMountNeedsSomewhereToGo() {

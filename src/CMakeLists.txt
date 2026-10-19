@@ -79,6 +79,7 @@ set(CORE_SOURCE
   file_reader.cpp
   job_json.cpp
   backup_plan.cpp
+  folder_watches.cpp
   webhooks.cpp
   rc_client.cpp
   qcron.cpp
@@ -126,6 +127,7 @@ set(CORE_HEADER
   file_reader.h
   job_json.h
   backup_plan.h
+  folder_watches.h
   webhooks.h
   rc_client.h
   qcron.h
@@ -138,6 +140,21 @@ set(CORE_HEADER
 # The Web UI travels inside the library that serves it, so a daemon has no
 # files to go looking for. See docs/WEB-UI.md.
 set(CORE_RESOURCE webui.qrc)
+
+# The page's languages: every webui/i18n/<language>.json, compiled in under
+# :/webui/i18n/. Listed when CMake runs, so a new file needs CMake run again
+# (CONFIGURE_DEPENDS does that on the next build).
+file(GLOB WEB_I18N CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/webui/i18n/*.json")
+set(WEB_I18N_QRC "${CMAKE_CURRENT_BINARY_DIR}/webui_i18n.qrc")
+set(WEB_I18N_FILES "")
+foreach(one ${WEB_I18N})
+  get_filename_component(name "${one}" NAME)
+  string(APPEND WEB_I18N_FILES "    <file alias=\"${name}\">${one}</file>\n")
+endforeach()
+file(WRITE "${WEB_I18N_QRC}.in"
+     "<RCC>\n  <qresource prefix=\"/webui/i18n\">\n${WEB_I18N_FILES}  </qresource>\n</RCC>\n")
+configure_file("${WEB_I18N_QRC}.in" "${WEB_I18N_QRC}" COPYONLY)
+list(APPEND CORE_RESOURCE "${WEB_I18N_QRC}")
 
 add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER} ${CORE_RESOURCE})
 # No Qt6::Widgets and no Qt6::Gui here. That omission is the contract.
@@ -190,6 +207,7 @@ set(MOC
   script_editor_dialog.h
   remote_settings_dialog.h
   serve_dialog.h
+  window_language.h
   file_view_dialog.h
   webhooks_dialog.h
   backup_dialog.h
@@ -231,6 +249,7 @@ set(SOURCE
   script_editor_dialog.cpp
   remote_settings_dialog.cpp
   serve_dialog.cpp
+  window_language.cpp
   file_view_dialog.cpp
   webhooks_dialog.cpp
   backup_dialog.cpp
@@ -291,4 +310,22 @@ else()
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.svg" DESTINATION "share/icons/hicolor/scalable/apps")
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.desktop" DESTINATION "share/applications")
   target_precompile_headers(rclone-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
+endif()
+
+# ---- The window's languages ----
+# Every translations/rclonebrowser_<language>.ts, compiled into :/i18n/ of the
+# program. None yet: the window is in English until there is one. The
+# update_translations target (lupdate) refreshes them from the code and the
+# .ui files. See docs/TRANSLATING.md.
+if(WIN32)
+  set(RB_WINDOW_TARGET RcloneBrowser)
+else()
+  set(RB_WINDOW_TARGET rclone-browser)
+endif()
+file(GLOB RB_TS_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/translations/rclonebrowser_*.ts")
+if(Qt6LinguistTools_FOUND AND RB_TS_FILES)
+  qt_add_translations(${RB_WINDOW_TARGET}
+      TS_FILES ${RB_TS_FILES}
+      RESOURCE_PREFIX /i18n
+      LUPDATE_OPTIONS -no-obsolete)
 endif()

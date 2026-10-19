@@ -6,6 +6,7 @@
 #include "shutdown_signal.h"
 #include "task_runner.h"
 #include "utils.h"
+#include "window_language.h"
 
 #include <QLockFile>
 #include <QTextStream>
@@ -408,6 +409,11 @@ int main(int argc, char *argv[]) {
 #endif
 
   auto settings = GetSettings();
+
+  // The words of the window, in the language chosen in Preferences. Before
+  // any window is made: a translation installed later changes nothing that
+  // is already on screen.
+  WindowLanguage::Install(&app);
 
   // initialize proxy settings
   if (!(settings->contains("Settings/useProxy"))) {

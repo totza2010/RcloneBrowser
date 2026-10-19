@@ -79,6 +79,11 @@ QList<Route> build() {
         "Whether an administrator password is set, so a sign-in page knows "
         "which form to show. Says nothing about what is behind it.",
         "", "", "200: the shape of the lock", true),
+      r("GET", "/api/v1/languages", kSignIn, "The languages the page can be in",
+        "Each with its own name for itself. The words are at "
+        "/i18n/<language>.json: what the page says in English, and what to "
+        "say instead. See docs/TRANSLATING.md.",
+        "", "", "200: the languages", true),
       r("POST", "/api/v1/login", kSignIn, "Sign in with the password",
         "Gives back a session, which is then used exactly as the token is: "
         "Authorization: Bearer <session>. Five wrong answers lock it for a "
@@ -198,6 +203,22 @@ QList<Route> build() {
       r("GET", "/api/v1/schedules", kSchedules, "Every schedule",
         "In words, with when each next comes due by the clock of the machine "
         "the program runs on."),
+      r("GET", "/api/v1/watches", kTasks, "Tasks that run when their folder changes",
+        "Each with how long its folder has to be quiet first, and -- since the "
+        "program started -- when a change was last seen and when it last "
+        "queued the task. How often every folder is looked over: "
+        "pollSeconds (RB_WATCH_POLL_SECONDS).",
+        "", "", "200: the watches"),
+      r("POST", "/api/v1/tasks/{id}/watch", kTasks,
+        "Run a task whenever its folder changes",
+        "For a task that sends a folder of this machine. Once the folder has "
+        "been quiet for quietSeconds, the task is queued -- once, however much "
+        "changed. What is in the folder when watching starts counts as sent.",
+        "", R"({"quietSeconds":30})",
+        "200: watched; 400: not a task that sends a folder; 404: no such "
+        "task"),
+      r("DELETE", "/api/v1/tasks/{id}/watch", kTasks, "Stop watching a task's folder",
+        "", "", "", "200: no longer watched; 404: it was not"),
       r("POST", "/api/v1/backups", kSchedules,
         "Make a backup: a task and the schedule that runs it",
         "One side is a folder of this machine, the other remote:path. "
