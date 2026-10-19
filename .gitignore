@@ -17,3 +17,5 @@ debian/rclone-browser*
 
 # holds VNC_PASSWORD
 docker/.env
+# scripts/ci_linux_local.sh
+ci-linux-out/

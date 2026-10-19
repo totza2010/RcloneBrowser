@@ -460,8 +460,9 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - ⚠ **CI (Linux) แดงมาตลอด** ตั้งแต่ราว 2026-10-17 — งานทุกชิ้นหลังจากนั้น build ผ่านบน Windows แต่ไม่เคยผ่าน CI บน Linux (Qt 6.4 ของ Ubuntu) ·
   พบ 2026-10-19 · สาเหตุที่เห็นจาก log: (1) `test_schedule_json` ใช้ `QTimeZone::fromSecondsAheadOfUtc`/`UTC` ซึ่งมีตั้งแต่ Qt 6.5 → compile ไม่ผ่าน ·
   (2) `test_app_core` ใช้ path `C:/…` ซึ่งบน Linux ไม่ใช่ absolute · (3) `test_api_server` task ทดสอบมีต้นทาง `C:/nowhere` → 403 บน Linux ·
-  (4) `test_directory_listing` สัญญาณ "หา rclone ไม่เจอ" มาช้ากว่าบน Linux · **แก้ทั้งสี่แล้ว (ยังไม่ได้ยืนยันบน Linux)** — อาจมีความล้มเหลวอื่น
-  ที่ซ่อนหลัง compile error · ต้องดู CI หลัง push หรือรันใน container `ubuntu:24.04` ตามแบบ `ci.yml` (Docker Desktop ปิดอยู่ตอนนั้น)
+  (4) `test_directory_listing` สัญญาณ "หา rclone ไม่เจอ" มาช้ากว่าบน Linux · **แก้ทั้งสี่แล้ว** (`e63ffd2`) ·
+  **ยืนยันแล้ว**: รันแบบ CI ใน container `ubuntu:24.04` (Qt 6.4.2) → build ผ่าน · **เทสต์ 32/32 ผ่าน** · ไม่มีความล้มเหลวอื่นซ่อนอยู่ ·
+  เพิ่ม **`scripts/ci_linux_local.sh`** — รันงาน Linux ของ CI บนเครื่อง (container ทิ้งหลังจบ ไม่ติดตั้งอะไร) ใช้ก่อน push ทุกครั้งที่แตะเทสต์หรือ Qt API
 - ยังไม่ได้ลอง build/push ผ่าน workflow · arm64 · อิมเมจ web-only ขนาดเล็ก (ต้องย้ายไอคอนมา core)
 - ลบโฟลเดอร์ของ Alpine ใน `/media` · รัน test ลิงก์ออกนอก root บน Linux (CI)
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test
