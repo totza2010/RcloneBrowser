@@ -2169,6 +2169,16 @@ marker: `CopyOptions` · `pick-more`
 | 2 | หน้าเว็บ 19991 · Copy → More · filter `- *.nfo` · Dry run | log ของงานแสดงว่าไฟล์ .nfo ไม่ถูกส่ง | ⬜ | |
 | 3 | Move → More | มีตัวเลือก "Remove the folders a move leaves empty" (Copy ไม่มี) | ⬜ | |
 
+### V-77 · Check กับเครื่องนี้ · Size หลายรายการ
+
+marker: `toLocal` · `sizeOfMany`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: check กับโฟลเดอร์ที่อนุญาต · นอกขอบเขต | 200 · ปลายทางเป็น path ตรงๆ · 403 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | หน้าเว็บ 19991 · Check → This machine → /media/... | ผลเทียบ · the same / differences | ⬜ | |
+| 3 | เลือก 3 รายการ · Size | ยอดรวม + ต่อรายการ · Cancel กลางทาง | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

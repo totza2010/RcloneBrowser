@@ -442,7 +442,9 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
   ⚠ ย้าย autostart mount จากหน้าต่างไป **`AppCore::startAutoMounts`** — เดิม daemon (Docker โหมด web) ไม่เคย mount ให้ · ไม่ซ้ำกับที่รันอยู่ ·
   `MainWindow::autoStartMounts` ถูกลบ · ยังไม่มีบนเว็บ: สคริปต์หลัง mount (รันโปรแกรมบนเครื่อง — ต้องคิดเรื่องสิทธิ์ก่อน) · ~~Copy/Move บนเว็บมีตัวเลือกน้อยกว่า~~ — **ทำแล้ว 2026-10-19**: `RemoteOps::CopyOptions` (ตัวเลือกของกล่อง copy ของหน้าต่าง:
   เก็บโฟลเดอร์ว่าง · ลบโฟลเดอร์ที่ move ทำให้ว่าง · `--no-traverse` · filter ทีละบรรทัด · ตัวเลือกเพิ่ม) · API copy/move รับ `emptyFolders` `removeEmptyFolders`
-  `noTraverse` `filters` `extra` (ตรวจแบบ extra ของ task) · หน้าเว็บ: ตัวเลือกปลายทางของ Copy/Move มี **More** · Check กับโฟลเดอร์ในเครื่อง · Size หลายรายการ
+  `noTraverse` `filters` `extra` (ตรวจแบบ extra ของ task) · หน้าเว็บ: ตัวเลือกปลายทางของ Copy/Move มี **More** · ~~Check กับโฟลเดอร์ในเครื่อง · Size หลายรายการ~~ — **ทำแล้ว 2026-10-19**: Check บนหน้าเว็บเลือก
+  **This machine** ในตัวเลือกปลายทางได้ (API `toLocal` · จำกัดตามโฟลเดอร์ที่ API ใช้ได้ · `RemoteOps::Check` ที่ไม่มีรีโหมด = path ในเครื่องตรงๆ) ·
+  Size ของหลายรายการ: ถามทีละอัน รวมยอด พร้อมรายการต่ออัน · Cancel ได้
 - ~~หน้าต่างคัดลอกข้ามรีโหมดไม่ได้ (หน้าเว็บได้)~~ — **ทำแล้ว 2026-10-19**: คลิกขวา / Tools → **Copy or move to another remote…**
   (เลือกรีโหมดปลายทาง · โฟลเดอร์ · Move · Dry run · ทุกรายการที่เลือก งานละรายการ ผ่าน `RemoteOps::CopyInto` ตัวเดียวกับหน้าเว็บ ·
   Copy/Move เดิมของหน้าต่างยังอยู่ในรีโหมดเดียวกัน) · ~~mount จาก task ไม่ได้ `Settings/mount`~~ — **แก้แล้ว 2026-10-19**: `StartTask` เติมตัวเลือก mount จาก Preferences

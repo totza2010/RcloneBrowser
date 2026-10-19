@@ -923,11 +923,24 @@ void ApiServer::remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
   } else if (question == QLatin1String("about")) {
     job = RemoteOps::About(remote, true);
   } else if (question == QLatin1String("check")) {
+    // Against a folder of this machine, as the window's Check can: held to
+    // the folders the API may use, as every local path it is given is.
+    const QString toLocal = request.queryValue(QStringLiteral("toLocal"));
+    QString localSide;
+    if (!toLocal.isEmpty()) {
+      localSide = LocalFiles::Allowed(toLocal);
+      if (localSide.isEmpty() || !QFileInfo(localSide).isDir()) {
+        refuse(403, QStringLiteral("outside_roots"),
+               QStringLiteral("that is not a folder of this machine the API may use"));
+        return;
+      }
+    }
     const QString other =
-        request.queryValue(QStringLiteral("toRemote")).isEmpty()
+        !toLocal.isEmpty() ? QString()
+        : request.queryValue(QStringLiteral("toRemote")).isEmpty()
             ? remote
             : request.queryValue(QStringLiteral("toRemote"));
-    if (RemoteRegistry::instance().find(other) == nullptr) {
+    if (toLocal.isEmpty() && RemoteRegistry::instance().find(other) == nullptr) {
       refuse(404, QStringLiteral("no_such_remote"),
              QStringLiteral("no such remote to compare with"));
       return;
@@ -940,8 +953,9 @@ void ApiServer::remoteQuestion(QTcpSocket *socket, const HttpRequest &request,
 
     QString why;
     job = RemoteOps::Check(remote, path, other,
-                           request.queryValue(QStringLiteral("to")), options,
-                           &why);
+                           toLocal.isEmpty() ? request.queryValue(QStringLiteral("to"))
+                                             : localSide,
+                           options, &why);
     if (job == nullptr) {
       refuse(400, QStringLiteral("refused"), why);
       return;

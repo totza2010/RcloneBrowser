@@ -186,7 +186,8 @@ struct CheckOptions {
   bool download = false; // compare by downloading both, for backends with no common hash
 };
 
-// Compares two folders and reports what differs. Changes nothing.
+// Compares two folders and reports what differs. Changes nothing. An empty
+// `otherRemote` makes `otherPath` a folder of this machine.
 //
 // rclone ends this with an error when the two differ, which makes a
 // difference look like a failure. ReadCheckOutput() tells them apart.

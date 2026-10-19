@@ -1944,6 +1944,8 @@ async function ask(question, title, path, draw) {
 }
 
 $("remote-size").addEventListener("click", () => {
+  const several = pickedEntries();
+  if (several.length > 1) return sizeOfMany(several);
   const path = subject();
   ask("size", "Size of " + browsing.remote + ":" + path, path, (d) =>
     figures([
@@ -1951,6 +1953,39 @@ $("remote-size").addEventListener("click", () => {
       ["Total", bytes(d.bytes) + "  (" + d.bytes + " bytes)"],
     ].concat(d.sizeless ? [["Of unknown size", String(d.sizeless)]] : [])));
 });
+
+// Several chosen: each asked in turn, and added up -- what the window's Size
+// does for a selection. Cancel or closing the box stops it.
+async function sizeOfMany(all) {
+  const title = "Size of " + all.length + " items in " + browsing.remote + ":" + browsing.path;
+  if (asking) asking.abort();
+  const mine = new AbortController();
+  asking = mine;
+  const rows = [];
+  let files = 0;
+  let total = 0;
+  const draw = (still) => showResult(title,
+    figures([["Files", String(files)], ["Total", bytes(total) + "  (" + total + " bytes)"]]) +
+    "<table><tbody>" + rows.join("") + "</tbody></table>" +
+    (still ? '<p class="muted">asking rclone… ' + still + ' <button type="button" class="ghost small" data-ask-cancel="">Cancel</button></p>' : ""));
+  for (const entry of all) {
+    draw(entry.name);
+    const answer = await api("GET", remoteUrl("size") + "?path=" + encodeURIComponent(entry.path),
+                             undefined, mine.signal).catch(() => null);
+    if (mine.signal.aborted) return;
+    if (!answer || answer.status !== 200) {
+      rows.push("<tr><td>" + esc(entry.name) + '</td><td class="error" colspan="2">' +
+        esc(answer ? reasonFrom(answer) : "could not reach the daemon") + "</td></tr>");
+      continue;
+    }
+    files += answer.data.count || 0;
+    total += answer.data.bytes || 0;
+    rows.push("<tr><td>" + esc(entry.name) + (entry.isDir ? "/" : "") + "</td><td>" +
+      (answer.data.count || 0) + " files</td><td>" + bytes(answer.data.bytes || 0) + "</td></tr>");
+  }
+  if (asking === mine) asking = null;
+  draw("");
+}
 
 $("remote-tree").addEventListener("click", () => {
   const path = subject();
@@ -2098,7 +2133,7 @@ function pickLocal(title, action, files) {
 
 // `copying`: { move } when the place is for a copy or a move, which then
 // has the window's copy options under More.
-function pickFolder(title, action, remote, path, copying) {
+function pickFolder(title, action, remote, path, copying, allowLocal) {
   $("pick-more").classList.toggle("hidden", !copying);
   if (copying) {
     $("pick-more").open = false;
@@ -2119,7 +2154,9 @@ function pickFolder(title, action, remote, path, copying) {
   $("pick-dry").checked = false;
   $("pick-remote").innerHTML = state.remotes.map((r) =>
     '<option value="' + esc(r.name) + '"' + (r.name === remote ? " selected" : "") +
-    ">" + esc(r.name) + " (" + esc(r.type) + ")</option>").join("");
+    ">" + esc(r.name) + " (" + esc(r.type) + ")</option>").join("") +
+    // A folder of the machine the program runs on, where that makes sense.
+    (allowLocal ? '<option value=":local">This machine (where the program runs)</option>' : "");
   $("pickbox").classList.remove("hidden");
   pickLoad();
 
@@ -2133,7 +2170,9 @@ function pickClose(result) {
 }
 
 $("pick-remote").addEventListener("change", () => {
-  picking.remote = $("pick-remote").value;
+  const value = $("pick-remote").value;
+  picking.local = value === ":local";
+  if (!picking.local) picking.remote = value;
   picking.path = "";
   pickLoad();
 });
@@ -2164,7 +2203,7 @@ $("pick-ok").addEventListener("click", () => {
       $("pick-error").textContent = "choose a folder first";
       return;
     }
-    pickClose({ path: path, isFile: !!picking.chosen, dryRun: $("pick-dry").checked });
+    pickClose({ local: true, path: path, isFile: !!picking.chosen, dryRun: $("pick-dry").checked });
     return;
   }
   pickClose({
@@ -4320,13 +4359,15 @@ $("remote-check").addEventListener("click", async () => {
   const path = subject();
   const what = browsing.remote + ":" + path;
   const other = await pickFolder(
-    "Compare " + what + " with…", "Compare with this folder", browsing.remote, "");
+    "Compare " + what + " with…", "Compare with this folder", browsing.remote, "", null, true);
   if (!other) return;
 
   const query = "?path=" + encodeURIComponent(path) +
-    "&to=" + encodeURIComponent(other.path) +
-    "&toRemote=" + encodeURIComponent(other.remote);
-  const title = "Check " + what + " against " + other.remote + ":" + other.path;
+    (other.local
+      ? "&toLocal=" + encodeURIComponent(other.path)
+      : "&to=" + encodeURIComponent(other.path) + "&toRemote=" + encodeURIComponent(other.remote));
+  const title = "Check " + what + " against " +
+    (other.local ? other.path + " on this machine" : other.remote + ":" + other.path);
 
   showResult(title, '<p class="muted">comparing… this reads every file on both sides</p>');
   let answer;

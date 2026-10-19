@@ -365,7 +365,11 @@ RunningJob *Check(const QString &remote, const QString &path,
   }
 
   const QString source = Target(remote, path);
-  const QString dest = Target(otherRemote, otherPath);
+  // No remote: a folder of this machine, given as it is -- what the window's
+  // Check offers beside another remote's folder.
+  const QString dest = otherRemote.isEmpty()
+                           ? QDir::cleanPath(otherPath)
+                           : Target(otherRemote, otherPath);
 
   QStringList command{QStringLiteral("check")};
   if (options.oneWay) {

@@ -3591,6 +3591,28 @@ private slots:
     qputenv("FAKE_RCLONE_SLEEP_MS", "0");
   }
 
+  // A remote's folder compared with a folder of this machine, as the
+  // window's Check can -- and only one the API may use.
+  void aFolderCanBeCheckedAgainstThisMachine() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    const QByteArray checked = ask(
+        "GET", "/api/v1/remotes/fake/check?path=films&toLocal=" +
+                   QUrl::toPercentEncoding(root + QStringLiteral("/films")),
+        mToken);
+    QCOMPARE(statusOf(checked), 200);
+    // The other side is the folder as it is, not "remote:path".
+    const JobRunRecord run =
+        RunHistory::find(bodyOf(checked).object().value(QStringLiteral("requestId")).toString());
+    QCOMPARE(run.dest, QDir::cleanPath(root + QStringLiteral("/films")));
+    QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/fake/check?path=films&toLocal=" +
+                                     QUrl::toPercentEncoding(QStringLiteral("C:/Windows")),
+                          mToken)),
+             403);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :
