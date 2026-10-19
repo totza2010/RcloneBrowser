@@ -1175,10 +1175,27 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
       return;
     }
 
+    // The window's copy options, held to the line a task's extra options
+    // are: a filter is an option too, and --filter-from reads a file.
+    QStringList filters;
+    for (const QJsonValue &line : given.value(QStringLiteral("filters")).toArray()) {
+      filters << line.toString();
+    }
+    const QString extra = given.value(QStringLiteral("extra")).toString();
+    const QString flags = flagsProblem(extra);
+    if (!flags.isEmpty()) {
+      refuse(400, QStringLiteral("bad_flag"), flags);
+      return;
+    }
+    const QStringList more = RemoteOps::CopyOptions(
+        move, given.value(QStringLiteral("emptyFolders")).toBool(false),
+        given.value(QStringLiteral("removeEmptyFolders")).toBool(false),
+        given.value(QStringLiteral("noTraverse")).toBool(false), filters, extra);
+
     QString why;
     RunningJob *job = RemoteOps::CopyInto(
         move, item, toRemote, given.value(QStringLiteral("to")).toString(),
-        given.value(QStringLiteral("dryRun")).toBool(false), &why);
+        given.value(QStringLiteral("dryRun")).toBool(false), &why, more);
     if (job == nullptr) {
       refuse(400, QStringLiteral("refused"), why);
       return;

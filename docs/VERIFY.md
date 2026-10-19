@@ -2159,6 +2159,16 @@ marker: `saveAs` · `autoStart` · `AppCore::startAutoMounts`
 | 3 | ปิดแล้วเปิดโปรแกรม (หน้าต่าง) | mount ขึ้นเองครั้งเดียว · การ์ดขึ้นในหน้าต่าง | ⬜ | |
 | 4 | Docker โหมด web · restart container | mount ที่ตั้ง autostart ขึ้นเอง (เดิมไม่ขึ้น) | ⬜ | |
 
+### V-76 · ตัวเลือก Copy/Move บนหน้าเว็บ
+
+marker: `CopyOptions` · `pick-more`
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: copy พร้อม emptyFolders · noTraverse · removeEmptyFolders (copy) · filter · extra · extra ต้องห้าม | คำสั่งมีครบ · ไม่มี delete-empty บน copy · 400 | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | หน้าเว็บ 19991 · Copy → More · filter `- *.nfo` · Dry run | log ของงานแสดงว่าไฟล์ .nfo ไม่ถูกส่ง | ⬜ | |
+| 3 | Move → More | มีตัวเลือก "Remove the folders a move leaves empty" (Copy ไม่มี) | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

@@ -533,6 +533,9 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .bar { flex: 0 0 160px; }
 
 tr.clickable { cursor: pointer; }
+#pick-more { margin: 4px 0; }
+#pick-more label { display: block; margin: 6px 0; }
+#pick-more textarea, #pick-more input[type=text] { width: 100%; box-sizing: border-box; }
 .settings-form textarea { width: 100%; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; }
 
 /* How full the remote is, beside where in it the page is. */

@@ -3558,6 +3558,39 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(task);
   }
 
+  // The window's copy options, on a copy asked for through the API.
+  void aCopyCarriesTheWindowsOptions() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "2000");
+    const QByteArray started = send(
+        "POST", "/api/v1/remotes/fake/copy", mToken,
+        "{\"path\":\"films/a\",\"isDir\":true,\"to\":\"backup\",\"emptyFolders\":true,"
+        "\"noTraverse\":true,\"removeEmptyFolders\":true,\"filters\":[\"- *.nfo\"],"
+        "\"extra\":\"--transfers 8\"}");
+    QCOMPARE(statusOf(started), 202);
+    RunningJob *job = JobRegistry::instance().find(
+        bodyOf(started).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    const QStringList command = job->displayCommand();
+    QVERIFY(command.contains(QStringLiteral("--create-empty-src-dirs")));
+    QVERIFY(command.contains(QStringLiteral("--no-traverse")));
+    QVERIFY(!command.contains(QStringLiteral("--delete-empty-src-dirs"))); // a copy empties nothing
+    const int at = command.indexOf(QStringLiteral("--filter"));
+    // Shown quoted, as an argument with a space is; given to rclone as one.
+    QVERIFY2(at >= 0 && command.value(at + 1).remove(QLatin1Char('"')) ==
+                            QStringLiteral("- *.nfo"),
+             qPrintable(command.join(QStringLiteral(" | "))));
+    QVERIFY(command.contains(QStringLiteral("--transfers")));
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/copy", mToken,
+                           "{\"path\":\"films/a\",\"isDir\":true,\"to\":\"backup\","
+                           "\"extra\":\"--rc-addr :1\"}")),
+             400);
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

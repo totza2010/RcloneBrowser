@@ -286,8 +286,33 @@ RunningJob *CopyBetween(bool move, const QString &sourceRemote,
                source, dest);
 }
 
+QStringList CopyOptions(bool move, bool emptyFolders, bool removeEmptyFolders,
+                        bool noTraverse, const QStringList &filters,
+                        const QString &extra) {
+  QStringList args;
+  if (emptyFolders) {
+    args << QStringLiteral("--create-empty-src-dirs");
+  }
+  if (move && removeEmptyFolders) {
+    args << QStringLiteral("--delete-empty-src-dirs");
+  }
+  if (noTraverse) {
+    args << QStringLiteral("--no-traverse");
+  }
+  for (const QString &line : filters) {
+    if (!line.trimmed().isEmpty()) {
+      args << QStringLiteral("--filter") << line.trimmed();
+    }
+  }
+  for (const QString &line : extra.split(QLatin1Char('\n'))) {
+    args << SplitRcloneOptions(line);
+  }
+  return args;
+}
+
 RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
-                     const QString &destFolder, bool dryRun, QString *why) {
+                     const QString &destFolder, bool dryRun, QString *why,
+                     const QStringList &more) {
   const auto refuse = [why](const QString &reason) {
     if (why != nullptr) {
       *why = reason;
@@ -321,7 +346,7 @@ RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
   // copied into the destination as it is.
   const QString destPath = what.isFolder ? Join(into, NameOf(from)) : into;
 
-  QStringList args;
+  QStringList args = more;
   if (dryRun) {
     args << QStringLiteral("--dry-run");
   }

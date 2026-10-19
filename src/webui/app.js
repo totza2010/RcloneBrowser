@@ -2096,7 +2096,17 @@ function pickLocal(title, action, files) {
   return new Promise((resolve) => { picking.done = resolve; });
 }
 
-function pickFolder(title, action, remote, path) {
+// `copying`: { move } when the place is for a copy or a move, which then
+// has the window's copy options under More.
+function pickFolder(title, action, remote, path, copying) {
+  $("pick-more").classList.toggle("hidden", !copying);
+  if (copying) {
+    $("pick-more").open = false;
+    for (const id of ["pick-empty", "pick-remove", "pick-notraverse"]) $(id).checked = false;
+    $("pick-filters").value = "";
+    $("pick-extra").value = "";
+    $("pick-remove-wrap").classList.toggle("hidden", !copying.move);
+  }
   picking.local = false;
   picking.files = false;
   picking.chosen = null;
@@ -2157,7 +2167,16 @@ $("pick-ok").addEventListener("click", () => {
     pickClose({ path: path, isFile: !!picking.chosen, dryRun: $("pick-dry").checked });
     return;
   }
-  pickClose({ remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked });
+  pickClose({
+    remote: picking.remote, path: picking.path, dryRun: $("pick-dry").checked,
+    more: $("pick-more").classList.contains("hidden") ? {} : {
+      emptyFolders: $("pick-empty").checked,
+      removeEmptyFolders: $("pick-remove").checked,
+      noTraverse: $("pick-notraverse").checked,
+      filters: $("pick-filters").value.split("\n").map((l) => l.trim()).filter(Boolean),
+      extra: $("pick-extra").value,
+    },
+  });
 });
 
 // ---- the API, described -------------------------------------------------------
@@ -3310,17 +3329,17 @@ async function copyOrMove(move) {
   const from = { remote: browsing.remote, path: browsing.path };
   const where = await pickFolder(
     verb + " " + (all.length > 1 ? all.length + " items" : entry.name) + " to…", verb + " here",
-    browsing.remote, browsing.path);
+    browsing.remote, browsing.path, { move: move });
   if (!where) return;
 
   // Several: one job each, all to the one place chosen.
   if (all.length > 1) {
     let started = 0;
     for (const one of all) {
-      const answer = await api("POST", remoteUrl(move ? "move" : "copy"), {
+      const answer = await api("POST", remoteUrl(move ? "move" : "copy"), Object.assign({
         path: one.path, isDir: one.isDir,
         to: where.path, toRemote: where.remote, dryRun: where.dryRun,
-      }).catch(() => null);
+      }, where.more)).catch(() => null);
       if (!answer || answer.status !== 202) {
         toast("stopped at " + one.name + ": " + (answer ? reasonFrom(answer) : "could not reach the daemon") +
               (started ? " — " + started + " started before it" : ""));
@@ -3340,10 +3359,10 @@ async function copyOrMove(move) {
   // ends if it is still the one on screen.
   let answer;
   try {
-    answer = await api("POST", remoteUrl(move ? "move" : "copy"), {
+    answer = await api("POST", remoteUrl(move ? "move" : "copy"), Object.assign({
       path: entry.path, isDir: entry.isDir,
       to: where.path, toRemote: where.remote, dryRun: where.dryRun,
-    });
+    }, where.more));
   } catch (e) {
     toast("could not reach the daemon");
     return;

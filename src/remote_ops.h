@@ -161,9 +161,22 @@ RunningJob *CopyBetween(bool move, const QString &sourceRemote,
 // Refused before anything runs: the root of a remote as the thing to move,
 // a folder into itself or into something inside itself, and a destination
 // that is where the thing already is.
+//
+// `more` is what the window's copy dialog adds: see CopyOptions().
 RunningJob *CopyInto(bool move, const Item &what, const QString &destRemote,
                      const QString &destFolder, bool dryRun,
-                     QString *why = nullptr);
+                     QString *why = nullptr,
+                     const QStringList &more = QStringList());
+
+// The window's copy and move options, as rclone arguments: empty folders
+// kept (--create-empty-src-dirs), folders a move empties removed
+// (--delete-empty-src-dirs, a move only), the destination not listed first
+// (--no-traverse), each filter line (--filter), then `extra` split as a
+// task's extra options are. Whoever takes `extra` and `filters` from outside
+// checks them first (ExtraFlags).
+QStringList CopyOptions(bool move, bool emptyFolders, bool removeEmptyFolders,
+                        bool noTraverse, const QStringList &filters,
+                        const QString &extra);
 
 // ---- comparing, and listing to a file ---------------------------------------
 

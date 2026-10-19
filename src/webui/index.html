@@ -475,6 +475,14 @@
       <div id="pick-crumbs" class="crumbs"></div>
       <div id="pick-list" class="pick-list"></div>
       <label class="check"><input type="checkbox" id="pick-dry"> Dry run — say what would happen, do none of it</label>
+      <details id="pick-more" class="hidden">
+        <summary>More, as the window's copy has</summary>
+        <label class="check"><input type="checkbox" id="pick-empty"> Keep empty folders</label>
+        <label class="check" id="pick-remove-wrap"><input type="checkbox" id="pick-remove"> Remove the folders a move leaves empty</label>
+        <label class="check"><input type="checkbox" id="pick-notraverse"> Do not list the destination first (faster into a large folder)</label>
+        <label>Filters, one a line: + to include, - to leave out<textarea id="pick-filters" rows="3" placeholder="- *.nfo"></textarea></label>
+        <label>More rclone options<input id="pick-extra" type="text" placeholder="--transfers 8"></label>
+      </details>
       <p id="pick-error" class="error"></p>
       <div class="modal-actions">
         <button type="button" id="pick-cancel" class="ghost">Cancel</button>
