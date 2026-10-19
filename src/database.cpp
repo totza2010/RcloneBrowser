@@ -172,6 +172,39 @@ bool migrateTo3(QSqlDatabase &db) {
                      "options LIKE '%--dry-run%')"));
 }
 
+// Who asked for a run, as well as how it started. A run from the queue
+// started "from the queue" whoever put it there -- an API key, the window, a
+// schedule, a watched folder -- and that is the question asked of it.
+//
+// Added where the table is and the column is not: a database put together
+// by hand, or by a test, can lack a table its version says it has, and one
+// missing table must not cost the whole history.
+bool addColumn(QSqlDatabase &db, const QString &table, const QString &column,
+               const QString &definition) {
+  QSqlQuery info(db);
+  if (!info.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
+    return false;
+  }
+  bool tableThere = false;
+  while (info.next()) {
+    tableThere = true;
+    if (info.value(1).toString() == column) {
+      return true; // already there
+    }
+  }
+  if (!tableThere) {
+    return true;
+  }
+  return run(db, QStringLiteral("ALTER TABLE %1 ADD COLUMN %2 %3")
+                     .arg(table, column, definition));
+}
+
+bool migrateTo4(QSqlDatabase &db) {
+  const QString text = QStringLiteral("TEXT NOT NULL DEFAULT ''");
+  return addColumn(db, QStringLiteral("queue_entry"), QStringLiteral("asked_by"), text) &&
+         addColumn(db, QStringLiteral("job_run"), QStringLiteral("asked_by"), text);
+}
+
 bool migrate(QSqlDatabase &db) {
   int version = readVersion(db);
   if (version == Database::kSchemaVersion) {
@@ -208,6 +241,9 @@ bool migrate(QSqlDatabase &db) {
   }
   if (ok && version < 3) {
     ok = migrateTo3(db);
+  }
+  if (ok && version < 4) {
+    ok = migrateTo4(db);
   }
 
   if (ok) {

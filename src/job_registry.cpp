@@ -19,6 +19,7 @@ JobRunRecord recordFor(const RunningJob *job) {
   r.taskId = job->taskId();
   r.kind = JobKindToString(job->kind());
   r.transferMode = job->transferMode();
+  r.askedBy = job->askedBy();
   r.info = job->description().info;
   r.source = job->description().source;
   r.dest = job->description().dest;
@@ -86,7 +87,8 @@ JobDescription DescribeTask(const JobOptions &task,
 }
 
 RunningJob *StartTask(JobOptions *task, const QString &transferMode,
-                      const QString &requestId, bool dryRun, bool resync) {
+                      const QString &requestId, bool dryRun, bool resync,
+                      const QString &askedBy) {
   if (task == nullptr) {
     return nullptr;
   }
@@ -108,7 +110,7 @@ RunningJob *StartTask(JobOptions *task, const QString &transferMode,
   RunningJob *job = JobRegistry::instance().start(
       isMount ? JobKind::Mount : JobKind::Transfer, args,
       DescribeTask(*task, transferMode, dryRun), task->uniqueId.toString(),
-      transferMode, requestId);
+      transferMode, requestId, {}, askedBy);
 
   if (isMount && !task->mountScript.isEmpty()) {
     job->setMountScript(task->mountScript);
@@ -160,7 +162,8 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
                                const QString &taskId,
                                const QString &transferMode,
                                const QString &requestId,
-                               const QMap<QString, QString> &environment) {
+                               const QMap<QString, QString> &environment,
+                               const QString &askedBy) {
   // A run with no id leaves no history: RunHistory refuses a record without
   // one, because the id is what an ending is matched back to a beginning by.
   //
@@ -231,6 +234,7 @@ RunningJob *JobRegistry::start(JobKind kind, const QStringList &args,
   // Announced before it is started, so a listener sees the job in its
   // Running state and cannot miss a transfer that fails immediately.
   job->setEnvironment(environment);
+  job->setAskedBy(askedBy);
   emit jobStarted(job);
   job->start();
 

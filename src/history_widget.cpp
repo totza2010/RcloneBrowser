@@ -287,7 +287,11 @@ void HistoryWidget::openSelectedRun() {
   lines << tr("What: %1").arg(nameText(*row))
         << tr("From: %1").arg(row->source.isEmpty() ? QStringLiteral("—") : row->source)
         << tr("To: %1").arg(row->dest.isEmpty() ? QStringLiteral("—") : row->dest)
-        << tr("Started by: %1").arg(row->transferMode)
+        << tr("Started by: %1%2")
+               .arg(row->transferMode,
+                    row->askedBy.isEmpty()
+                        ? QString()
+                        : tr(", asked by %1").arg(row->askedBy))
         << tr("Began: %1").arg(at(row->startedAt))
         << tr("Ended: %1").arg(at(row->finishedAt))
         << tr("How it went: %1%2")

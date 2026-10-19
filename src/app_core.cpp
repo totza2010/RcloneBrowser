@@ -411,7 +411,8 @@ QString AppCore::fire(const Schedule &schedule, QString *reason) {
     }
     qCDebug(rbSched) << "fired" << schedule.name << "request=" << requestId
                      << "mode=" << "queue";
-    JobQueue::instance().enqueue(schedule.taskId, false, requestId);
+    JobQueue::instance().enqueue(schedule.taskId, false, requestId,
+                                 QStringLiteral("schedule: %1").arg(schedule.name));
   } else {
     qCDebug(rbSched) << "fired" << schedule.name << "request=" << requestId
                      << "mode=" << "now";

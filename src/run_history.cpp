@@ -20,6 +20,7 @@ JobRunRecord readRow(const QSqlQuery &query) {
   r.taskName = query.value(QStringLiteral("task_name")).toString();
   r.kind = query.value(QStringLiteral("kind")).toString();
   r.transferMode = query.value(QStringLiteral("transfer_mode")).toString();
+  r.askedBy = query.value(QStringLiteral("asked_by")).toString();
   r.info = query.value(QStringLiteral("info")).toString();
   r.source = query.value(QStringLiteral("source")).toString();
   r.dest = query.value(QStringLiteral("dest")).toString();
@@ -78,8 +79,8 @@ bool upsert(const JobRunRecord &r) {
       "INSERT INTO job_run (request_id, task_id, task_name, kind, "
       "transfer_mode, info, source, dest, started_at, finished_at, state, "
       "exit_code, bytes, total_bytes, transfers, errors, log_path, log_bytes, "
-      "dry_run) "
-      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+      "dry_run, asked_by) "
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
       "ON CONFLICT(request_id) DO UPDATE SET "
       "task_id=excluded.task_id, task_name=excluded.task_name, "
       "kind=excluded.kind, transfer_mode=excluded.transfer_mode, "
@@ -88,7 +89,8 @@ bool upsert(const JobRunRecord &r) {
       "exit_code=excluded.exit_code, bytes=excluded.bytes, "
       "total_bytes=excluded.total_bytes, transfers=excluded.transfers, "
       "errors=excluded.errors, log_path=excluded.log_path, "
-      "log_bytes=excluded.log_bytes, dry_run=excluded.dry_run"));
+      "log_bytes=excluded.log_bytes, dry_run=excluded.dry_run, "
+      "asked_by=excluded.asked_by"));
   // started_at is deliberately not updated: the first record of when a job
   // began is the true one.
 
@@ -113,6 +115,8 @@ bool upsert(const JobRunRecord &r) {
   query.addBindValue(r.logPath);
   query.addBindValue(r.logBytes);
   query.addBindValue(r.dryRun ? 1 : 0);
+  // Never null: the column is NOT NULL, and an empty QString binds as NULL.
+  query.addBindValue(r.askedBy.isNull() ? QStringLiteral("") : r.askedBy);
 
   return query.exec();
 }

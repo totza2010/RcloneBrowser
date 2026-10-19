@@ -22,6 +22,9 @@ struct QueueEntry {
   QString taskId;
   QString requestId;
   bool dryRun = false;
+  // Who put it there: an API key's name, "window", "schedule: <name>",
+  // "folder watch". Empty for an entry from before this was kept.
+  QString askedBy;
 };
 
 namespace QueueStore {

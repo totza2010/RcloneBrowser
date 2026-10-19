@@ -2972,7 +2972,9 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
 
     if (verb == QLatin1String("enqueue")) {
       const QString requestId =
-          JobQueue::instance().enqueue(id, wantsDryRun(request));
+          JobQueue::instance().enqueue(
+              id, wantsDryRun(request), QString(),
+              mCallerName.isEmpty() ? QStringLiteral("api") : mCallerName);
       qCDebug(rbApp) << "API queued task" << id << "request=" << requestId;
       *body = startedJob(requestId, QStringLiteral("queued"));
       return 202;
@@ -3681,6 +3683,7 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       object.insert(QStringLiteral("requestId"), entry.requestId);
       object.insert(QStringLiteral("taskId"), entry.taskId);
       object.insert(QStringLiteral("dryRun"), entry.dryRun);
+      object.insert(QStringLiteral("askedBy"), entry.askedBy);
       object.insert(QStringLiteral("running"),
                     entry.requestId ==
                         JobQueue::instance().runningRequestId());
@@ -3858,6 +3861,7 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     object.insert(QStringLiteral("taskId"), row.taskId);
     object.insert(QStringLiteral("kind"), row.kind);
     object.insert(QStringLiteral("startedBy"), row.transferMode);
+    object.insert(QStringLiteral("askedBy"), row.askedBy);
     object.insert(QStringLiteral("info"), row.info);
     object.insert(QStringLiteral("exitCode"), row.exitCode);
     object.insert(QStringLiteral("totalBytes"), double(row.totalBytes));
@@ -3904,6 +3908,7 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
       object.insert(QStringLiteral("taskName"), row.taskName);
       object.insert(QStringLiteral("kind"), row.kind);
       object.insert(QStringLiteral("startedBy"), row.transferMode);
+      object.insert(QStringLiteral("askedBy"), row.askedBy);
       object.insert(QStringLiteral("state"), row.state);
       object.insert(QStringLiteral("exitCode"), row.exitCode);
       object.insert(QStringLiteral("bytes"), double(row.bytes));

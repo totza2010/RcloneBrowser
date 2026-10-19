@@ -27,6 +27,9 @@ QJsonObject Write(const RunningJob &job, int streamIdleSeconds) {
   object.insert(QStringLiteral("taskId"), job.taskId());
   object.insert(QStringLiteral("kind"), JobKindToString(job.kind()));
   object.insert(QStringLiteral("startedBy"), job.transferMode());
+  // Who put it in the queue, when it came from there: a key's name, the
+  // window, a schedule, a watched folder.
+  object.insert(QStringLiteral("askedBy"), job.askedBy());
   object.insert(QStringLiteral("info"), job.description().info);
   object.insert(QStringLiteral("source"), job.description().source);
   object.insert(QStringLiteral("dest"), job.description().dest);

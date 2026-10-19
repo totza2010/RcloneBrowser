@@ -139,6 +139,11 @@ public:
     mEnvironment = extra;
   }
 
+  // Who asked for this run when it came from the queue (QueueEntry::askedBy).
+  // Set before start(), so the history row has it from the beginning.
+  void setAskedBy(const QString &who) { mAskedBy = who; }
+  QString askedBy() const { return mAskedBy; }
+
   // How fast it may go, changed while it runs. Only a transfer can be
   // asked, and only once its remote control is up. `done` gets whether
   // rclone took it and the rate rclone says it now has.
@@ -259,6 +264,7 @@ private:
   QString mStreamPath;
   ServeAddress mServe;
   QMap<QString, QString> mEnvironment;
+  QString mAskedBy;
   QProcess *mScriptProcess = nullptr;
   QString mRcPort;
 

@@ -44,12 +44,13 @@ JobOptions *JobQueue::taskFor(const QueueEntry &entry) const {
 }
 
 QString JobQueue::enqueue(const QString &taskId, bool dryRun,
-                          const QString &requestId) {
+                          const QString &requestId, const QString &askedBy) {
   QueueEntry entry;
   entry.taskId = taskId;
   entry.requestId =
       requestId.isEmpty() ? QUuid::createUuid().toString() : requestId;
   entry.dryRun = dryRun;
+  entry.askedBy = askedBy;
 
   qCDebug(rbQueue) << "enqueue task=" << taskId << "request=" << entry.requestId
                    << "count=" << mEntries.size() + 1;
@@ -211,7 +212,8 @@ bool JobQueue::advance() {
                    << "request=" << entry.requestId
                    << "waiting=" << mEntries.size() - 1;
   mRunningRequestId = entry.requestId;
-  StartTask(task, QStringLiteral("queue"), entry.requestId, entry.dryRun);
+  StartTask(task, QStringLiteral("queue"), entry.requestId, entry.dryRun,
+            false, entry.askedBy);
 
   emit taskStarted(entry.taskId, entry.requestId);
   emit changed();

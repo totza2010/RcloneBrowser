@@ -315,7 +315,8 @@ void FolderWatches::check(const QString &taskId) {
       return;
     }
   }
-  const QString requestId = JobQueue::instance().enqueue(taskId);
+  const QString requestId = JobQueue::instance().enqueue(
+      taskId, false, QString(), QStringLiteral("folder watch"));
   mSent.insert(taskId, now);
   watch->lastQueued = QDateTime::currentDateTime();
   watch->lastRequestId = requestId;

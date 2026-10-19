@@ -101,8 +101,8 @@ QList<QueueEntry> QueueStore::load() {
 
   QList<QueueEntry> entries;
   QSqlQuery query(db);
-  if (!query.exec(QStringLiteral("SELECT task_id, request_id, dry_run FROM "
-                                 "queue_entry ORDER BY position"))) {
+  if (!query.exec(QStringLiteral("SELECT task_id, request_id, dry_run, "
+                                 "asked_by FROM queue_entry ORDER BY position"))) {
     return entries;
   }
   while (query.next()) {
@@ -110,6 +110,7 @@ QList<QueueEntry> QueueStore::load() {
     entry.taskId = query.value(0).toString();
     entry.requestId = query.value(1).toString();
     entry.dryRun = query.value(2).toBool();
+    entry.askedBy = query.value(3).toString();
     entries.append(entry);
   }
   return entries;
@@ -135,12 +136,15 @@ bool QueueStore::save(const QList<QueueEntry> &entries) {
   for (int i = 0; i < entries.size() && ok; ++i) {
     QSqlQuery query(db);
     query.prepare(QStringLiteral("INSERT INTO queue_entry (request_id, "
-                                 "task_id, position, dry_run) "
-                                 "VALUES (?,?,?,?)"));
+                                 "task_id, position, dry_run, asked_by) "
+                                 "VALUES (?,?,?,?,?)"));
     query.addBindValue(entries[i].requestId);
     query.addBindValue(entries[i].taskId);
     query.addBindValue(i);
     query.addBindValue(entries[i].dryRun ? 1 : 0);
+    // Never null: the column is NOT NULL, and an empty QString binds as NULL.
+    query.addBindValue(entries[i].askedBy.isNull() ? QStringLiteral("")
+                                                   : entries[i].askedBy);
     ok = query.exec();
   }
 

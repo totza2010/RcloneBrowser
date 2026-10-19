@@ -35,8 +35,10 @@ public:
   // requestId lets a caller that already has one -- a schedule, which has to
   // recognise its own run when the job ends -- keep it. Left empty, the queue
   // mints one.
+  // askedBy: who is asking -- see QueueEntry::askedBy.
   QString enqueue(const QString &taskId, bool dryRun = false,
-                  const QString &requestId = QString());
+                  const QString &requestId = QString(),
+                  const QString &askedBy = QString());
 
   void remove(const QString &requestId);
 

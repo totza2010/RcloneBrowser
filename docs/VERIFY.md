@@ -2009,6 +2009,16 @@ marker: `GET /api/v1/remotes/{name}/capabilities` · `drawCapabilities`
 | 2 | หน้าเว็บ · เปิดรีโหมด teldrive | Dedupe · Cleanup ปิดพร้อมเหตุผล · Check บอกว่าไม่มี hash · ตรงกับหน้าต่าง | ⬜ | |
 | 3 | สลับ teldrive ↔ gdrive | ปุ่มเปลี่ยนตามรีโหมดทันที | ⬜ | |
 
+### V-62 · ใครขอให้รันจากคิว
+
+marker: `askedBy` · schema 4
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | API: key "sonarr" ใส่คิว · คิวเริ่ม · งานจบ | `/queue` · `/jobs` · ประวัติ บอก `api:sonarr` · startedBy ยังเป็น queue | ✅ **PASS** | AI / 2026-10-19 · `test_api_server` |
+| 2 | เปิด build นี้กับ database เดิมของจริง (schema 3) | ขึ้น schema 4 · คิว task ประวัติเดิมครบ | ⬜ | (สำรอง rclone-browser.db ก่อน) |
+| 3 | หน้าต่าง · ใส่คิว · ตารางเวลา · เฝ้าโฟลเดอร์ | askedBy = window · schedule: ชื่อ · folder watch | ⬜ | |
+
 ---
 
 ## วิธีเพิ่มรายการใหม่

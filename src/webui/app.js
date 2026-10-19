@@ -569,7 +569,8 @@ function jobCard(job) {
     figures.push(job.serve.user ? "log in as " + esc(job.serve.user) : "no log-in");
     figures.push(job.serve.everyone ? "other machines can reach it" : "this machine only");
   }
-  figures.push("started by " + esc(job.startedBy || "?"));
+  figures.push("started by " + esc(job.startedBy || "?") +
+    (job.askedBy ? ", asked by " + esc(job.askedBy) : ""));
 
   return (
     '<div class="card">' +
@@ -676,7 +677,8 @@ function drawQueue() {
       "<tr>" +
         '<td class="muted">' + (i + 1) + "</td>" +
         "<td>" + esc(task ? task.name : entry.taskId) +
-          (by ? '<br><span class="muted">⏱ ' + esc(by.name) + "</span>" : "") + "</td>" +
+          (by ? '<br><span class="muted">⏱ ' + esc(by.name) + "</span>"
+              : entry.askedBy ? '<br><span class="muted">asked by ' + esc(entry.askedBy) + "</span>" : "") + "</td>" +
         "<td>" + (entry.running ? '<span class="tag running">running</span>' : "waiting") + "</td>" +
         "<td>" + (entry.dryRun ? "dry run" : "") + "</td>" +
         '<td style="text-align:right; white-space:nowrap">' +
@@ -968,7 +970,7 @@ async function openRun(requestId) {
       ["What", r.info || r.kind],
       ["From", r.source || "—"],
       ["To", r.dest || "—"],
-      ["Started by", r.startedBy || "—"],
+      ["Started by", (r.startedBy || "—") + (r.askedBy ? ", asked by " + r.askedBy : "")],
       ["Began", when(r.startedAt)],
       ["Ended", r.finishedAt ? when(r.finishedAt) : "still going"],
       ["Took", r.durationSeconds !== null ? seconds(r.durationSeconds) : "—"],

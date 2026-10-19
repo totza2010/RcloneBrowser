@@ -1774,7 +1774,7 @@ MainWindow::MainWindow() {
           // The queue gives the run its id and announces the change; the row
           // for it is drawn by refreshQueueView(), not added here as well.
           Q_UNUSED(jobIcon);
-          JobQueue::instance().enqueue(jo->uniqueId.toString());
+          JobQueue::instance().enqueue(jo->uniqueId.toString(), false, QString(), "window");
         }
 
         if (ui.queueListWidget->count() > 0) {
@@ -4243,7 +4243,7 @@ void MainWindow::addSavedTransfer(const QString &uniqueId, bool dryRun,
   // Into the queue. The queue gives the run its id, saves itself, tells the
   // view to redraw and decides whether this is the moment to start it -- all
   // of which stood written out here. See docs/QUEUE-MOVE.md block 10.
-  JobQueue::instance().enqueue(joTask->uniqueId.toString());
+  JobQueue::instance().enqueue(joTask->uniqueId.toString(), false, QString(), "window");
 }
 
 void MainWindow::addTransfer(const QString &message, const QString &source,

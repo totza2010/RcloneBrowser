@@ -27,9 +27,11 @@ JobDescription DescribeTask(const JobOptions &task, const QString &transferMode,
 // Returns nullptr only for a null task.
 //
 // `resync`: for a bisync, start the pair afresh this once (its first run).
+//
+// `askedBy`: who put it in the queue, kept with the run.
 RunningJob *StartTask(JobOptions *task, const QString &transferMode,
                       const QString &requestId, bool dryRun = false,
-                      bool resync = false);
+                      bool resync = false, const QString &askedBy = QString());
 
 class JobRegistry : public QObject {
   Q_OBJECT
@@ -58,7 +60,8 @@ public:
   RunningJob *start(JobKind kind, const QStringList &args,
                     const JobDescription &description, const QString &taskId,
                     const QString &transferMode, const QString &requestId,
-                    const QMap<QString, QString> &environment = {});
+                    const QMap<QString, QString> &environment = {},
+                    const QString &askedBy = QString());
 
   // Drops a finished job. Running jobs are left alone: forgetting one would
   // leave rclone running with nothing holding it.

@@ -20,6 +20,7 @@ struct JobRunRecord {
   QString taskName; // copied in: the task may be gone by the time this is read
   QString kind;         // "transfer" | "mount" | "stream"
   QString transferMode; // "task" | "queue" | "scheduler" | ...
+  QString askedBy;      // who put it in the queue; see QueueEntry::askedBy
   QString info;         // the one-line description shown on the card
   QString source;
   QString dest;

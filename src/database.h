@@ -22,7 +22,7 @@ public:
   // is refused rather than half-read.
   //
   // 1: meta, job_run     2: task, queue_entry, schedule
-  static constexpr int kSchemaVersion = 3;
+  static constexpr int kSchemaVersion = 4;
 
   // Alongside the settings, so a portable installation keeps its history with
   // the rest of its data.

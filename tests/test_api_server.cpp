@@ -3362,6 +3362,53 @@ private slots:
     QCOMPARE(statusOf(ask("GET", "/api/v1/remotes/nothing/capabilities", mToken)), 404);
   }
 
+  // A run from the queue says who put it there -- here, a key -- in the
+  // queue, on the job and in the history.
+  void aQueuedRunSaysWhoAskedForIt() {
+    QVERIFY(useFakeRclone(1));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "300");
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray key =
+        bodyOf(send("POST", "/api/v1/keys", mToken, "{\"name\":\"sonarr\",\"scope\":\"control\"}"))
+            .object().value(QStringLiteral("key")).toString().toUtf8();
+    JobQueue::instance().pause();
+    JobQueue::instance().clear();
+    JobOptions *task = makeTask(QStringLiteral("asked for"));
+
+    const QByteArray queued =
+        ask("POST", "/api/v1/tasks/" + QUrl::toPercentEncoding(task->uniqueId.toString()) + "/enqueue",
+            key);
+    QCOMPARE(statusOf(queued), 202);
+    const QString id = bodyOf(queued).object().value(QStringLiteral("requestId")).toString();
+    const QJsonArray queue = bodyOf(ask("GET", "/api/v1/queue", mToken)).array();
+    QCOMPARE(queue.size(), 1);
+    QCOMPARE(queue.at(0).toObject().value(QStringLiteral("askedBy")).toString(), QStringLiteral("api:sonarr"));
+
+    JobQueue::instance().setDrivesItself(true); // as AppCore has it
+    JobQueue::instance().start();
+    QTRY_VERIFY_WITH_TIMEOUT(JobRegistry::instance().find(id) != nullptr, 5000);
+    RunningJob *job = JobRegistry::instance().find(id);
+    QCOMPARE(job->transferMode(), QStringLiteral("queue")); // how it started
+    QCOMPARE(job->askedBy(), QStringLiteral("api:sonarr"));     // and who asked: the key, as a run it started itself says it
+    for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+      if (value.toObject().value(QStringLiteral("requestId")).toString() == id) {
+        QCOMPARE(value.toObject().value(QStringLiteral("askedBy")).toString(), QStringLiteral("api:sonarr"));
+      }
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 5000);
+    QCOMPARE(RunHistory::find(id).askedBy, QStringLiteral("api:sonarr"));
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/history/" + QUrl::toPercentEncoding(id), mToken)).object()
+                 .value(QStringLiteral("askedBy")).toString(),
+             QStringLiteral("api:sonarr"));
+
+    JobQueue::instance().pause();
+    JobQueue::instance().setDrivesItself(false);
+    JobQueue::instance().clear();
+    ApiAuth::Keys::instance().forgetAll();
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    ListOfJobOptions::getInstance()->Forget(task);
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :
