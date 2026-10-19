@@ -9,7 +9,9 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QComboBox>
 #include <QLineEdit>
+#include <QTimer>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -77,9 +79,24 @@ HistoryWidget::HistoryWidget(QWidget *parent) : QWidget(parent) {
 
   auto *bar = new QHBoxLayout;
   mFilter = new QLineEdit(this);
-  mFilter->setPlaceholderText(tr("Filter by task, path or result"));
+  mFilter->setPlaceholderText(tr("Find: a task, a folder, a remote"));
   mFilter->setClearButtonEnabled(true);
   bar->addWidget(mFilter, 1);
+
+  // The same narrowing as the page's History tab, asked of the same search.
+  mState = new QComboBox(this);
+  mState->addItem(tr("Every result"), QString());
+  for (const char *state : {"finished", "error", "stopped", "running"}) {
+    mState->addItem(QString::fromLatin1(state), QString::fromLatin1(state));
+  }
+  bar->addWidget(mState);
+  mKind = new QComboBox(this);
+  mKind->addItem(tr("Every kind"), QString());
+  for (const char *kind : {"transfer", "mount", "serve", "stream", "check",
+                           "size", "link", "mkdir", "rename", "delete"}) {
+    mKind->addItem(QString::fromLatin1(kind), QString::fromLatin1(kind));
+  }
+  bar->addWidget(mKind);
 
   auto *refreshButton = new QPushButton(tr("Refresh"), this);
   mOpenLog = new QPushButton(tr("Open log"), this);
@@ -102,8 +119,17 @@ HistoryWidget::HistoryWidget(QWidget *parent) : QWidget(parent) {
   mTable->setSortingEnabled(false); // the query already orders by time
   layout->addWidget(mTable, 1);
 
+  auto *foot = new QHBoxLayout;
   mSummary = new QLabel(this);
-  layout->addWidget(mSummary);
+  foot->addWidget(mSummary, 1);
+  mOlder = new QPushButton(tr("Load older"), this);
+  foot->addWidget(mOlder);
+  layout->addLayout(foot);
+
+  // Asked when typing stops, not at every letter: each is a query.
+  mTyping = new QTimer(this);
+  mTyping->setSingleShot(true);
+  mTyping->setInterval(300);
 
   QObject::connect(refreshButton, &QPushButton::clicked, this,
                    &HistoryWidget::refresh);
@@ -111,12 +137,19 @@ HistoryWidget::HistoryWidget(QWidget *parent) : QWidget(parent) {
                    &HistoryWidget::openSelectedLog);
   QObject::connect(mClear, &QPushButton::clicked, this,
                    &HistoryWidget::clearHistory);
-  QObject::connect(mFilter, &QLineEdit::textChanged, this,
-                   [this]() { applyFilter(); });
+  QObject::connect(mFilter, &QLineEdit::textChanged, mTyping,
+                   [this]() { mTyping->start(); });
+  QObject::connect(mTyping, &QTimer::timeout, this, &HistoryWidget::refresh);
+  QObject::connect(mState, &QComboBox::currentIndexChanged, this,
+                   &HistoryWidget::refresh);
+  QObject::connect(mKind, &QComboBox::currentIndexChanged, this,
+                   &HistoryWidget::refresh);
+  QObject::connect(mOlder, &QPushButton::clicked, this,
+                   &HistoryWidget::loadOlder);
   QObject::connect(mTable, &QTableWidget::itemSelectionChanged, this,
                    [this]() { updateButtons(); });
   QObject::connect(mTable, &QTableWidget::itemDoubleClicked, this,
-                   [this]() { openSelectedLog(); });
+                   [this]() { openSelectedRun(); });
 
   // A job that has just ended belongs here immediately: the card and the row
   // otherwise disagree until something happens to refresh this.
@@ -126,11 +159,36 @@ HistoryWidget::HistoryWidget(QWidget *parent) : QWidget(parent) {
   refresh();
 }
 
+RunHistory::Search HistoryWidget::asked() const {
+  RunHistory::Search search;
+  search.limit = 200;
+  search.text = mFilter->text().trimmed();
+  search.state = mState->currentData().toString();
+  search.kind = mKind->currentData().toString();
+  return search;
+}
+
 void HistoryWidget::refresh() {
+  mRows = RunHistory::search(asked());
+  mAtTheEnd = mRows.size() < asked().limit;
+  draw();
+}
+
+void HistoryWidget::loadOlder() {
+  if (mRows.isEmpty()) {
+    return;
+  }
+  RunHistory::Search search = asked();
+  search.before = mRows.last().startedAt;
+  const QList<JobRunRecord> older = RunHistory::search(search);
+  mAtTheEnd = older.size() < search.limit;
+  mRows += older;
+  draw();
+}
+
+void HistoryWidget::draw() {
   const QString wasSelected =
       selectedRecord() != nullptr ? selectedRecord()->requestId : QString();
-
-  mRows = RunHistory::recent(500);
 
   mTable->setRowCount(0);
   mTable->setRowCount(mRows.size());
@@ -196,37 +254,58 @@ void HistoryWidget::refresh() {
   mTable->resizeColumnsToContents();
   mTable->horizontalHeader()->setSectionResizeMode(ColName,
                                                    QHeaderView::Stretch);
-  applyFilter();
+
+  const RunHistory::Search search = asked();
+  const bool narrowed = !search.text.isEmpty() || !search.state.isEmpty() ||
+                        !search.kind.isEmpty();
+  if (mRows.isEmpty()) {
+    mSummary->setText(narrowed
+                          ? tr("Nothing that matches.")
+                          : tr("No runs recorded yet. Every job started from "
+                               "here or with --run-task is added when it "
+                               "begins."));
+  } else {
+    mSummary->setText(tr("%n run(s)", nullptr, mRows.size()) +
+                      (mAtTheEnd ? QString() : tr(" — there are older ones")));
+  }
+  mOlder->setVisible(!mRows.isEmpty() && !mAtTheEnd);
+  updateButtons();
 }
 
-void HistoryWidget::applyFilter() {
-  const QString needle = mFilter->text().trimmed();
-  int shown = 0;
-
-  for (int i = 0; i < mRows.size(); ++i) {
-    const JobRunRecord &row = mRows[i];
-    const bool match =
-        needle.isEmpty() ||
-        nameText(row).contains(needle, Qt::CaseInsensitive) ||
-        row.source.contains(needle, Qt::CaseInsensitive) ||
-        row.dest.contains(needle, Qt::CaseInsensitive) ||
-        row.state.contains(needle, Qt::CaseInsensitive) ||
-        row.kind.contains(needle, Qt::CaseInsensitive);
-    mTable->setRowHidden(i, !match);
-    if (match) {
-      ++shown;
-    }
+// The page's run in full, here: everything kept about it.
+void HistoryWidget::openSelectedRun() {
+  const JobRunRecord *row = selectedRecord();
+  if (row == nullptr) {
+    return;
   }
-
-  if (mRows.isEmpty()) {
-    mSummary->setText(tr("No runs recorded yet. Every job started from here or "
-                         "with --run-task is added when it begins."));
-  } else if (needle.isEmpty()) {
-    mSummary->setText(tr("%n run(s)", nullptr, mRows.size()));
-  } else {
-    mSummary->setText(tr("%1 of %2 runs").arg(shown).arg(mRows.size()));
+  const auto at = [](qint64 ms) {
+    return ms > 0 ? QDateTime::fromMSecsSinceEpoch(ms).toString(
+                        QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+                  : tr("still going");
+  };
+  QStringList lines;
+  lines << tr("What: %1").arg(nameText(*row))
+        << tr("From: %1").arg(row->source.isEmpty() ? QStringLiteral("—") : row->source)
+        << tr("To: %1").arg(row->dest.isEmpty() ? QStringLiteral("—") : row->dest)
+        << tr("Started by: %1").arg(row->transferMode)
+        << tr("Began: %1").arg(at(row->startedAt))
+        << tr("Ended: %1").arg(at(row->finishedAt))
+        << tr("How it went: %1%2")
+               .arg(row->state, row->dryRun ? tr(" (dry run)") : QString())
+        << tr("Moved: %1 · %2 files · %3 errors")
+               .arg(FormatBytes(row->bytes))
+               .arg(row->transfers)
+               .arg(row->errors);
+  QMessageBox box(QMessageBox::Information, tr("Run"), lines.join('\n'),
+                  QMessageBox::Close, this);
+  QPushButton *log = nullptr;
+  if (!row->logPath.isEmpty() && QFileInfo::exists(row->logPath)) {
+    log = box.addButton(tr("Open log"), QMessageBox::ActionRole);
   }
-  updateButtons();
+  box.exec();
+  if (log != nullptr && box.clickedButton() == log) {
+    openSelectedLog();
+  }
 }
 
 const JobRunRecord *HistoryWidget::selectedRecord() const {

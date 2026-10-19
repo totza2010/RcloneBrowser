@@ -14,10 +14,12 @@
 #include <QList>
 #include <QWidget>
 
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class HistoryWidget : public QWidget {
   Q_OBJECT
@@ -31,14 +33,23 @@ public:
 
 private:
   void openSelectedLog();
+  void openSelectedRun();
   void clearHistory();
-  void applyFilter();
+  void loadOlder();
+  void draw();
   void updateButtons();
+  // What is asked of the history: the page's search, from the same words.
+  RunHistory::Search asked() const;
 
   const JobRunRecord *selectedRecord() const;
 
   QTableWidget *mTable = nullptr;
   QLineEdit *mFilter = nullptr;
+  QComboBox *mState = nullptr;
+  QComboBox *mKind = nullptr;
+  QPushButton *mOlder = nullptr;
+  QTimer *mTyping = nullptr;
+  bool mAtTheEnd = false;
   QPushButton *mOpenLog = nullptr;
   QPushButton *mClear = nullptr;
   QLabel *mSummary = nullptr;
