@@ -17,7 +17,7 @@ namespace JobJson {
 // not need it.
 QJsonObject Write(const RunningJob &job, int streamIdleSeconds = 0);
 
-// A moment, with its offset from UTC: "2026-10-19T10:52:00+07:00". Without
+// A moment, with its offset from UTC: "2026-10-19T10:52:00.123+07:00". Without
 // one, "10:52" is a different instant to every reader in another time zone,
 // and a program reading it has no window to look at to guess which. Empty
 // for a moment that never was (invalid, or zero).

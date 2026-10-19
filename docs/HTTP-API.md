@@ -148,6 +148,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 - `limit` ไม่บอก: ภาพ/PDF อ่านทั้งไฟล์ · อื่นๆ 2 MiB · สูงสุด 64 MiB · rclone หยุดอ่านตรงนั้น (`cat --count`)
 - `400` ไม่ได้ระบุไฟล์ · `404` ไม่มีรีโหมด · `502` rclone อ่านไม่ได้ · ไม่มีประวัติ (เป็นคำถาม ไม่ใช่งาน)
 
+### history — `GET /api/v1/history` · `GET /api/v1/history/{requestId}`
+
+- `?limit=100&before=<startedAt ของแถวสุดท้าย>&state=error&kind=transfer&task=<id>&q=<คำ>` → array ใหม่สุดก่อน
+- หน้าถัดไป: `before` = `startedAt` ของแถวสุดท้ายที่ได้ (เวลาเป็นมิลลิวินาที ไม่มีแถวตกหล่น)
+- `/history/{requestId}`: ทุกอย่างที่เก็บ · `hasLog` → `GET /jobs/{requestId}/log` (บรรทัดแรกคือคำสั่ง)
+
 ### เฝ้าโฟลเดอร์ — `GET /api/v1/watches` · `POST/DELETE /api/v1/tasks/{id}/watch`
 
 task ที่ส่งโฟลเดอร์ของเครื่องนี้ (upload) เข้าคิวเองเมื่อโฟลเดอร์เปลี่ยนแล้วเงียบไป `quietSeconds` (ค่าเริ่ม 30)

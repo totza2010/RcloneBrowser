@@ -3274,6 +3274,74 @@ private slots:
     ListOfJobOptions::getInstance()->Forget(task);
   }
 
+  // The history, found, narrowed and paged, and one run in full.
+  void theHistoryCanBeSearchedAndPaged() {
+    QVERIFY(useFakeRclone(1));
+    RunHistory::clear();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (int i = 0; i < 5; ++i) {
+      JobRunRecord run;
+      run.requestId = QStringLiteral("{run-%1}").arg(i);
+      run.kind = i == 4 ? QStringLiteral("mount") : QStringLiteral("transfer");
+      run.taskName = i == 2 ? QStringLiteral("films_main_01") : QStringLiteral("photos");
+      run.source = QStringLiteral("C:/pictures");
+      run.dest = QStringLiteral("fake:backup");
+      run.startedAt = now - (5 - i) * 60000; // run-4 is the newest
+      run.state = i == 1 ? QStringLiteral("error") : QStringLiteral("finished");
+      run.finishedAt = run.startedAt + 1000;
+      run.transfers = i;
+      QVERIFY(RunHistory::recordFinished(run));
+    }
+    const auto ids = [&](const QByteArray &query) {
+      QStringList found;
+      for (const QJsonValue &v : bodyOf(ask("GET", "/api/v1/history" + query, mToken)).array()) {
+        found << v.toObject().value(QStringLiteral("requestId")).toString();
+      }
+      return found;
+    };
+
+    QCOMPARE(ids("?limit=2"), (QStringList{"{run-4}", "{run-3}"}));
+    // The next page: before the oldest one already had.
+    const QString third =
+        bodyOf(ask("GET", "/api/v1/history?limit=2", mToken)).array().at(1).toObject()
+            .value(QStringLiteral("startedAt")).toString();
+    QCOMPARE(ids("?limit=2&before=" + QUrl::toPercentEncoding(third)),
+             (QStringList{"{run-2}", "{run-1}"}));
+    QCOMPARE(ids("?state=error"), (QStringList{"{run-1}"}));
+    QCOMPARE(ids("?kind=mount"), (QStringList{"{run-4}"}));
+    // Found by a word, and "_" is a letter here, not a wildcard.
+    QCOMPARE(ids("?q=MAIN_01"), (QStringList{"{run-2}"}));
+    QCOMPARE(ids("?q=mainX01"), QStringList());
+    QCOMPARE(statusOf(ask("GET", "/api/v1/history?before=yesterday", mToken)), 400);
+
+    const QByteArray one = ask("GET", "/api/v1/history/%7Brun-3%7D", mToken);
+    QCOMPARE(statusOf(one), 200);
+    const QJsonObject run = bodyOf(one).object();
+    QCOMPARE(run.value(QStringLiteral("source")).toString(), QStringLiteral("C:/pictures"));
+    QCOMPARE(run.value(QStringLiteral("durationSeconds")).toDouble(), 1.0);
+    QCOMPARE(run.value(QStringLiteral("hasLog")).toBool(), false);
+    QCOMPARE(statusOf(ask("GET", "/api/v1/history/%7Bnothing%7D", mToken)), 404);
+
+    // Two runs begun within one second still come one page after the other.
+    RunHistory::clear();
+    const qint64 second = (now / 1000) * 1000 + 100;
+    for (int i = 0; i < 2; ++i) {
+      JobRunRecord quick;
+      quick.requestId = QStringLiteral("{quick-%1}").arg(i);
+      quick.kind = QStringLiteral("mkdir");
+      quick.startedAt = second + i * 300;
+      quick.finishedAt = quick.startedAt + 10;
+      quick.state = QStringLiteral("finished");
+      QVERIFY(RunHistory::recordFinished(quick));
+    }
+    const QString newest =
+        bodyOf(ask("GET", "/api/v1/history?limit=1", mToken)).array().at(0).toObject()
+            .value(QStringLiteral("startedAt")).toString();
+    QCOMPARE(ids("?limit=1&before=" + QUrl::toPercentEncoding(newest)),
+             (QStringList{"{quick-0}"}));
+    RunHistory::clear();
+  }
+
   void aMountNeedsSomewhereToGo() {
     QVERIFY(useFakeRclone(1));
     for (const char *body :

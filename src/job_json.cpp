@@ -10,7 +10,10 @@ QString Stamp(const QDateTime &when) {
     return QString();
   }
   const QDateTime local = when.toLocalTime();
-  return local.toOffsetFromUtc(local.offsetFromUtc()).toString(Qt::ISODate);
+  // To the millisecond: the history is paged by "before this moment", and
+  // runs begun within one second would otherwise fall between two pages.
+  return local.toOffsetFromUtc(local.offsetFromUtc())
+      .toString(Qt::ISODateWithMs);
 }
 
 QString Stamp(qint64 msSinceEpoch) {

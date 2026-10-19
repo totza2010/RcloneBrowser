@@ -3782,14 +3782,60 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
     return 200;
   }
 
+  // history/{requestId} -- one run, with everything kept about it
+  if (path.startsWith(QLatin1String("/api/v1/history/"))) {
+    const QString id = path.mid(int(qstrlen("/api/v1/history/")));
+    const JobRunRecord row = RunHistory::find(id);
+    if (row.requestId.isEmpty()) {
+      *body = problem(QStringLiteral("no such run"));
+      return 404;
+    }
+    QJsonObject object = describeRun(row).toObject();
+    object.insert(QStringLiteral("taskId"), row.taskId);
+    object.insert(QStringLiteral("kind"), row.kind);
+    object.insert(QStringLiteral("startedBy"), row.transferMode);
+    object.insert(QStringLiteral("info"), row.info);
+    object.insert(QStringLiteral("exitCode"), row.exitCode);
+    object.insert(QStringLiteral("totalBytes"), double(row.totalBytes));
+    object.insert(QStringLiteral("logBytes"), double(row.logBytes));
+    object.insert(QStringLiteral("hasLog"),
+                  !row.logPath.isEmpty() && QFileInfo::exists(row.logPath));
+    *body = toJson(object);
+    return 200;
+  }
+
   if (path == QLatin1String("/api/v1/history")) {
     bool readable = true;
     const int asked = request.queryValue(QStringLiteral("limit")).toInt(&readable);
-    const int limit = readable && asked > 0 ? qMin(asked, 500) : 50;
+    RunHistory::Search search;
+    search.limit = readable && asked > 0 ? qMin(asked, 1000) : 50;
+    // A moment as this API says them, or a plain count of milliseconds.
+    const QString before = request.queryValue(QStringLiteral("before"));
+    if (!before.isEmpty()) {
+      bool number = false;
+      const qint64 ms = before.toLongLong(&number);
+      const QDateTime at = QDateTime::fromString(before, Qt::ISODate);
+      if (!number && !at.isValid()) {
+        *body = problem(QStringLiteral("\"before\" is a moment such as "
+                                       "2026-10-19T10:52:00+07:00"));
+        return 400;
+      }
+      search.before = number ? ms : at.toMSecsSinceEpoch();
+    }
+    search.state = request.queryValue(QStringLiteral("state"));
+    search.kind = request.queryValue(QStringLiteral("kind"));
+    search.taskId = request.queryValue(QStringLiteral("task"));
+    search.text = request.queryValue(QStringLiteral("q"));
 
     QJsonArray array;
-    for (const JobRunRecord &row : RunHistory::recent(limit)) {
+    for (const JobRunRecord &row : RunHistory::search(search)) {
       QJsonObject object;
+      object.insert(QStringLiteral("taskId"), row.taskId);
+      object.insert(QStringLiteral("info"), row.info);
+      object.insert(QStringLiteral("source"), row.source);
+      object.insert(QStringLiteral("dest"), row.dest);
+      object.insert(QStringLiteral("transfers"), double(row.transfers));
+      object.insert(QStringLiteral("errors"), double(row.errors));
       object.insert(QStringLiteral("requestId"), row.requestId);
       object.insert(QStringLiteral("taskName"), row.taskName);
       object.insert(QStringLiteral("kind"), row.kind);

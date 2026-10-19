@@ -264,8 +264,19 @@ QList<Route> build() {
       // ---- history ---------------------------------------------------------
       r("GET", "/api/v1/history", kHistory, "Past runs, newest first",
         "When each began and ended, what it moved, and whether it was a "
-        "rehearsal.",
-        "limit: how many"),
+        "rehearsal. The next page: before = the startedAt of the last run "
+        "already had.",
+        "limit: how many, 50 unless said, 1000 at most; before: only runs "
+        "that began before this moment (ISO 8601, or ms since 1970); state: "
+        "finished, error, stopped, running; kind: transfer, mount, ...; "
+        "task: a task's id; q: words in its name, description, source or "
+        "destination"),
+      r("GET", "/api/v1/history/{requestId}", kHistory, "One past run",
+        "Everything kept about it: what, where from and to, when, how long, "
+        "what it moved, how it ended. What rclone printed -- the command "
+        "first -- is GET /jobs/{requestId}/log while the log is kept "
+        "(hasLog).",
+        "", "", "200: the run; 404: no such run"),
 
       // ---- remotes ---------------------------------------------------------
       r("GET", "/api/v1/remotes", kRemotes, "Every remote",

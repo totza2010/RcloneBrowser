@@ -169,6 +169,39 @@ QList<JobRunRecord> RunHistory::recent(int limit) {
   return select(QString(), {}, limit);
 }
 
+QList<JobRunRecord> RunHistory::search(const Search &asked) {
+  QStringList where;
+  QVariantList binds;
+  if (asked.before > 0) {
+    where << QStringLiteral("started_at < ?");
+    binds << asked.before;
+  }
+  for (const auto &[column, value] :
+       {std::pair<const char *, QString>{"state", asked.state},
+        {"kind", asked.kind},
+        {"task_id", asked.taskId}}) {
+    if (!value.isEmpty()) {
+      where << QStringLiteral("%1 = ?").arg(QLatin1String(column));
+      binds << value;
+    }
+  }
+  if (!asked.text.trimmed().isEmpty()) {
+    // instr() rather than LIKE: in LIKE "_" and "%" mean any character, and
+    // they are in names here (tgdrive_main_01).
+    QStringList anyOf;
+    for (const char *column : {"task_name", "info", "source", "dest"}) {
+      anyOf << QStringLiteral("instr(lower(COALESCE(%1, '')), lower(?)) > 0")
+                   .arg(QLatin1String(column));
+      binds << asked.text.trimmed();
+    }
+    where << QLatin1Char('(') + anyOf.join(QStringLiteral(" OR ")) + QLatin1Char(')');
+  }
+  return select(where.isEmpty() ? QString()
+                                : QStringLiteral("WHERE ") +
+                                      where.join(QStringLiteral(" AND ")),
+                binds, qBound(1, asked.limit, 1000));
+}
+
 namespace {
 
 // The newest transfer whose `column` is on that remote.

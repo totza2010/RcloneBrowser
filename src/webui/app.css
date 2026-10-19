@@ -528,6 +528,9 @@ input.bad, select.bad { border-color: var(--bad); }
 .uploads .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uploads .bar { flex: 0 0 160px; }
 
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.08)); }
+
 /* The files of a job on their way, one line each. */
 .files { margin-top: 6px; display: grid; gap: 3px; }
 .file { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 8px; align-items: center; font-size: 0.85em; }

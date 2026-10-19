@@ -69,6 +69,21 @@ bool recordFinished(const JobRunRecord &record);
 
 // Newest first.
 QList<JobRunRecord> recent(int limit = 200);
+
+// Runs that match, newest first. Every field left empty matches everything.
+struct Search {
+  int limit = 50;
+  // Only runs that began before this moment (ms since the epoch): the next
+  // page is the runs before the oldest one already had.
+  qint64 before = 0;
+  QString state;  // "finished" | "error" | "stopped" | "running" | ...
+  QString kind;   // "transfer" | "mount" | ...
+  QString taskId;
+  // Somewhere in its task's name, its description, its source or its
+  // destination; any case.
+  QString text;
+};
+QList<JobRunRecord> search(const Search &asked);
 QList<JobRunRecord> forTask(const QString &taskId, int limit = 50);
 
 JobRunRecord find(const QString &requestId);

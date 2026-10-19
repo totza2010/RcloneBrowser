@@ -491,7 +491,7 @@ async function refresh() {
       api("GET", "/queue"),
       api("GET", "/tasks"),
       api("GET", "/schedules"),
-      api("GET", "/history?limit=100"),
+      api("GET", "/history?limit=100" + historyFilter()),
       api("GET", "/remotes"),
       api("GET", "/watches"),
     ]);
@@ -924,9 +924,78 @@ function duration(row) {
   return isNaN(took) || took < 0 ? "" : seconds(took);
 }
 
+// What the history is narrowed to, kept while the page is open.
+const historyAsk = { q: "", state: "", kind: "", older: [], end: false };
+
+function historyFilter() {
+  return (historyAsk.q ? "&q=" + encodeURIComponent(historyAsk.q) : "") +
+    (historyAsk.state ? "&state=" + encodeURIComponent(historyAsk.state) : "") +
+    (historyAsk.kind ? "&kind=" + encodeURIComponent(historyAsk.kind) : "");
+}
+
+// The newest page comes with every refresh; older pages are kept apart, so
+// a refresh does not take back what was scrolled to.
+function historyRows() {
+  const seen = new Set(state.history.map((r) => r.requestId));
+  return state.history.concat(historyAsk.older.filter((r) => !seen.has(r.requestId)));
+}
+
+async function historyAgain() {
+  historyAsk.older = [];
+  historyAsk.end = false;
+  const answer = await api("GET", "/history?limit=100" + historyFilter());
+  if (answer.status === 200) state.history = answer.data || [];
+  drawHistory();
+}
+
+async function historyOlder() {
+  const rows = historyRows();
+  if (!rows.length) return;
+  const last = rows[rows.length - 1].startedAt;
+  const answer = await api("GET", "/history?limit=100&before=" + encodeURIComponent(last) + historyFilter());
+  if (answer.status !== 200) return toast(reasonFrom(answer));
+  historyAsk.older = historyAsk.older.concat(answer.data || []);
+  historyAsk.end = (answer.data || []).length < 100;
+  drawHistory();
+}
+
+async function openRun(requestId) {
+  const answer = await api("GET", "/history/" + encodeURIComponent(requestId));
+  if (answer.status !== 200) return toast(reasonFrom(answer));
+  const r = answer.data;
+  showResult(r.taskName || r.info || r.kind,
+    figures([
+      ["What", r.info || r.kind],
+      ["From", r.source || "—"],
+      ["To", r.dest || "—"],
+      ["Started by", r.startedBy || "—"],
+      ["Began", when(r.startedAt)],
+      ["Ended", r.finishedAt ? when(r.finishedAt) : "still going"],
+      ["Took", r.durationSeconds !== null ? seconds(r.durationSeconds) : "—"],
+      ["How it went", r.state + (r.dryRun ? " (dry run)" : "") + (r.exitCode >= 0 ? " · exit " + r.exitCode : "")],
+      ["Moved", bytes(r.bytes) + (r.totalBytes ? " of " + bytes(r.totalBytes) : "") + " · " + r.transfers + " files"],
+      ["Errors", String(r.errors)],
+    ]) +
+    (r.hasLog
+      ? '<p><button class="ghost small" data-log="' + esc(r.requestId) + '">Log — the command and what rclone printed</button></p>'
+      : '<p class="muted">No log is kept for it.</p>'));
+}
+
 function drawHistory() {
-  const rows = state.history.map((row) => (
-    "<tr>" +
+  const kinds = ["transfer", "mount", "serve", "stream", "check", "size", "link", "mkdir", "rename", "delete"];
+  const tools =
+    '<div class="toolbar">' +
+      '<input id="history-q" type="search" placeholder="find: a task, a folder, a remote" value="' + esc(historyAsk.q) + '">' +
+      '<select id="history-state"><option value="">every result</option>' +
+        ["finished", "error", "stopped", "running"].map((s) =>
+          '<option value="' + s + '"' + (historyAsk.state === s ? " selected" : "") + ">" + s + "</option>").join("") +
+      "</select>" +
+      '<select id="history-kind"><option value="">every kind</option>' +
+        kinds.map((k) => '<option value="' + k + '"' + (historyAsk.kind === k ? " selected" : "") + ">" + k + "</option>").join("") +
+      "</select>" +
+    "</div>";
+  const rows = historyRows().map((row) => (
+    '<tr data-run="' + esc(row.requestId) + '" class="clickable">' +
       "<td>" + esc(when(row.startedAt)) + "</td>" +
       "<td>" + esc(row.taskName || row.kind) + "</td>" +
       "<td>" + esc(row.kind) + (row.dryRun ? " (dry run)" : "") + "</td>" +
@@ -940,11 +1009,33 @@ function drawHistory() {
     "</tr>"
   ));
 
-  $("tab-history").innerHTML = rows.length
+  const filtered = historyAsk.q || historyAsk.state || historyAsk.kind;
+  $("tab-history").innerHTML = tools + (rows.length
     ? "<table><thead><tr><th>Started</th><th>Task</th><th>Kind</th><th>Started by</th><th>Result</th><th>Took</th><th>Bytes</th><th></th></tr></thead><tbody>" +
-      rows.join("") + "</tbody></table>"
-    : '<p class="empty">Nothing has run yet.</p>';
+      rows.join("") + "</tbody></table>" +
+      (rows.length >= 100 && !historyAsk.end
+        ? '<p><button class="ghost small" data-history-older="">Load older</button></p>' : "")
+    : '<p class="empty">' + (filtered ? "Nothing that matches." : "Nothing has run yet.") + "</p>");
+
+  const q = $("history-q");
+  let typing = null;
+  q.addEventListener("input", () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => { historyAsk.q = q.value.trim(); historyAgain(); }, 300);
+  });
+  $("history-state").addEventListener("change", (e) => { historyAsk.state = e.target.value; historyAgain(); });
+  $("history-kind").addEventListener("change", (e) => { historyAsk.kind = e.target.value; historyAgain(); });
+  // The search box keeps its place when the table is drawn again.
+  if (document.activeElement === document.body && historyAsk.q) q.focus();
 }
+
+// A run is opened by clicking its row; the Log button on it still opens the
+// log, through the click handler every button goes through.
+$("tab-history").addEventListener("click", (event) => {
+  if (event.target.closest("button, input, select")) return;
+  const row = event.target.closest("tr[data-run]");
+  if (row) openRun(row.dataset.run);
+});
 
 // ---- remotes and their folders -------------------------------------------
 
@@ -3828,6 +3919,7 @@ document.addEventListener("click", async (event) => {
   const task = (id, suffix) => "/tasks/" + encodeURIComponent(id) + suffix;
 
   if (d.log) return openLog(d.log);
+  if (d.historyOlder !== undefined) return historyOlder();
   if (d.stream) return reopenStream(d.stream);
   if (d.copyText !== undefined) {
     try {
