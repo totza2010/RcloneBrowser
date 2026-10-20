@@ -51,10 +51,12 @@ RemoteSettingsDialog::RemoteSettingsDialog(const QString &remote,
 
   auto *head = new QFormLayout();
   mName = new QLineEdit(formPage);
+  mName->setObjectName(QStringLiteral("remoteName"));
   mName->setText(remote);
   mName->setPlaceholderText(QStringLiteral("films, backup, nas…"));
   head->addRow(QStringLiteral("Name"), mName);
   mKind = new QComboBox(formPage);
+  mKind->setObjectName(QStringLiteral("remoteKind"));
   mKind->setEditable(true);
   mKind->setInsertPolicy(QComboBox::NoInsert);
   mKind->completer()->setFilterMode(Qt::MatchContains);
@@ -300,6 +302,9 @@ QWidget *RemoteSettingsDialog::makeInput(const ProviderOption &option,
     input = line;
   }
   input->setToolTip(option.help);
+  // Named as rclone names the option: what a test fills in, and what a
+  // screen reader can tell apart.
+  input->setObjectName(option.name);
   return input;
 }
 

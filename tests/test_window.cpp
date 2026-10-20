@@ -11,7 +11,14 @@
 #include "job_queue.h"
 #include "list_of_job_options.h"
 #include "main_window.h"
+#include "check_dialog.h"
+#include "dedupe_dialog.h"
+#include "job_registry.h"
+#include "job_widget.h"
 #include "mount_dialog.h"
+#include "remote_settings_dialog.h"
+#include "running_job.h"
+#include "serve_dialog.h"
 #include "transfer_dialog.h"
 #include "progress_dialog.h"
 #include "remote_widget.h"
@@ -21,9 +28,11 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QRadioButton>
+#include <QSpinBox>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QInputDialog>
@@ -99,14 +108,25 @@ private:
   struct Asked {
     QString text;
     bool seen = false;
+    bool given_up = false; // the test it was for has ended
   };
+  // Every box still being waited for. A wait outlives its test otherwise,
+  // and answers the next test's box for it.
+  QList<std::shared_ptr<Asked>> mWaiting;
   std::shared_ptr<Asked> answerNextBox(QMessageBox::StandardButton which) {
     auto asked = std::make_shared<Asked>();
+    mWaiting << asked;
     auto *timer = new QTimer(this);
     auto *started = new QElapsedTimer;
     started->start();
     timer->setInterval(50);
     connect(timer, &QTimer::timeout, this, [=]() {
+      if (asked->given_up) {
+        timer->stop();
+        timer->deleteLater();
+        delete started;
+        return;
+      }
       if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
         asked->text = box->text();
         asked->seen = true;
@@ -132,11 +152,18 @@ private:
   // what it asked comes back.
   std::shared_ptr<Asked> typeIntoNextBox(const QString &text) {
     auto asked = std::make_shared<Asked>();
+    mWaiting << asked;
     auto *timer = new QTimer(this);
     auto *started = new QElapsedTimer;
     started->start();
     timer->setInterval(50);
     connect(timer, &QTimer::timeout, this, [=]() {
+      if (asked->given_up) {
+        timer->stop();
+        timer->deleteLater();
+        delete started;
+        return;
+      }
       if (auto *box = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
         asked->text = box->labelText();
         asked->seen = true;
@@ -212,11 +239,18 @@ private:
   // seconds; `seen` says whether it came.
   std::shared_ptr<Asked> onNextBox(std::function<void(QWidget *)> answer) {
     auto asked = std::make_shared<Asked>();
+    mWaiting << asked;
     auto *timer = new QTimer(this);
     auto *started = new QElapsedTimer;
     started->start();
     timer->setInterval(50);
     connect(timer, &QTimer::timeout, this, [=]() {
+      if (asked->given_up) {
+        timer->stop();
+        timer->deleteLater();
+        delete started;
+        return;
+      }
       if (QWidget *box = QApplication::activeModalWidget()) {
         asked->text = box->windowTitle();
         asked->seen = true;
@@ -262,6 +296,14 @@ private:
   }
 
 private slots:
+  // Each test starts with nobody waiting to answer a box.
+  void init() {
+    for (const auto &asked : mWaiting) {
+      asked->given_up = true;
+    }
+    mWaiting.clear();
+  }
+
   void initTestCase() {
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
     mScratch.reset(new QTemporaryDir);
@@ -645,6 +687,191 @@ private slots:
     QVERIFY2(line.contains(QLatin1String("--vfs-cache-mode writes")), qPrintable(line));
     QVERIFY2(line.contains(QLatin1String("Films")), qPrintable(line));
     QCOMPARE(dialog.getScript(), script->text());
+  }
+
+  // Check and Dedupe: what is ticked is what rclone is told.
+  void checkAndDedupeBecomeCommands() {
+    CheckDialog check(QStringLiteral("fake"), QDir(QStringLiteral("films")), QStringLiteral("fake"),
+                      mWindow.get());
+    check.findChild<QCheckBox *>(QStringLiteral("oneWay"))->setChecked(true);
+    check.findChild<QCheckBox *>(QStringLiteral("sizeOnly"))->setChecked(true);
+    const QString line = check.getOptions().join(' ');
+    QVERIFY2(line.contains(QLatin1String("check")), qPrintable(line));
+    QVERIFY2(line.contains(QLatin1String("--one-way")), qPrintable(line));
+    QVERIFY2(line.contains(QLatin1String("--size-only")), qPrintable(line));
+
+    DedupeDialog dedupe(QStringLiteral("fake"), QDir(QStringLiteral("films")), QStringLiteral("fake"),
+                        mWindow.get());
+    dedupe.findChild<QCheckBox *>(QStringLiteral("cb_newest"))->setChecked(true);
+    const QString again = dedupe.getOptions().join(' ');
+    QVERIFY2(again.contains(QLatin1String("dedupe")), qPrintable(again));
+    QVERIFY2(again.contains(QLatin1String("newest")), qPrintable(again));
+  }
+
+  // Serve: the protocol, the port and the login chosen are what it serves
+  // with -- and the password is kept for rclone's environment.
+  void theServeFormIsWhatIsServed() {
+    ServeDialog dialog(QStringLiteral("fake:films"), mWindow.get());
+    dialog.show();
+    auto *protocol = dialog.findChild<QComboBox *>(QStringLiteral("serveProtocol"));
+    auto *port = dialog.findChild<QSpinBox *>(QStringLiteral("servePort"));
+    auto *user = dialog.findChild<QLineEdit *>(QStringLiteral("serveUser"));
+    auto *password = dialog.findChild<QLineEdit *>(QStringLiteral("servePassword"));
+    QVERIFY(protocol && port && user && password);
+    const int sftp = protocol->findData(QStringLiteral("sftp"));
+    QVERIFY2(sftp >= 0, "no sftp to choose");
+    protocol->setCurrentIndex(sftp);
+    port->setValue(18922);
+    user->setText(QStringLiteral("someone"));
+    password->setText(QStringLiteral("a secret"));
+    const RemoteOps::ServeOptions chosen = dialog.options();
+    QCOMPARE(chosen.protocol, QStringLiteral("sftp"));
+    QCOMPARE(int(chosen.port), 18922);
+    QCOMPARE(chosen.user, QStringLiteral("someone"));
+    QCOMPARE(chosen.password, QStringLiteral("a secret"));
+  }
+
+  // A remote from the window: made, changed, deleted -- each the rclone
+  // command it should be, against the fake (no real rclone.conf is touched).
+  void aRemoteIsMadeChangedAndDeletedFromTheWindow() {
+    {
+      RemoteSettingsDialog made(QString(), mWindow.get());
+      made.show();
+      auto *kind = made.findChild<QComboBox *>(QStringLiteral("remoteKind"));
+      auto *name = made.findChild<QLineEdit *>(QStringLiteral("remoteName"));
+      QVERIFY(kind && name);
+      QTRY_VERIFY_WITH_TIMEOUT(kind->findText(QStringLiteral("fake"), Qt::MatchStartsWith) >= 0, 10000);
+      kind->setCurrentIndex(kind->findText(QStringLiteral("fake"), Qt::MatchStartsWith));
+      QLineEdit *token = nullptr;
+      QTRY_VERIFY((token = made.findChild<QLineEdit *>(QStringLiteral("access_token"))) != nullptr);
+      name->setText(QStringLiteral("made-in-window"));
+      token->setText(QStringLiteral("tok-123"));
+      sent();
+      buttonSaying(&made, QStringLiteral("Save"))->click();
+      QStringList lines;
+      QTRY_VERIFY((lines += sent(), anyStartsWith(lines, QStringLiteral("config\tcreate\tmade-in-window\tfake"))));
+      QVERIFY2(lines.join('\n').contains(QLatin1String("tok-123")), qPrintable(lines.join(" | ")));
+      // Done when the box has closed itself: what it started has answered.
+      QTRY_VERIFY_WITH_TIMEOUT(!made.isVisible(), 10000);
+    }
+    {
+      RemoteSettingsDialog changed(QStringLiteral("fake"), mWindow.get());
+      changed.show();
+      QLineEdit *chunk = nullptr;
+      QTRY_VERIFY_WITH_TIMEOUT((chunk = changed.findChild<QLineEdit *>(QStringLiteral("chunk_size"))) != nullptr,
+                               10000);
+      chunk->setText(QStringLiteral("2Gi")); // the fake has 1Gi: the same would change nothing
+      sent();
+      buttonSaying(&changed, QStringLiteral("Save"))->click();
+      QStringList lines;
+      QTRY_VERIFY((lines += sent(), anyStartsWith(lines, QStringLiteral("config\tupdate\tfake"))));
+      QVERIFY2(lines.join('\n').contains(QLatin1String("chunk_size")), qPrintable(lines.join(" | ")));
+      // The token that was set is not sent again, unasked.
+      QVERIFY2(!lines.join('\n').contains(QLatin1String("access_token")), qPrintable(lines.join(" | ")));
+      QTRY_VERIFY_WITH_TIMEOUT(!changed.isVisible(), 10000);
+    }
+    {
+      RemoteSettingsDialog doomed(QStringLiteral("fake"), mWindow.get());
+      doomed.show();
+      QAbstractButton *drop = nullptr;
+      QTRY_VERIFY((drop = buttonSaying(&doomed, QStringLiteral("Delete this remote…"))) != nullptr &&
+                  drop->isEnabled());
+      sent();
+      auto no = answerNextBox(QMessageBox::No);
+      drop->click();
+      QTRY_VERIFY(no->seen);
+      QTest::qWait(300);
+      QVERIFY(!anyStartsWith(sent(), QStringLiteral("config\tdelete")));
+      // Yes to whatever it asks: whether to, and whether even though tasks use it.
+      auto yes = answerNextBox(QMessageBox::Yes);
+      drop->click();
+      QTRY_VERIFY(yes->seen);
+      auto again = answerNextBox(QMessageBox::Yes);
+      QStringList lines;
+      QTRY_VERIFY_WITH_TIMEOUT((lines += sent(), anyStartsWith(lines, QStringLiteral("config\tdelete\tfake"))),
+                               15000);
+      QTRY_VERIFY_WITH_TIMEOUT(!doomed.isVisible(), 10000);
+    }
+  }
+
+  // Save, then Cancel straight away: the box goes while rclone is still
+  // making the remote. That took the window down: the process was the box's
+  // child, and its last word reached a box already half taken apart.
+  void cancellingWhileSavingDoesNotTakeTheWindowDown() {
+    auto *box = new RemoteSettingsDialog(QString(), mWindow.get());
+    box->show();
+    auto *kind = box->findChild<QComboBox *>(QStringLiteral("remoteKind"));
+    QTRY_VERIFY_WITH_TIMEOUT(kind->findText(QStringLiteral("fake"), Qt::MatchStartsWith) >= 0, 10000);
+    kind->setCurrentIndex(kind->findText(QStringLiteral("fake"), Qt::MatchStartsWith));
+    QLineEdit *token = nullptr;
+    QTRY_VERIFY((token = box->findChild<QLineEdit *>(QStringLiteral("access_token"))) != nullptr);
+    box->findChild<QLineEdit *>(QStringLiteral("remoteName"))->setText(QStringLiteral("cancelled-mid-save"));
+    token->setText(QStringLiteral("tok"));
+    sent();
+    buttonSaying(box, QStringLiteral("Save"))->click();
+    buttonSaying(box, QStringLiteral("Cancel"))->click();
+    delete box; // as the window's dialog.exec() leaves it: gone at once
+    // Whatever rclone was doing finishes without anyone to tell; the window
+    // is still here. (Cancelled before rclone was asked to make it, nothing
+    // is made: the steps after the one under way are not taken.)
+    QTest::qWait(2000);
+    QVERIFY(mWindow->isVisible());
+  }
+
+  // Preferences: what is typed there is what is kept.
+  void preferencesAreKept() {
+    auto *menuItem = mWindow->findChild<QAction *>(QStringLiteral("preferences"));
+    QVERIFY(menuItem != nullptr);
+    auto filled = onNextBox([](QWidget *box) {
+      box->findChild<QLineEdit *>(QStringLiteral("defaultRcloneOptions"))
+          ->setText(QStringLiteral("--fast-list"));
+      box->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    menuItem->trigger();
+    QTRY_VERIFY(filled->seen);
+    QCOMPARE(GetSettings()->value(QStringLiteral("Settings/defaultRcloneOptions")).toString(),
+             QStringLiteral("--fast-list"));
+    GetSettings()->setValue(QStringLiteral("Settings/defaultRcloneOptions"), QString());
+  }
+
+  // A job's card: Stop asks first; No leaves it running, Yes stops it.
+  void aJobsCardStopsItAfterAsking() {
+    qputenv("FAKE_RCLONE_SLEEP_MS", "20000");
+    JobOptions *task = makeTask(QStringLiteral("window test slow"));
+    RunningJob *job = StartTask(task, QStringLiteral("window"), QUuid::createUuid().toString());
+    QVERIFY(job != nullptr);
+    JobWidget *card = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT([&]() {
+      for (JobWidget *one : mWindow->findChildren<JobWidget *>()) {
+        if (one->getRequestId() == job->requestId()) {
+          card = one;
+        }
+      }
+      return card != nullptr && job->isRunning();
+    }(), 10000);
+    // Where a person would see it: the Jobs tab.
+    find<QTabWidget>("tabs")->setCurrentIndex(1);
+    auto *stop = card->findChild<QToolButton *>(QStringLiteral("cancel"));
+    QVERIFY(stop != nullptr);
+    QVERIFY2(card->isRunning, qPrintable(QStringLiteral("the card says it is not running; the job is %1")
+                                             .arg(job->isRunning() ? "running" : job->finalStatus())));
+    QVERIFY2(stop->isVisible() && stop->isEnabled(), "its Stop button cannot be pressed");
+
+    QSignalSpy pressed(stop, &QToolButton::clicked);
+    auto no = answerNextBox(QMessageBox::No);
+    QTest::mouseClick(stop, Qt::LeftButton);
+    QVERIFY2(pressed.count() == 1, "the button did not say it was clicked");
+    QTRY_VERIFY(no->seen);
+    QVERIFY2(no->text.contains(QLatin1String("stop")), qPrintable(no->text));
+    QTest::qWait(300);
+    QVERIFY(job->isRunning());
+
+    auto yes = answerNextBox(QMessageBox::Yes);
+    stop->click();
+    QTRY_VERIFY(yes->seen);
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    qunsetenv("FAKE_RCLONE_SLEEP_MS");
+    ListOfJobOptions::getInstance()->Forget(task);
   }
 
   // Deleting a task: asked first, with its name; No keeps it, Yes deletes it.

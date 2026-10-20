@@ -35,10 +35,12 @@ ServeDialog::ServeDialog(const QString &what, QWidget *parent)
   intro->setWordWrap(true);
 
   mProtocol = new QComboBox(this);
+  mProtocol->setObjectName(QStringLiteral("serveProtocol"));
   for (const QString &protocol : RemoteOps::ServeProtocols()) {
     mProtocol->addItem(describe(protocol), protocol);
   }
   mPort = new QSpinBox(this);
+  mPort->setObjectName(QStringLiteral("servePort"));
   mPort->setRange(1, 65535);
   mPort->setValue(RemoteOps::DefaultServePort(mProtocol->currentData().toString()));
   QObject::connect(mProtocol, &QComboBox::currentIndexChanged, this, [this]() {
@@ -53,7 +55,9 @@ ServeDialog::ServeDialog(const QString &what, QWidget *parent)
   mReadOnly = new QCheckBox(QStringLiteral("Read only"), this);
   mReadOnly->setChecked(true);
   mUser = new QLineEdit(this);
+  mUser->setObjectName(QStringLiteral("serveUser"));
   mPassword = new QLineEdit(this);
+  mPassword->setObjectName(QStringLiteral("servePassword"));
   mPassword->setEchoMode(QLineEdit::Password);
 
   auto *form = new QFormLayout();

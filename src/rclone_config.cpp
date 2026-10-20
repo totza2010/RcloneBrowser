@@ -147,9 +147,31 @@ QJsonArray DescribeSettings(const QJsonObject &section,
 namespace {
 
 // One "rclone config ..." run, and what it said.
+// A process for rclone whose answer goes to `context` -- and that is not
+// `context`'s child. A dialog closed while rclone works (Save, then Cancel)
+// is deleted while it runs; as a child the process went with it, and dying
+// it said "finished" to a dialog already half taken apart, which took the
+// window down. It deletes itself once done instead, and what it says
+// reaches `context` only while `context` is there to hear it.
+QProcess *ProcessFor(QObject *context) {
+  Q_UNUSED(context);
+  auto *process = new QProcess();
+  QObject::connect(process,
+                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
+                       &QProcess::finished),
+                   process, &QObject::deleteLater);
+  QObject::connect(process, &QProcess::errorOccurred, process,
+                   [process](QProcess::ProcessError error) {
+                     if (error == QProcess::FailedToStart) {
+                       process->deleteLater();
+                     }
+                   });
+  return process;
+}
+
 void runConfig(QObject *context, const QStringList &args,
                std::function<void(bool ok, const QString &said)> done) {
-  auto *process = new QProcess(context);
+  auto *process = ProcessFor(context);
   process->setProcessChannelMode(QProcess::MergedChannels);
   UseRclonePassword(process);
   QObject::connect(
@@ -377,7 +399,7 @@ QJsonObject questionIn(const QString &said) {
 
 void runConfigWhole(QObject *context, const QStringList &args,
                     std::function<void(bool ok, const QString &said)> done) {
-  auto *process = new QProcess(context);
+  auto *process = ProcessFor(context);
   process->setProcessChannelMode(QProcess::SeparateChannels);
   UseRclonePassword(process);
   QObject::connect(
@@ -776,7 +798,7 @@ void RcloneConfigRegistry::ensureLoaded() {
 void RcloneConfigRegistry::readDump(
     QObject *context,
     std::function<void(bool, const QJsonObject &, const QString &)> done) {
-  auto *process = new QProcess(context);
+  auto *process = ProcessFor(context);
   process->setProcessChannelMode(QProcess::SeparateChannels);
   UseRclonePassword(process);
   QObject::connect(
