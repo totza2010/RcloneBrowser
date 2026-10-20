@@ -504,11 +504,16 @@ RunningJob *Mount(const QString &remote, const QString &path,
 
   qCDebug(rbRemote) << "mounting" << task.source << "on" << task.dest;
 
-  return JobRegistry::instance().start(
+  RunningJob *job = JobRegistry::instance().start(
       JobKind::Mount, command,
       JobDescription{QStringLiteral("%1 on %2").arg(task.source, task.dest),
                      task.source, task.dest},
       QString(), QStringLiteral("mount"), QUuid::createUuid().toString());
+  // Run once rclone says its remote control is up, which is after this.
+  if (job != nullptr && !options.script.trimmed().isEmpty()) {
+    job->setMountScript(options.script.trimmed());
+  }
+  return job;
 }
 
 namespace {
@@ -640,6 +645,7 @@ JobOptions *MountTask(const QString &remote, const QString &path,
   task->mountVolume = options.volumeName.trimmed();
   task->extra = options.extra;
   task->mountAutoStart = autoStart;
+  task->mountScript = options.script.trimmed();
   // A port of its own, kept with the task: on Windows unmounting has to
   // reach the same one every time. See Mount().
   {

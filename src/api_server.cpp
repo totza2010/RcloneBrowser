@@ -1299,6 +1299,26 @@ void ApiServer::remoteOperation(QTcpSocket *socket, const HttpRequest &request,
     options.cache = given.value(QStringLiteral("cache")).toString();
     options.volumeName = given.value(QStringLiteral("volumeName")).toString();
     options.extra = given.value(QStringLiteral("extra")).toString();
+    // A program run on this machine, by the core, when the mount is up. Only
+    // the owner names one: a key that can write may download a file into the
+    // folders the API uses, and naming it here would be running it. And only
+    // a file in those folders.
+    const QString script = given.value(QStringLiteral("script")).toString().trimmed();
+    if (!script.isEmpty()) {
+      if (callerOf(request).scope < int(ApiAuth::Scope::Admin)) {
+        refuse(403, QStringLiteral("forbidden"),
+               QStringLiteral("a script to run is the owner's to give"));
+        return;
+      }
+      const QString allowed = LocalFiles::Allowed(script);
+      if (allowed.isEmpty() || !QFileInfo(allowed).isFile()) {
+        refuse(403, QStringLiteral("outside_roots"),
+               QStringLiteral("the script has to be a file of this machine in "
+                              "the folders the API may use"));
+        return;
+      }
+      options.script = allowed;
+    }
     // The same line a task's extra options are held to.
     const QString flags = flagsProblem(options.extra);
     if (!flags.isEmpty()) {

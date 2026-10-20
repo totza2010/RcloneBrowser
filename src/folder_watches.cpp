@@ -60,7 +60,7 @@ quint64 FolderWatches::Fingerprint(const QString &folder, int *files) {
   QCryptographicHash hash(QCryptographicHash::Sha1);
   for (const QString &line : seen) {
     hash.addData(line.toUtf8());
-    hash.addData("\n", 1);
+    hash.addData(QByteArrayView("\n", 1));
   }
   const QByteArray digest = hash.result();
   quint64 value = 0;

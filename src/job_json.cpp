@@ -71,6 +71,24 @@ QJsonObject Write(const RunningJob &job, int streamIdleSeconds) {
     object.insert(QStringLiteral("serve"), serve);
   }
 
+  // The script a mount runs once it is up, and what it has said: the core
+  // runs it, this only reports it.
+  if (!job.mountScript().isEmpty()) {
+    const RunningJob::ScriptReport &report = job.scriptReport();
+    QJsonObject script;
+    script.insert(QStringLiteral("path"), job.mountScript());
+    script.insert(QStringLiteral("started"), report.started);
+    script.insert(QStringLiteral("running"), report.running);
+    script.insert(QStringLiteral("exitCode"),
+                  report.exitCode >= 0 ? QJsonValue(report.exitCode)
+                                       : QJsonValue(QJsonValue::Null));
+    if (!report.error.isEmpty()) {
+      script.insert(QStringLiteral("error"), report.error);
+    }
+    script.insert(QStringLiteral("output"), QJsonArray::fromStringList(report.lines));
+    object.insert(QStringLiteral("script"), script);
+  }
+
   const JobStats &stats = job.stats();
   if (stats.valid) {
     QJsonObject figures;

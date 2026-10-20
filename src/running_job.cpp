@@ -313,6 +313,9 @@ void RunningJob::startMountScript() {
   // before rclone says which port it is on.
   mScriptProcess = new QProcess(this);
   mScriptProcess->setProcessChannelMode(QProcess::MergedChannels);
+  mScriptReport = ScriptReport();
+  mScriptReport.started = true;
+  mScriptReport.running = true;
 
   QObject::connect(mScriptProcess, &QProcess::readyRead, this, [this]() {
     while (mScriptProcess->canReadLine()) {
@@ -322,15 +325,24 @@ void RunningJob::startMountScript() {
       // (docs/ARCHITECTURE.md section 5).
       const QString safe = RedactOutputLine(line, mRcUser, mRcPass);
       mLog.appendLine(QStringLiteral("[script] ") + safe);
+      mScriptReport.lines << safe;
+      while (mScriptReport.lines.size() > kScriptLinesKept) {
+        mScriptReport.lines.removeFirst();
+      }
       emit scriptOutputLine(safe);
     }
   });
 
   QObject::connect(mScriptProcess, &QProcess::errorOccurred, this,
                    [this](QProcess::ProcessError error) {
-                     emit scriptFailed(
+                     const QString why = QString::fromLatin1(
                          QMetaEnum::fromType<QProcess::ProcessError>()
                              .valueToKey(error));
+                     mScriptReport.error = why;
+                     if (error == QProcess::FailedToStart) {
+                       mScriptReport.running = false;
+                     }
+                     emit scriptFailed(why);
                    });
 
   QObject::connect(
@@ -338,6 +350,8 @@ void RunningJob::startMountScript() {
       static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
           &QProcess::finished),
       this, [this](int exitCode, QProcess::ExitStatus) {
+        mScriptReport.running = false;
+        mScriptReport.exitCode = exitCode;
         emit scriptFinished(exitCode);
       });
 

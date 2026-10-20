@@ -239,6 +239,11 @@ struct MountOptions {
   // More rclone options, written as a task's extra options are. Whoever
   // takes them from outside checks them first (ExtraFlags).
   QString extra;
+  // A program of this machine run once the mount is up, given rclone, the
+  // remote-control port and login and the mount point -- the window's
+  // "script". The core runs it; whoever takes it from outside decides who
+  // may name one.
+  QString script;
 };
 
 // The mount kept as a task, as the window's Mount dialog can: named, and

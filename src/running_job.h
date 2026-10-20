@@ -117,6 +117,20 @@ public:
   void setMountScript(const QString &script) { mMountScript = script; }
   QString mountScript() const { return mMountScript; }
 
+  // What the mount script has done, for whoever shows the job: the window's
+  // card draws it from the signals below, the page reads it from here. The
+  // lines are the redacted ones (the script is handed the remote-control
+  // login), the last kScriptLinesKept of them.
+  struct ScriptReport {
+    bool started = false;
+    bool running = false;
+    int exitCode = -1;  // -1 until it has ended
+    QString error;      // why it could not run, when it could not
+    QStringList lines;
+  };
+  static constexpr int kScriptLinesKept = 200;
+  const ScriptReport &scriptReport() const { return mScriptReport; }
+
   // Where a stream is being served: the port, and the path under it that
   // has to be asked for. Kept with the job so that whoever shows the job can
   // give the address again -- it cannot be worked out from the command,
@@ -267,6 +281,7 @@ private:
   JobLogWriter mLog;
 
   QString mMountScript;
+  ScriptReport mScriptReport;
   QString mBandwidth;
   quint16 mStreamPort = 0;
   QString mStreamPath;

@@ -1601,7 +1601,27 @@ private slots:
              "the web UI was not compiled into the binary");
     QVERIFY(page.contains("text/html"));
 
-    QCOMPARE(statusOf(ask("GET", "/app.js", QByteArray())), 200);
+    const QByteArray script = ask("GET", "/app.js", QByteArray());
+    QCOMPARE(statusOf(script), 200);
+
+    // In a script, a second function of the same name replaces the first
+    // everywhere, without a word: once, the question to rclone took the
+    // name of the page's question box, and every confirm on the page asked
+    // rclone about "[object Object]" instead.
+    QSet<QString> declared;
+    const QRegularExpression function(
+        QStringLiteral("^(?:async\\s+)?function\\*?\\s+([A-Za-z_$][\\w$]*)"),
+        QRegularExpression::MultilineOption);
+    auto found = function.globalMatch(QString::fromUtf8(script));
+    while (found.hasNext()) {
+      const QString name = found.next().captured(1);
+      QVERIFY2(!declared.contains(name),
+               qPrintable(QStringLiteral("app.js declares %1 twice").arg(name)));
+      declared.insert(name);
+    }
+    QVERIFY2(declared.contains(QStringLiteral("ask")) &&
+                 declared.contains(QStringLiteral("askYes")),
+             "the page's functions were not found in app.js");
     QVERIFY(ask("GET", "/app.css", QByteArray()).contains("text/css"));
 
     // A remote's picture is asked for by the name of its kind, which is the
@@ -3615,6 +3635,80 @@ private slots:
                                      QUrl::toPercentEncoding(QStringLiteral("C:/Windows")),
                           mToken)),
              403);
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
+  // The script a mount runs once it is up: named by the owner, run by the
+  // core, and what it said shown with the job -- the login it is handed
+  // never among it.
+  void aMountsScriptIsRunByTheCoreAndShown() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+#if defined(Q_OS_WIN)
+    const QString script = root + QStringLiteral("/after.cmd");
+    const QByteArray text = "@echo off\r\necho mounted on %5\r\necho login %3 %4\r\nexit /b 3\r\n";
+#else
+    const QString script = root + QStringLiteral("/after.sh");
+    const QByteArray text = "#!/bin/sh\necho \"mounted on $5\"\necho \"login $3 $4\"\nexit 3\n";
+#endif
+    QFile file(script);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(text);
+    file.close();
+    file.setPermissions(file.permissions() | QFileDevice::ExeOwner | QFileDevice::ExeUser);
+
+    // The remote control is "up" when rclone says so, which the fake does.
+    QTcpServer rc;
+    QVERIFY(rc.listen(QHostAddress::LocalHost, 0));
+    qputenv("FAKE_RCLONE_RC_PORT", QByteArray::number(rc.serverPort()));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+
+    const QByteArray made = send("POST", "/api/v1/remotes/fake/mount", mToken,
+                                 "{\"path\":\"films\",\"mountPoint\":\"X:\",\"script\":\"" +
+                                     script.toUtf8() + "\"}");
+    QCOMPARE(statusOf(made), 202);
+    const QString id = bodyOf(made).object().value(QStringLiteral("requestId")).toString();
+
+    QJsonObject reported;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        [&]() {
+          for (const QJsonValue &v : bodyOf(ask("GET", "/api/v1/jobs", mToken)).array()) {
+            if (v.toObject().value(QStringLiteral("requestId")).toString() == id) {
+              reported = v.toObject().value(QStringLiteral("script")).toObject();
+            }
+          }
+          return reported.value(QStringLiteral("exitCode")).toInt(-1) == 3;
+        }(),
+        10000);
+    const QJsonArray output = reported.value(QStringLiteral("output")).toArray();
+    QVERIFY2(output.size() >= 2, qPrintable(QJsonDocument(reported).toJson()));
+    QCOMPARE(output.at(0).toString(), QStringLiteral("mounted on X:"));
+    // Handed the remote-control login, which never comes back out.
+    QCOMPARE(output.at(1).toString(), QStringLiteral("login *** ***"));
+    QCOMPARE(reported.value(QStringLiteral("running")).toBool(), false);
+
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr);
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+
+    // Not a key's to name, and not a file outside the folders the API uses.
+    ApiAuth::Keys::instance().forgetAll();
+    const QByteArray writer =
+        bodyOf(send("POST", "/api/v1/keys", mToken, "{\"name\":\"w\",\"scope\":\"write\"}"))
+            .object().value(QStringLiteral("key")).toString().toUtf8();
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mount", writer,
+                           "{\"mountPoint\":\"X:\",\"script\":\"" + script.toUtf8() + "\"}")),
+             403);
+    ApiAuth::Keys::instance().forgetAll();
+    QCOMPARE(statusOf(send("POST", "/api/v1/remotes/fake/mount", mToken,
+                           "{\"mountPoint\":\"X:\",\"script\":\"" +
+                               QDir::rootPath().toUtf8() + "elsewhere/x.sh\"}")),
+             403);
+
+    qunsetenv("FAKE_RCLONE_RC_PORT");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
     qunsetenv("RB_LOCAL_ROOTS");
   }
 

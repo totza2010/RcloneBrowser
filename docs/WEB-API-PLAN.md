@@ -440,7 +440,7 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - ~~Mount บนเว็บมีตัวเลือกน้อยกว่า~~ — **ทำแล้ว 2026-10-19**: ชื่อไดรฟ์ (`--volname`) · ตัวเลือก rclone เพิ่ม (ตรวจแบบ extra ของ task) ·
   **เก็บเป็น task** (`saveAs`, `RemoteOps::MountTask`, รันผ่าน `StartTask`) · **mount ทุกครั้งที่โปรแกรมเปิด** (`autoStart`) ·
   ⚠ ย้าย autostart mount จากหน้าต่างไป **`AppCore::startAutoMounts`** — เดิม daemon (Docker โหมด web) ไม่เคย mount ให้ · ไม่ซ้ำกับที่รันอยู่ ·
-  `MainWindow::autoStartMounts` ถูกลบ · ยังไม่มีบนเว็บ: สคริปต์หลัง mount (รันโปรแกรมบนเครื่อง — ต้องคิดเรื่องสิทธิ์ก่อน) · ~~Copy/Move บนเว็บมีตัวเลือกน้อยกว่า~~ — **ทำแล้ว 2026-10-19**: `RemoteOps::CopyOptions` (ตัวเลือกของกล่อง copy ของหน้าต่าง:
+  `MainWindow::autoStartMounts` ถูกลบ · ~~ยังไม่มีบนเว็บ: สคริปต์หลัง mount~~ — **ทำแล้ว 2026-10-20**: **core เป็นคนรัน หน้าเว็บไม่ได้สั่งรันเอง** · `MountOptions.script` → `RunningJob::setMountScript` (ตัวเดียวกับที่หน้าต่างใช้ · อาร์กิวเมนต์ remote/path/user/pass/mountpoint เหมือนเดิม) · ตั้งได้เฉพาะ key `admin` (อื่น → 403) และไฟล์ต้องอยู่ในโฟลเดอร์ที่อนุญาต (`LocalFiles::Allowed` · นอกนั้น → 403 `outside_roots`) · ผลของสคริปต์อยู่ใน `/jobs` และเหตุการณ์ (`"script": {path, started, running, exitCode, error, output[]}` · output ผ่าน `RedactArgs` เก็บ 200 บรรทัดล่าสุด) · หน้าเว็บ: ช่อง Script + ปุ่มเลือกไฟล์ในฟอร์ม Mount · รายละเอียดงานแสดงสถานะ exit code และ output · เก็บเป็น task ได้ (`mountScript`) · test `aMountsScriptIsRunByTheCoreAndShown` ผ่านทั้ง Windows และ Linux · ~~Copy/Move บนเว็บมีตัวเลือกน้อยกว่า~~ — **ทำแล้ว 2026-10-19**: `RemoteOps::CopyOptions` (ตัวเลือกของกล่อง copy ของหน้าต่าง:
   เก็บโฟลเดอร์ว่าง · ลบโฟลเดอร์ที่ move ทำให้ว่าง · `--no-traverse` · filter ทีละบรรทัด · ตัวเลือกเพิ่ม) · API copy/move รับ `emptyFolders` `removeEmptyFolders`
   `noTraverse` `filters` `extra` (ตรวจแบบ extra ของ task) · หน้าเว็บ: ตัวเลือกปลายทางของ Copy/Move มี **More** · ~~Check กับโฟลเดอร์ในเครื่อง · Size หลายรายการ~~ — **ทำแล้ว 2026-10-19**: Check บนหน้าเว็บเลือก
   **This machine** ในตัวเลือกปลายทางได้ (API `toLocal` · จำกัดตามโฟลเดอร์ที่ API ใช้ได้ · `RemoteOps::Check` ที่ไม่มีรีโหมด = path ในเครื่องตรงๆ) ·
@@ -543,9 +543,20 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 - **เมนูคลิกขวา** บนแถว: แถวที่ไม่ได้เลือกถูกเลือกเดี่ยว (แบบ file manager) · รายการคือปุ่มบนแถบเครื่องมือเอง (`$(id).click()`)
   จึงทำอย่างเดียวกันและปิด/เปิดตามกันเสมอ · View/Play (ไฟล์) · Serve/Mount (โฟลเดอร์) · Download · Copy/Move · Rename · Link · Size · Delete ·
   อยู่ในจอเสมอ · ปิดด้วย Escape คลิกที่อื่น หรือเลื่อนหน้า
-- ⚠ หน้าต่าง: ต้องตรวจว่าลบ/คัดลอกหลายรายการได้เท่ากันหรือไม่ (`RemoteOps::Item` list มีอยู่สำหรับ delete) · ดาวน์โหลดหลายรายการบนหน้าเว็บยังไม่ได้
+- ⚠ หน้าต่าง: ต้องตรวจว่าลบ/คัดลอกหลายรายการได้เท่ากันหรือไม่ (`RemoteOps::Item` list มีอยู่สำหรับ delete) ·
+  ~~ดาวน์โหลดหลายรายการบนหน้าเว็บยังไม่ได้~~ — **ทำแล้ว 2026-10-20**: เลือกหลายรายการ → Download ถามโฟลเดอร์ในเครื่องครั้งเดียว
+  (ตัวเลือกโฟลเดอร์ของเครื่อง · มี Dry run) แล้วเริ่มดาวน์โหลดรายการละงานผ่าน `/remotes/{name}/download` · หยุดและบอกเมื่ออันไหนล้ม ·
+  รายการเดียวยังเปิดฟอร์ม transfer เต็มเหมือนเดิม
 
 ## กล่องถามของหน้าเว็บ (2026-10-19)
+
+> **บั๊กที่ผู้ใช้เจอ 2026-10-20**: กด Clear the queue แล้วขึ้น "no such endpoint" — Network บอก
+> `GET /remotes//[object Object]?path=undefined` · สาเหตุ: `function ask(question, title, path, draw)` ของคำถามถึง rclone
+> (Size/Tree/About, commit 4160bf9) **ชื่อซ้ำ** กับ `function ask(options)` กล่องถามของหน้าเว็บ — ใน JS ตัวหลังทับตัวแรก
+> ทั้งไฟล์ · ผล: **ทุก confirm/prompt บนหน้าเว็บพัง** (ลบ · หยุด · ล้างคิว · ลบ task/ตารางเวลา · เปลี่ยนชื่อ · สร้างโฟลเดอร์ ·
+> ตั้งความเร็ว · เฝ้าโฟลเดอร์ ...) ขึ้นกล่อง error แล้วไม่ทำอะไร · Remove ทีละตัวในคิวไม่ถามจึงใช้ได้ ·
+> **แก้**: เปลี่ยนชื่อเป็น `askRclone` · test `theWebUiIsServedWithoutATokenAndSaysNothing` ตรวจว่า app.js ไม่มี function
+> ระดับบนสุดชื่อซ้ำ (ของเดิมเจอ `ask`) · บทเรียน: test ฝั่ง API ผ่านหมดแต่ไม่มีอะไรรันหน้าเว็บจริง — ต้องมีการตรวจ JS ใน CI
 
 - `ask({title, text, value, yes, danger, readOnly, noCancel})` → Promise · `askText()` แทน `prompt()` · `askYes()` แทน `confirm()`
 - กล่อง `#askbox` อยู่**เหนือกล่องอื่นที่เปิดอยู่** (เช่นถามยืนยัน dedupe จากในกล่องผล) · Enter = ตกลง · Escape / คลิกนอกกล่อง = ยกเลิก ·

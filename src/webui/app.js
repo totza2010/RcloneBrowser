@@ -1175,6 +1175,17 @@ $("result-body").addEventListener("click", (event) => {
 
 // ---- a job in full ----------------------------------------------------------------
 
+// What a mount's script did: the core runs it, the page only shows it.
+function scriptReport(script) {
+  const how = !script.started ? "waiting for the mount to come up"
+    : script.running ? "running"
+    : script.error ? "could not run: " + script.error
+    : "ended, exit code " + script.exitCode;
+  return "<h3>The script</h3>" +
+    figures([["File", script.path], ["Now", how]]) +
+    '<pre class="command">' + esc((script.output || []).join("\n") || "—") + "</pre>";
+}
+
 async function openJob(requestId, fromAddress) {
   const job = state.jobs.find((j) => j.requestId === requestId);
   if (!job) {
@@ -1199,6 +1210,7 @@ async function openJob(requestId, fromAddress) {
       ["Speed", job.running ? bytes(s.speed || 0) + "/s" + (job.bandwidth ? " (limited to " + job.bandwidth + ")" : "") : "—"],
     ]) +
     (job.running ? fileBars(s.transferring || []) : "") +
+    (job.script ? scriptReport(job.script) : "") +
     "<h3>The command</h3>" +
     '<pre class="command">' + esc(job.command || "") + "</pre>" +
     "<h3>The end of what rclone printed</h3>" +
@@ -1436,8 +1448,8 @@ function drawChosen() {
   $("remote-rename").disabled = !one;
   $("remote-link").disabled = !one || !can("publicLink");
   $("remote-view").disabled = !one || one.isDir;
-  $("remote-download").disabled = !one;
-  $("remote-download").title = all.length > 1 ? "one at a time: choose one, or download the folder they are in" : "";
+  $("remote-download").disabled = !all.length;
+  $("remote-download").title = all.length > 1 ? "all " + all.length + " into one folder of the machine the program runs on" : "";
   $("remote-delete").disabled = !all.length;
   $("remote-copy").disabled = !all.length;
   $("remote-move").disabled = !all.length;
@@ -1914,7 +1926,10 @@ function subject() {
 // The question being waited for, so Cancel and closing the box can drop it.
 let asking = null;
 
-async function ask(question, title, path, draw) {
+// Not "ask": that is the page's own question box, and a second function
+// of the same name replaces it everywhere -- every confirm on the page
+// then asked rclone about "[object Object]" instead.
+async function askRclone(question, title, path, draw) {
   if (asking) asking.abort();
   const mine = new AbortController();
   asking = mine;
@@ -1947,7 +1962,7 @@ $("remote-size").addEventListener("click", () => {
   const several = pickedEntries();
   if (several.length > 1) return sizeOfMany(several);
   const path = subject();
-  ask("size", "Size of " + browsing.remote + ":" + path, path, (d) =>
+  askRclone("size", "Size of " + browsing.remote + ":" + path, path, (d) =>
     figures([
       ["Files", String(d.count)],
       ["Total", bytes(d.bytes) + "  (" + d.bytes + " bytes)"],
@@ -1989,13 +2004,13 @@ async function sizeOfMany(all) {
 
 $("remote-tree").addEventListener("click", () => {
   const path = subject();
-  ask("tree", "Folders under " + browsing.remote + ":" + path, path, (d) =>
+  askRclone("tree", "Folders under " + browsing.remote + ":" + path, path, (d) =>
     "<pre>" + esc(d.output) + "</pre>" +
     (d.truncated ? '<p class="muted">There is more than is shown.</p>' : ""));
 });
 
 $("remote-about").addEventListener("click", () => {
-  ask("about", "About " + browsing.remote + ":", null, (d) => {
+  askRclone("about", "About " + browsing.remote + ":", null, (d) => {
     const rows = [];
     // Only what the backend reported. Not every one knows all of these, and
     // a missing figure is not a zero.
@@ -3449,7 +3464,33 @@ $("remote-upload").addEventListener("click", () => {
   });
 });
 
+// Several chosen: one folder of the machine the program runs on is asked
+// for once, and each is sent there as a download of its own -- what the
+// window's Download does with a selection. One alone still opens the whole
+// transfer form.
+async function downloadMany(all) {
+  const where = await pickLocal("Download " + all.length + " items to…", "Download here", false);
+  if (!where) return;
+  let started = 0;
+  for (const one of all) {
+    const answer = await api("POST", remoteUrl("download"), {
+      path: one.path, isDir: one.isDir, to: where.path, dryRun: where.dryRun,
+    }).catch(() => null);
+    if (!answer || answer.status !== 202) {
+      toast("stopped at " + one.name + ": " + (answer ? reasonFrom(answer) : "could not reach the daemon") +
+            (started ? " — " + started + " started before it" : ""));
+      return refresh();
+    }
+    started += 1;
+  }
+  toast(started + " download" + (started === 1 ? "" : "s") + (where.dryRun ? " (dry run)" : "") +
+        " started — see Jobs");
+  refresh();
+}
+
 $("remote-download").addEventListener("click", () => {
+  const several = pickedEntries();
+  if (several.length > 1) return downloadMany(several);
   const entry = browsing.entries.find((e) => e.path === browsing.chosen);
   if (!entry) return;
   openTransfer("download",
@@ -3486,9 +3527,17 @@ $("remote-mount").addEventListener("click", () => {
       '<p><label>More rclone options, as a task takes them<input id="mount-extra" type="text" placeholder="--vfs-cache-max-age 2h"></label></p>' +
       '<p><label>Keep it as a task named<input id="mount-save" type="text" placeholder="empty: mount it this once"></label></p>' +
       '<p><label class="check"><input type="checkbox" id="mount-auto"> and mount it every time the program starts</label></p>' +
+      '<p><label>A script to run once it is mounted (a file of the machine the program runs on; the administrator only)' +
+        '<span class="input-row"><input id="mount-script" type="text" placeholder="/media/scripts/after-mount.sh">' +
+        '<button type="button" class="ghost small" id="mount-script-pick">Choose…</button></span></label></p>' +
     "</details>" +
     '<p><button id="mount-go" class="small">Mount</button> ' +
     '<span id="mount-state" class="error"></span></p>');
+
+  $("mount-script-pick").addEventListener("click", async () => {
+    const chosen = await pickLocal("The script to run once it is mounted", "Use this file", true);
+    if (chosen && chosen.isFile) $("mount-script").value = chosen.path;
+  });
 
   $("mount-go").addEventListener("click", async () => {
     let answer;
@@ -3502,6 +3551,7 @@ $("remote-mount").addEventListener("click", () => {
         extra: $("mount-extra").value,
         saveAs: $("mount-save").value,
         autoStart: $("mount-auto").checked,
+        script: $("mount-script").value,
       });
     } catch (e) {
       $("mount-state").textContent = "could not reach the daemon";

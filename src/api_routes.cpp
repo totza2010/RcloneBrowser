@@ -379,7 +379,7 @@ QList<Route> build() {
       r("POST", "/api/v1/remotes/{name}/mount", kRemotes,
         "Mount a folder on the machine the program runs on",
         "Stopping the job unmounts it.", "",
-        R"({"path":"films","mountPoint":"X:","readOnly":true,"cache":"writes","volumeName":"Films","extra":"--vfs-cache-max-age 2h","saveAs":"films drive","autoStart":true})",
+        R"({"path":"films","mountPoint":"X:","readOnly":true,"cache":"writes","volumeName":"Films","extra":"--vfs-cache-max-age 2h","saveAs":"films drive","autoStart":true,"script":"/media/scripts/after-mount.sh"})",
         "202: started; 400: refused"),
       r("POST", "/api/v1/remotes/{name}/upload", kRemotes,
         "Upload from the machine the program runs on",
