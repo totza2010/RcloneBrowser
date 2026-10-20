@@ -20,3 +20,7 @@ docker/.env
 # scripts/ci_linux_local.sh
 ci-linux-out/
 verify-report.md
+ui-report.md
+ui-failures/
+# tests/ui: Playwright, a test dependency only
+tests/ui/.venv/
