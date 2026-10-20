@@ -45,6 +45,7 @@ WebhooksDialog::WebhooksDialog(QWidget *parent) : QDialog(parent) {
   intro->setWordWrap(true);
 
   mTable = new QTableWidget(0, 4, this);
+  mTable->setObjectName(QStringLiteral("hooks"));
   mTable->setHorizontalHeaderLabels(
       {QStringLiteral("Where"), QStringLiteral("As"), QStringLiteral("When"),
        QStringLiteral("Last")});
@@ -182,8 +183,10 @@ void WebhooksDialog::edit(const QString &id) {
   form.setWindowTitle(exists ? QStringLiteral("Change webhook")
                                           : QStringLiteral("Add webhook"));
   auto *url = new QLineEdit(hook.url, &form);
+  url->setObjectName(QStringLiteral("hookUrl"));
   url->setPlaceholderText(QStringLiteral("https://ntfy.sh/my-topic"));
   auto *name = new QLineEdit(hook.name, &form);
+  name->setObjectName(QStringLiteral("hookName"));
   name->setPlaceholderText(QStringLiteral("optional"));
   auto *format = new QComboBox(&form);
   for (const QString &one : Webhooks::Formats()) {

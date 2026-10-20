@@ -241,7 +241,6 @@ set(OTHER
 
 set(SOURCE
   pch.cpp
-  main.cpp
   headless.cpp
   main_window.cpp
   remote_widget.cpp
@@ -276,9 +275,7 @@ set(SOURCE
   api_keys_dialog.cpp
 )
 
-if(WIN32)
-  set(OTHER ${OTHER} resources.rc)
-elseif(APPLE)
+if(APPLE)
   set(OTHER ${OTHER} osx_helper.h mac_os_notifications.h mac_os_power_saving.h)
   set(SOURCE ${SOURCE} osx_helper.mm mac_os_notifications.mm mac_os_power_saving.mm)
 endif()
@@ -291,46 +288,59 @@ if(Qt6Multimedia_FOUND)
   add_definitions(-DRB_HAVE_MULTIMEDIA)
 endif()
 
-# ---- Output target ----
-if(WIN32)
-  add_executable(RcloneBrowser WIN32 ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC})
-  target_link_libraries(RcloneBrowser PRIVATE
-      rbcore
-      Qt6::Widgets
-      Qt6::Network
-      ${RB_MULTIMEDIA_LIB}
-  )
-  target_precompile_headers(RcloneBrowser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
-elseif(APPLE)
-  set_source_files_properties(icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-  add_executable(rclone-browser MACOSX_BUNDLE ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC} icon.icns)
-  target_link_libraries(rclone-browser PRIVATE
-      rbcore
-      Qt6::Widgets
-      Qt6::Network
-      ${RB_MULTIMEDIA_LIB}
+# ---- The window, as a library ----
+# Everything of the window but main(): the program links it, and so do the
+# tests that click through the window (tests/test_window_*.cpp) -- the same
+# code, not a copy of it. The pictures (resources.qrc) are compiled into each
+# program that links it: in a static library nothing would pull them in.
+add_library(rbgui STATIC ${SOURCE} ${OTHER} ${UI} ${MOC})
+# The headers uic writes from the .ui files are included by the window's own
+# headers, so whatever links rbgui needs to find them too: include_<config>
+# with a generator that builds several configurations, include without.
+get_property(RB_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(RB_MULTI_CONFIG)
+  set(RB_GUI_UI_HEADERS "${CMAKE_CURRENT_BINARY_DIR}/rbgui_autogen/include_$<CONFIG>")
+else()
+  set(RB_GUI_UI_HEADERS "${CMAKE_CURRENT_BINARY_DIR}/rbgui_autogen/include")
+endif()
+target_include_directories(rbgui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${RB_GUI_UI_HEADERS}")
+target_link_libraries(rbgui PUBLIC
+    rbcore
+    Qt6::Widgets
+    Qt6::Network
+    ${RB_MULTIMEDIA_LIB}
+)
+if(APPLE)
+  target_link_libraries(rbgui PUBLIC
       ${COCOA_LIB}
       ${IOKKIT_LIB}
       ${USER_NOTIFICATIONS_LIB}
       ${UNIFORM_TYPE_IDENTIFIERS_LIB}
   )
+endif()
+target_precompile_headers(rbgui PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
+
+# ---- Output target ----
+if(WIN32)
+  add_executable(RcloneBrowser WIN32 main.cpp resources.rc ${QRC})
+  target_link_libraries(RcloneBrowser PRIVATE rbgui)
+  target_precompile_headers(RcloneBrowser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
+elseif(APPLE)
+  set_source_files_properties(icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+  add_executable(rclone-browser MACOSX_BUNDLE main.cpp ${QRC} icon.icns)
+  target_link_libraries(rclone-browser PRIVATE rbgui)
+  target_precompile_headers(rclone-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
   set_target_properties(rclone-browser PROPERTIES
       MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
   )
-  target_precompile_headers(rclone-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
 else()
-  add_executable(rclone-browser ${SOURCE} ${OTHER} ${UI} ${MOC} ${QRC})
-  target_link_libraries(rclone-browser PRIVATE
-      rbcore
-      Qt6::Widgets
-      Qt6::Network
-      ${RB_MULTIMEDIA_LIB}
-  )
+  add_executable(rclone-browser main.cpp ${QRC})
+  target_link_libraries(rclone-browser PRIVATE rbgui)
+  target_precompile_headers(rclone-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
 
   install(TARGETS rclone-browser RUNTIME DESTINATION bin)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.svg" DESTINATION "share/icons/hicolor/scalable/apps")
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.desktop" DESTINATION "share/applications")
-  target_precompile_headers(rclone-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
 endif()
 
 # ---- The window's languages ----
@@ -345,8 +355,10 @@ else()
 endif()
 file(GLOB RB_TS_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/translations/rclonebrowser_*.ts")
 if(Qt6LinguistTools_FOUND AND RB_TS_FILES)
+  # The words are in rbgui now; lupdate is told where to read them.
   qt_add_translations(${RB_WINDOW_TARGET}
       TS_FILES ${RB_TS_FILES}
+      SOURCES ${SOURCE} ${UI} main.cpp
       RESOURCE_PREFIX /i18n
       LUPDATE_OPTIONS -no-obsolete)
 endif()

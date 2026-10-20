@@ -26,6 +26,7 @@ BackupDialog::BackupDialog(QWidget *parent) : QDialog(parent) {
   intro->setWordWrap(true);
 
   mSource = new QLineEdit(this);
+  mSource->setObjectName(QStringLiteral("backupSource"));
   mSource->setPlaceholderText(QStringLiteral("D:/Documents  or  gdrive:Documents"));
   auto *browse = new QPushButton(QStringLiteral("Folder…"), this);
   QObject::connect(browse, &QPushButton::clicked, this, [this]() {
@@ -40,6 +41,7 @@ BackupDialog::BackupDialog(QWidget *parent) : QDialog(parent) {
   sourceRow->addWidget(browse);
 
   mDest = new QLineEdit(this);
+  mDest->setObjectName(QStringLiteral("backupDest"));
   mDest->setPlaceholderText(QStringLiteral("gdrive:Backups/documents"));
 
   mMirror = new QRadioButton(
@@ -66,12 +68,14 @@ BackupDialog::BackupDialog(QWidget *parent) : QDialog(parent) {
     daysRow->addWidget(box);
   }
   mTime = new QTimeEdit(QTime(2, 0), this);
+  mTime->setObjectName(QStringLiteral("backupTime"));
   mTime->setDisplayFormat(QStringLiteral("HH:mm"));
   daysRow->addWidget(new QLabel(QStringLiteral("at"), this));
   daysRow->addWidget(mTime);
   daysRow->addStretch();
 
   mName = new QLineEdit(this);
+  mName->setObjectName(QStringLiteral("backupName"));
   mName->setPlaceholderText(QStringLiteral("optional"));
 
   auto *form = new QFormLayout();

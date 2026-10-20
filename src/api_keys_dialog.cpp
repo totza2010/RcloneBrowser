@@ -29,6 +29,7 @@ ApiKeysDialog::ApiKeysDialog(QWidget *parent) : QDialog(parent) {
   intro->setWordWrap(true);
 
   mTable = new QTableWidget(0, 4, this);
+  mTable->setObjectName(QStringLiteral("keys"));
   mTable->setHorizontalHeaderLabels({QStringLiteral("Name"),
                                      QStringLiteral("Level"),
                                      QStringLiteral("Made"),
@@ -44,10 +45,12 @@ ApiKeysDialog::ApiKeysDialog(QWidget *parent) : QDialog(parent) {
                    &ApiKeysDialog::takeBack);
 
   mName = new QLineEdit(this);
+  mName->setObjectName(QStringLiteral("keyName"));
   mName->setPlaceholderText(
       QStringLiteral("what it is for: home assistant, sonarr…"));
   mName->setMaxLength(40);
   mScope = new QComboBox(this);
+  mScope->setObjectName(QStringLiteral("keyScope"));
   for (const char *scope : {"read", "control", "write", "admin"}) {
     mScope->addItem(QString::fromLatin1(scope), QString::fromLatin1(scope));
   }
@@ -67,6 +70,7 @@ ApiKeysDialog::ApiKeysDialog(QWidget *parent) : QDialog(parent) {
   mMadeNote = new QLabel(this);
   mMadeNote->setWordWrap(true);
   mMade = new QLineEdit(this);
+  mMade->setObjectName(QStringLiteral("keyMade"));
   mMade->setReadOnly(true);
   auto *copy = new QPushButton(QStringLiteral("Copy"), this);
   QObject::connect(copy, &QPushButton::clicked, this, [this]() {

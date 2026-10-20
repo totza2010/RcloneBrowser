@@ -33,6 +33,19 @@
 int main(int argc, char *argv[]) {
   const char *command = argc > 1 ? argv[1] : "";
 
+  // FAKE_RCLONE_LOG names a file each run adds a line to: its arguments,
+  // separated by tabs. For a test that clicks a button and needs to know
+  // which command it sent -- whatever the command.
+  if (const char *log = std::getenv("FAKE_RCLONE_LOG")) {
+    if (FILE *out = std::fopen(log, "a")) {
+      for (int i = 1; i < argc; ++i) {
+        std::fprintf(out, "%s%s", i > 1 ? "\t" : "", argv[i]);
+      }
+      std::fprintf(out, "\n");
+      std::fclose(out);
+    }
+  }
+
   // config providers  one backend, "fake", with a sensitive option, a
   //                   password, an ordinary one and an advanced one
   // config dump       the one remote, secrets and all, as rclone gives it

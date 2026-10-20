@@ -52,6 +52,21 @@ rb_add_test(test_extra_flags)
 rb_add_test(test_schedule_json)
 rb_add_test(test_rclone_config)
 
+# The window, clicked through: the one kind of test that links Qt6::Widgets,
+# and so the one that needs rbgui -- the window's own code, which the
+# program links too. Absent from a build without the window.
+if(TARGET rbgui)
+  set(CMAKE_AUTORCC ON)
+  add_executable(test_window test_window.cpp ../src/resources.qrc)
+  target_link_libraries(test_window PRIVATE rbgui Qt6::Test)
+  target_precompile_headers(test_window PRIVATE "${CMAKE_SOURCE_DIR}/src/pch.h")
+  target_compile_definitions(test_window PRIVATE
+      RB_FAKE_RCLONE="$<TARGET_FILE:fake_rclone>")
+  add_dependencies(test_window fake_rclone)
+  add_test(NAME test_window COMMAND test_window)
+  set_tests_properties(test_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 # Not registered as a test: run by hand to regenerate the golden task file
 # after JobOptions changes shape. See the comment at the top of the source.
 add_executable(make_task_fixture EXCLUDE_FROM_ALL make_task_fixture.cpp)
