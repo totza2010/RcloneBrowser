@@ -19,3 +19,4 @@ debian/rclone-browser*
 docker/.env
 # scripts/ci_linux_local.sh
 ci-linux-out/
+verify-report.md
