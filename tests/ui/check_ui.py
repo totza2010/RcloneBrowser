@@ -53,16 +53,23 @@ class Watch:
         # Asked and not yet answered: when a step waits in vain, these are
         # usually why.
         self.pending = {}
-        page.on("request", lambda r: self.pending.__setitem__(id(r), r))
+        self.sent_at = {}
+        page.on("request", lambda r: (self.pending.__setitem__(id(r), r),
+                                      self.sent_at.__setitem__(id(r), time.time())))
         page.on("requestfinished", lambda r: self.pending.pop(id(r), None))
         page.on("requestfailed", lambda r: self.pending.pop(id(r), None))
 
     def waiting(self):
         found = []
-        for r in self.pending.values():
+        streams = 0
+        for key, r in self.pending.items():
             path = urllib.parse.urlparse(r.url).path
-            if "/api/v1/" in path and not path.endswith("/events"):
-                found.append("%s %s" % (r.method, path))
+            if path.endswith("/events"):
+                streams += 1
+            else:
+                found.append("%s %s (%.0fs)" % (r.method, path, time.time() - self.sent_at.get(key, time.time())))
+        if found and streams != 1:
+            found.append("%d event streams open" % streams)
         return found
 
     def _console(self, message):
@@ -99,6 +106,10 @@ def on_screen_errors(page, toast_ok=False):
     found = []
     if shown(page, "#toast") and not toast_ok:
         found.append("error bar: " + page.locator("#toast").inner_text().strip())
+    if shown(page, "#taskbox"):
+        said = page.locator("#task-error").inner_text().strip()
+        if said:
+            found.append("transfer form: " + said)
     if shown(page, "#resultbox"):
         for text in page.locator("#result-body .error").all_inner_texts():
             if text.strip():
@@ -135,7 +146,9 @@ def step(page, watch, name, action, allowed=(), toast_ok=False):
         problems.append("picture: " + shot)
     say("fail" if problems else "pass", name, "\n".join(problems) if problems else detail)
     # Whatever is left open is closed, so the next step starts clean.
-    for close in ("#ask-no", "#result-close"):
+    # The transfer form is left open for the next step to go on with,
+    # unless this one went wrong.
+    for close in ("#ask-no", "#log-close", "#result-close") + (("#pick-cancel", "#task-cancel") if problems else ()):
         if shown(page, close):
             page.click(close)
     page.evaluate("document.getElementById('toast').classList.add('hidden')")
@@ -441,6 +454,914 @@ def check_backup_and_schedule(page, watch, api, ctx):
     step(page, watch, "Schedules: delete one, asked first", drop_schedule)
 
 
+def open_upload(page, ctx):
+    page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(ctx["remote"]),
+                                                  urllib.parse.quote(ctx["scratch"])))
+    entry_row(page, ctx["scratch"] + "/a.txt").wait_for(timeout=WAIT)
+    page.click("#remote-upload")
+    page.wait_for_selector("#taskbox:not(.hidden)", timeout=5000)
+
+
+def pane(page, name):
+    page.click('#task-tabs button[data-pane="%s"]' % name)
+    page.wait_for_selector('section[data-pane="%s"].on, section[data-pane="%s"]:visible' % (name, name),
+                           timeout=5000)
+
+
+def command_now(page):
+    pane(page, "command")
+    page.wait_for_function("!['', '…'].includes(document.getElementById('task-command').innerText.trim())",
+                           timeout=WAIT)
+    return page.locator("#task-command").inner_text()
+
+
+def field(page, name):
+    return page.locator('#taskbox [data-field="%s"]' % name)
+
+
+def check_transfer_form(page, watch, api, ctx):
+    remote, scratch = ctx["remote"], ctx["scratch"]
+    src = ctx.get("local_src")
+
+    def defaults():
+        open_upload(page, ctx)
+        kind = page.eval_on_selector("#task-dest-remote", "e => e.tagName")
+        assert kind == "SELECT", "To's remote is a %s, not a list to choose from" % kind
+        assert page.input_value("#task-dest-remote") == remote, page.input_value("#task-dest-remote")
+        assert page.input_value("#task-dest") == scratch, "To is %r" % page.input_value("#task-dest")
+        tabs = page.locator("#task-tabs button").count()
+        assert tabs == 7, "%d tabs" % tabs
+        got = (field(page, "transfers").input_value(), field(page, "checkers").input_value())
+        assert got == ("4", "8"), "transfers/checkers are %s/%s" % got
+        return "To = %s:%s · 7 tabs · transfers 4 · checkers 8" % (remote, scratch)
+    step(page, watch, "transfer form: Upload opens with the folder as To (V-38 #1, V-39 #1)", defaults)
+
+    def from_note():
+        page.fill("#task-source", "/no/such/place-for-ui-check")
+        page.wait_for_selector("#task-source-note.bad", timeout=5000)
+        bad = page.locator("#task-source-note").inner_text()
+        if not src:
+            return "not there: %r (no folder of this machine to try a real one)" % bad
+        page.fill("#task-source", src)
+        page.wait_for_function("document.getElementById('task-source-note').innerText === 'a folder'",
+                               timeout=5000)
+        return "not there: %r · real: 'a folder'" % bad
+    step(page, watch, "transfer form: From says whether it is there (V-39 #2)", from_note,
+         allowed={("GET", "/local/stat")})
+
+    def sync_options():
+        pane(page, "settings")
+        page.check('input[name="task-operation"][value="sync"]')
+        assert page.is_enabled("#task-timing") and page.is_enabled("#task-delete-excluded"), \
+            "the delete choices are greyed out for sync"
+        page.check('input[name="task-operation"][value="copy"]')
+        assert not page.is_enabled("#task-timing") and not page.is_enabled("#task-delete-excluded"), \
+            "the delete choices can be used for copy"
+        return "sync: delete choices on · copy: off"
+    step(page, watch, "transfer form: Sync's own choices (V-38 #4)", sync_options)
+
+    def units():
+        pane(page, "transfer")
+        page.fill('[data-unit-number="bandwidth"]', "10")
+        page.select_option('[data-unit-choice="bandwidth"]', "M")
+        with_it = command_now(page)
+        assert "--bwlimit 10M" in with_it, with_it
+        pane(page, "transfer")
+        page.fill('[data-unit-number="bandwidth"]', "")
+        page.wait_for_timeout(500)
+        without = command_now(page)
+        assert "--bwlimit" not in without, without
+        return "10 MiB/s → --bwlimit 10M · emptied → gone"
+    step(page, watch, "transfer form: a number and its unit (V-39 #14, #15)", units)
+
+    def patterns():
+        pane(page, "include")
+        new = page.locator('[data-pattern-new="included"]')
+        new.fill("*.mkv")
+        new.press("Enter")
+        new.fill("*.mkv")
+        new.press("Enter")
+        note = page.locator('[data-pattern-note="included"]').inner_text()
+        assert "already" in note, "a second *.mkv said %r" % note
+        new.fill("*.srt")
+        page.click('[data-pattern-add="included"]')
+        rows = page.locator('[data-pattern-list="included"] .flag-row')
+        assert rows.count() == 2, "%d rows" % rows.count()
+        rows.nth(1).locator("[data-pattern-drop]").click()
+        assert rows.count() == 1, "Remove left %d" % rows.count()
+        pane(page, "exclude")
+        page.fill('[data-pattern-new="excluded"]', "*.nfo")
+        page.click('[data-pattern-add="excluded"]')
+        line = command_now(page)
+        assert "--include" in line and "*.mkv" in line, line
+        assert "--exclude" in line and "*.nfo" in line, line
+        assert "*.srt" not in line, line
+        return "Enter adds · the same twice: %r · Remove · both in the command" % note
+    step(page, watch, "transfer form: include and exclude patterns (V-39 #17, #19)", patterns)
+
+    def filters():
+        pane(page, "filter")
+        new = page.locator('[data-pattern-new="filtered"]')
+        page.select_option('[data-pattern-sign="filtered"]', "-")
+        new.fill("*.tmp")
+        page.click('[data-pattern-add="filtered"]')
+        page.select_option('[data-pattern-sign="filtered"]', "+")
+        new.fill("*.mkv")
+        page.click('[data-pattern-add="filtered"]')
+        rows = page.locator('[data-pattern-list="filtered"] .flag-row')
+        assert rows.count() == 2, "%d rows" % rows.count()
+        assert rows.nth(0).locator(".order").inner_text() == "1", "no order numbers"
+        rows.nth(1).locator("[data-pattern-up]").click()
+        first = rows.nth(0).locator("code").inner_text()
+        assert first == "+ *.mkv", "the first rule is %r after ↑" % first
+        line = command_now(page)
+        assert "--filter" in line, line
+        return "numbered · ↑ moved '+ *.mkv' first · --filter in the command"
+    step(page, watch, "transfer form: filter rules in order (V-39 #18)", filters)
+
+    def extra():
+        pane(page, "extra")
+        page.fill("#flag-name", "fast")
+        page.locator('#flag-menu button[data-flag="--fast-list"]').wait_for(timeout=WAIT)
+        offered = page.locator("#flag-menu button[data-flag]").count()
+        page.click('#flag-menu button[data-flag="--fast-list"]')
+        assert not page.is_enabled("#flag-value"), "a value can be typed for --fast-list"
+        page.click("#flag-add")
+        page.locator('#flag-list code:text-is("--fast-list")').wait_for(timeout=5000)
+        page.fill("#flag-name", "--max-transfer")
+        page.fill("#flag-value", "")
+        page.click("#flag-add")
+        page.wait_for_timeout(300)
+        assert page.locator('#flag-list code:text-is("--max-transfer")').count() == 0, \
+            "--max-transfer was added with no value"
+        said = page.locator("#flag-help").inner_text().strip()
+        assert "needs a value" in said, "about the missing value it said %r" % said
+        return "%d offered for 'fast' · --fast-list added, no value · --max-transfer refused: %r" % (offered, said)
+    step(page, watch, "transfer form: extra options (V-39 #4, #5, #6)", extra)
+    page.click("#task-cancel")
+
+    if not src:
+        say("skip", "transfer form: saving and running", "no folder of this machine to send from")
+        return
+
+    def tasks_now():
+        return {t["id"]: t for t in (api.get("/tasks")[1] or [])}
+
+    def save_unnamed():
+        before = tasks_now()
+        open_upload(page, ctx)
+        page.fill("#task-source", src)
+        page.click('#taskbox [data-act="save"]')
+        page.wait_for_selector("#taskbox.hidden", state="attached", timeout=10000)
+        made = [t for i, t in tasks_now().items() if i not in before]
+        assert len(made) == 1, "%d new tasks" % len(made)
+        ctx.setdefault("form_tasks", []).append(made[0]["id"])
+        name = made[0]["name"]
+        assert name.startswith("_tmp_"), "named %r" % name
+        page.click('#tabs button[data-tab="tasks"]')
+        page.locator('#tab-tasks [data-edit="%s"]' % made[0]["id"]).wait_for(timeout=10000)
+        ctx["unnamed"] = made[0]["id"]
+        return "named %s · listed in Tasks" % name
+    step(page, watch, "transfer form: Save task with no name (V-38 #9)", save_unnamed, toast_ok=True)
+
+    if ctx.get("unnamed"):
+        def edit():
+            before = len(tasks_now())
+            page.click('#tab-tasks [data-edit="%s"]' % ctx["unnamed"])
+            page.wait_for_selector("#taskbox:not(.hidden)", timeout=5000)
+            assert page.input_value("#task-source").rstrip("/\\") == src.rstrip("/\\"), \
+                "From is %r" % page.input_value("#task-source")
+            pane(page, "transfer")
+            field(page, "transfers").fill("3")
+            page.click('#taskbox [data-act="save"]')
+            page.wait_for_selector("#taskbox.hidden", state="attached", timeout=10000)
+            now = tasks_now()
+            assert len(now) == before, "%d tasks, %d before" % (len(now), before)
+            assert str(now[ctx["unnamed"]].get("transfers")) == "3", now[ctx["unnamed"]].get("transfers")
+            return "opened with its values · transfers 4 → 3 · no new task"
+        step(page, watch, "Tasks: Edit a task (V-38 #11)", edit, toast_ok=True)
+
+    def new_from_tasks():
+        page.click('#tabs button[data-tab="tasks"]')
+        page.click('#tab-tasks [data-new-task="upload"]')
+        page.wait_for_selector("#taskbox:not(.hidden)", timeout=5000)
+        empty = (page.input_value("#task-source"), page.input_value("#task-name"))
+        assert empty == ("", ""), "not empty: %s" % (empty,)
+        assert page.is_enabled("#task-source-browse") and page.is_enabled("#task-dest-browse"), "Browse greyed"
+        page.click("#task-cancel")
+        return "empty · both Browse buttons work"
+    step(page, watch, "Tasks: New upload task opens empty (V-38 #14)", new_from_tasks)
+
+    def run_one(act, name, dest, queue=False):
+        open_upload(page, ctx)
+        page.fill("#task-source", src)
+        page.fill("#task-dest", dest)
+        page.fill("#task-name", name)
+        if queue:
+            page.check("#task-queue")
+        page.click('#taskbox [data-act="%s"]' % act)
+        page.wait_for_selector("#taskbox.hidden", state="attached", timeout=10000)
+        made = [t for t in tasks_now().values() if t.get("name") == name]
+        assert made, "no task called %r" % name
+        ctx.setdefault("form_tasks", []).append(made[0]["id"])
+        return made[0]["id"]
+
+    def dry():
+        task = run_one("dry", "ui check dry run", scratch + "/dry")
+        page.click('#tabs button[data-tab="jobs"]')
+        deadline = time.time() + 60
+        row = None
+        while time.time() < deadline and not row:
+            rows = api.get("/history?limit=10&task=" + urllib.parse.quote(task))[1] or []
+            row = next((r for r in rows if r.get("state") not in ("running", "")), None)
+            time.sleep(1)
+        assert row and row.get("dryRun"), "its run: %s" % row
+        return "saved · ran as a dry run · %s" % row.get("state")
+    step(page, watch, "transfer form: Save and Dry run (V-38 #6)", dry, toast_ok=True)
+
+    def run():
+        task = run_one("run", "ui check run", scratch + "/up")
+        deadline = time.time() + 120
+        row = None
+        while time.time() < deadline and not row:
+            rows = api.get("/history?limit=10&task=" + urllib.parse.quote(task))[1] or []
+            row = next((r for r in rows if r.get("state") not in ("running", "")), None)
+            time.sleep(1)
+        assert row and row.get("state") == "finished", "its run: %s" % row
+        st, ls, _ = api.get("/remotes/%s/ls?path=%s" % (remote, urllib.parse.quote(scratch + "/up")))
+        names = [e["name"] for e in (ls or {}).get("entries", [])]
+        assert "a.txt" in names, "up/ holds %s" % names
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        entry_row(page, scratch + "/up").wait_for(timeout=WAIT)
+        return "finished · up/a.txt on the remote · listed"
+    step(page, watch, "transfer form: Save and Run (V-38 #7)", run, toast_ok=True)
+
+    def queued():
+        task = run_one("run", "ui check queued", scratch + "/queued", queue=True)
+        waiting = api.get("/queue")[1] or []
+        mine = [e for e in waiting if e.get("taskId") == task]
+        assert mine and not mine[0].get("running"), "the queue holds %s" % waiting
+        return "in the queue, not started (the queue is paused)"
+    step(page, watch, "transfer form: Add to the queue (V-38 #8)", queued, toast_ok=True)
+
+
+def tab_on(page, name):
+    return page.locator("#tab-%s.on" % name).count() == 1
+
+
+def check_history_and_addresses(page, watch, api, ctx):
+    remote, scratch = ctx["remote"], ctx["scratch"]
+    run_task = next((t for t in (api.get("/tasks")[1] or []) if t.get("name") == "ui check run"), None)
+
+    def search():
+        page.click('#tabs button[data-tab="history"]')
+        page.wait_for_selector("#history-q", timeout=5000)
+        page.click("#history-q")
+        page.keyboard.type(scratch, delay=20)
+        page.wait_for_timeout(1500)
+        rows = page.locator("#tab-history tr[data-run]")
+        n = rows.count()
+        assert n > 0, "nothing found for %r" % scratch
+        texts = rows.all_inner_texts()
+        focused = page.evaluate("document.activeElement && document.activeElement.id")
+        assert focused == "history-q", "the search box lost the focus to %r" % focused
+        everything = api.get("/history?limit=100")[1] or []
+        return "%d rows for the scratch folder (of %d) · still typing in the box" % (n, len(everything))
+    step(page, watch, "History: find by words, the box keeps the focus (V-60 #2)", search)
+
+    def open_run():
+        row = page.locator("#tab-history tr[data-run]").first
+        rid = row.get_attribute("data-run")
+        row.locator("td").nth(1).click()
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        assert "#/history/" in page.url, "the address is " + page.url
+        body = page.locator("#result-body").inner_text()
+        assert body.strip(), "an empty box"
+        log = page.locator("#result-body button[data-log]")
+        said = ""
+        if log.count():
+            log.first.click()
+            page.wait_for_selector("#logbox:not(.hidden)", timeout=10000)
+            page.wait_for_function("document.getElementById('log-body').innerText.trim().length > 0",
+                                   timeout=WAIT)
+            said = " · its log: %d lines" % len(page.locator("#log-body").inner_text().splitlines())
+            page.click("#log-close")
+        page.go_back()
+        page.wait_for_selector("#resultbox.hidden", state="attached", timeout=5000)
+        assert page.url.endswith("#/history"), "Back went to " + page.url
+        return "opened %s%s · Back closed it" % (rid[:9], said)
+    step(page, watch, "History: a run in full, its address, Back (V-60 #4, V-66 #4)", open_run)
+
+    def back_through_tabs():
+        page.goto(ctx["base"] + "/#/remotes")
+        page.wait_for_selector("#tab-remotes.on", timeout=5000)
+        page.click('#tabs button[data-tab="jobs"]')
+        page.click('#tabs button[data-tab="history"]')
+        page.go_back()
+        page.wait_for_selector("#tab-jobs.on", timeout=5000)
+        first = page.url.split("#", 1)[-1]
+        page.go_back()
+        page.wait_for_selector("#tab-remotes.on", timeout=5000)
+        return "History → Back: %s → Back: %s" % (first, page.url.split("#", 1)[-1])
+    step(page, watch, "Back walks the tabs (V-66 #1)", back_through_tabs)
+
+    def back_through_folders():
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        page.click("#remote-refresh")
+        entry_row(page, scratch + "/up").wait_for(timeout=WAIT)
+        entry_row(page, scratch + "/up").locator("button").first.click()
+        entry_row(page, scratch + "/up/a.txt").wait_for(timeout=WAIT)
+        deeper = page.url.split("#", 1)[-1]
+        page.go_back()
+        entry_row(page, scratch + "/a.txt").wait_for(timeout=WAIT)
+        return "%s → Back → %s" % (deeper, page.url.split("#", 1)[-1])
+    if ctx.get("local_src"):
+        step(page, watch, "Back from a folder two deep (V-66 #2)", back_through_folders)
+
+    def reload_stays():
+        page.click('#tabs button[data-tab="schedules"]')
+        page.wait_for_selector("#tab-schedules.on", timeout=5000)
+        page.reload()
+        page.wait_for_selector("#app:not(.hidden)", timeout=WAIT)
+        page.wait_for_selector("#tab-schedules.on", timeout=5000)
+        return page.url.split("#", 1)[-1]
+    step(page, watch, "F5 keeps the tab (V-66 #5)", reload_stays)
+
+    if not run_task:
+        say("skip", "task in full", "the transfer form made no task that ran")
+        return
+
+    def task_in_full():
+        page.click('#tabs button[data-tab="tasks"]')
+        page.click('#tab-tasks [data-task-open="%s"]' % run_task["id"])
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        page.wait_for_function("document.getElementById('result-body').innerText.includes('The last times it ran')",
+                               timeout=WAIT)
+        text = page.locator("#result-body").inner_text()
+        for part in ("When it runs", "The last times it ran", "The command"):
+            assert part in text, "no %r in the box" % part
+        runs = page.locator("#result-body tr[data-run-open]")
+        listed = runs.count()
+        assert listed >= 1, "no runs listed"
+        runs.first.click()
+        page.wait_for_function("location.hash.startsWith('#/history/')", timeout=10000)
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        return "settings · when · %d runs · the command · a run opens in full" % listed
+    step(page, watch, "Tasks: a task in full, and one of its runs (V-67 #1, #2)", task_in_full)
+
+    def task_address():
+        page.goto(ctx["base"] + "/#/tasks")
+        page.wait_for_selector("#tab-tasks.on", timeout=5000)
+        page.goto(ctx["base"] + "/#/tasks/" + urllib.parse.quote(run_task["id"], safe=""))
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        page.reload()
+        page.wait_for_selector("#app:not(.hidden)", timeout=WAIT)
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        page.go_back()
+        page.wait_for_selector("#resultbox.hidden", state="attached", timeout=5000)
+        return "opened from its address · F5 kept it · Back closed it"
+    step(page, watch, "Tasks: a task's own address, F5, Back (V-67 #4)", task_address)
+
+
+def names_in(api, remote, path):
+    st, ls, _ = api.get("/remotes/%s/ls?path=%s" % (remote, urllib.parse.quote(path)))
+    return sorted(e["name"] for e in (ls or {}).get("entries", []))
+
+
+def wait_for_names(api, remote, path, wanted, seconds=90):
+    deadline = time.time() + seconds
+    names = []
+    while time.time() < deadline:
+        names = names_in(api, remote, path)
+        if all(w in names for w in wanted):
+            return names
+        time.sleep(2)
+    raise AssertionError("%s:%s holds %s, not %s" % (remote, path, names, wanted))
+
+
+def clear_choice(page):
+    """Nothing chosen. Each click draws the list again, so the boxes are
+    looked for afresh every time."""
+    for _ in range(50):
+        checked = page.locator("#listing input[data-pick]:checked")
+        if checked.count() == 0:
+            return
+        checked.first.click()
+    raise AssertionError("rows stay chosen")
+
+
+def choose_alone(page, path):
+    """Only this row chosen, by its own box: as a person would after
+    clearing what was chosen before."""
+    clear_choice(page)
+    entry_row(page, path).locator("input[data-pick]").click()
+
+
+def check_copy_move(page, watch, api, ctx):
+    remote, scratch = ctx["remote"], ctx["scratch"]
+    for name in ("dst", "srcdir"):
+        api.post("/remotes/%s/mkdir" % remote, {"path": scratch, "name": name})
+    for folder, name in ((scratch, "f1.txt"), (scratch, "f2.txt"), (scratch + "/srcdir", "inside.txt")):
+        st, body, _ = api.call("POST", "/remotes/%s/receive?path=%s&name=%s" % (
+            remote, urllib.parse.quote(folder), name), raw=b"made by check_ui\n")
+        if st == 202:
+            api.wait_job(body["requestId"])
+    # Drive lists what was just made a moment later, now and then: the steps
+    # start once rclone sees all of it.
+    wait_for_names(api, remote, scratch, ["dst", "srcdir", "f1.txt", "f2.txt"], 60)
+
+    def show_scratch(*wanted):
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        page.click("#remote-refresh")
+        for name in wanted or ("f1.txt", "dst", "srcdir"):
+            entry_row(page, scratch + "/" + name).wait_for(timeout=WAIT)
+
+    looked_again = []
+
+    def see_in_chooser(folder):
+        """Until the chooser lists `folder`: Drive now and then leaves a
+        folder just made out of a listing for a moment, and a person would
+        look again -- by clicking where they are. Said in the result."""
+        here = folder.rsplit("/", 1)[0] if "/" in folder else ""
+        wanted = page.locator('#pick-list button[data-pick="%s"]' % folder)
+        for attempt in range(8):
+            try:
+                wanted.wait_for(timeout=4000)
+                return
+            except PlaywrightTimeout:
+                looked_again.append(folder)
+                page.locator('#pick-crumbs button[data-pick="%s"]' % here).click()
+        wanted.wait_for(timeout=4000)
+
+    def pick_into(folder):
+        page.wait_for_selector("#pickbox:not(.hidden)", timeout=5000)
+        see_in_chooser(folder)
+        page.locator('#pick-list button[data-pick="%s"]' % folder).click()
+        page.wait_for_selector('#pick-crumbs button[data-pick="%s"]' % folder, timeout=WAIT)
+
+    def walk():
+        show_scratch()
+        choose_alone(page, scratch + "/f1.txt")
+        page.click("#remote-copy")
+        pick_into(scratch + "/dst")
+        page.locator('#pick-crumbs button[data-pick="%s"]' % scratch).click()
+        see_in_chooser(scratch + "/srcdir")
+        page.locator('#pick-crumbs button[data-pick=""]').click()
+        see_in_chooser(scratch)
+        page.click("#pick-cancel")
+        again = (" · looked again %d× (Drive listed a new folder late)" % len(looked_again)) if looked_again else ""
+        return "into dst · back by its crumb · up to %s: by the first%s" % (remote, again)
+    step(page, watch, "Copy: the folder chooser walks in and out (V-34 #3)", walk)
+
+    def dry_copy():
+        show_scratch()
+        choose_alone(page, scratch + "/f1.txt")
+        page.click("#remote-copy")
+        pick_into(scratch + "/dst")
+        page.check("#pick-dry")
+        page.click("#pick-ok")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        time.sleep(8)
+        names = names_in(api, remote, scratch + "/dst")
+        assert "f1.txt" not in names, "a dry run copied: dst holds %s" % names
+        rows = api.get("/history?limit=5&q=" + urllib.parse.quote(scratch + "/f1.txt"))[1] or []
+        assert any(r.get("dryRun") for r in rows), "no dry run in the history: %s" % rows[:2]
+        return "started · a dry run in the history · dst still empty"
+    step(page, watch, "Copy: Dry run copies nothing (V-34 #5)", dry_copy, toast_ok=True)
+
+    def copy_folder():
+        show_scratch()
+        choose_alone(page, scratch + "/srcdir")
+        page.click("#remote-copy")
+        pick_into(scratch + "/dst")
+        page.uncheck("#pick-dry")
+        page.click("#pick-ok")
+        wait_for_names(api, remote, scratch + "/dst", ["srcdir"])
+        inside = wait_for_names(api, remote, scratch + "/dst/srcdir", ["inside.txt"])
+        top = names_in(api, remote, scratch + "/dst")
+        assert "inside.txt" not in top, "its contents spilled into dst: %s" % top
+        return "dst/srcdir/%s" % ", ".join(inside)
+    step(page, watch, "Copy: a folder lands under its own name (V-34 #6)", copy_folder, toast_ok=True)
+
+    def copy_three():
+        show_scratch("a.txt", "f1.txt", "f2.txt")
+        clear_choice(page)
+        for name in ("a.txt", "f1.txt", "f2.txt"):
+            entry_row(page, scratch + "/" + name).locator("input[data-pick]").click()
+        page.click("#remote-copy")
+        pick_into(scratch + "/dst")
+        page.click("#pick-ok")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        said = page.locator("#toast").inner_text()
+        assert "3 copy jobs started" in said, "it said %r" % said
+        names = wait_for_names(api, remote, scratch + "/dst", ["a.txt", "f1.txt", "f2.txt"])
+        return "%r · dst holds %s" % (said, ", ".join(names))
+    step(page, watch, "Copy three at once (V-64 #3)", copy_three, toast_ok=True)
+
+    def two_chosen():
+        show_scratch("f1.txt", "f2.txt")
+        clear_choice(page)
+        for name in ("f1.txt", "f2.txt"):
+            entry_row(page, scratch + "/" + name).locator("input[data-pick]").click()
+        off = [b for b in ("#remote-rename", "#remote-link", "#remote-view") if page.is_enabled(b)]
+        assert not off, "usable with two chosen: %s" % off
+        assert page.is_enabled("#remote-download"), "Download is greyed out"
+        title = page.get_attribute("#remote-download", "title") or ""
+        assert "2" in title, "Download's tooltip: %r" % title
+        return "Rename · Link · View off · Download: %r" % title
+    step(page, watch, "Two chosen: what can and cannot be done (V-64 #4)", two_chosen)
+
+    def move_one():
+        show_scratch("f2.txt", "srcdir")
+        choose_alone(page, scratch + "/f2.txt")
+        page.click("#remote-move")
+        pick_into(scratch + "/srcdir")
+        page.click("#pick-ok")
+        wait_for_names(api, remote, scratch + "/srcdir", ["f2.txt"])
+        entry_row(page, scratch + "/f2.txt").wait_for(state="detached", timeout=WAIT)
+        return "in srcdir · gone from the list on screen without a refresh"
+    step(page, watch, "Move: gone from here, there instead (V-34 #8)", move_one, toast_ok=True)
+
+    def into_itself():
+        show_scratch()
+        choose_alone(page, scratch + "/dst")
+        page.click("#remote-copy")
+        pick_into(scratch + "/dst")
+        before = len(api.get("/history?limit=50&q=" + urllib.parse.quote(scratch + "/dst"))[1] or [])
+        page.click("#pick-ok")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        said = page.locator("#toast").inner_text()
+        after = len(api.get("/history?limit=50&q=" + urllib.parse.quote(scratch + "/dst"))[1] or [])
+        assert after == before, "a job was started anyway"
+        return "refused: %r" % said
+    step(page, watch, "Copy a folder into itself is refused (V-34 #10)", into_itself,
+         allowed={("POST", "/copy")}, toast_ok=True)
+
+    def single_download():
+        show_scratch()
+        choose_alone(page, scratch + "/f1.txt")
+        page.click("#remote-download")
+        page.wait_for_selector("#taskbox:not(.hidden)", timeout=5000)
+        source = page.input_value("#task-source")
+        page.click("#task-cancel")
+        assert source.endswith("f1.txt"), "From is %r" % source
+        return "the whole transfer form, From = %s" % source
+    step(page, watch, "Download one: the whole form (V-78 #3)", single_download)
+
+    if not ctx.get("local_src"):
+        return
+
+    def download_three():
+        show_scratch()
+        clear_choice(page)
+        for name in ("a.txt", "f1.txt", "dst"):
+            entry_row(page, scratch + "/" + name).locator("input[data-pick]").click()
+        page.click("#remote-download")
+        page.wait_for_selector("#pickbox:not(.hidden)", timeout=5000)
+        # Straight to the folder it is to go into: the way there is clicking
+        # through folders, as the chooser's own steps above already show.
+        target = ctx["local_src"]
+        page.evaluate("p => { picking.path = p; pickLoad(); }", target)
+        page.wait_for_function("document.getElementById('pick-crumbs').innerText.length > 0", timeout=WAIT)
+        page.click("#pick-ok")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        said = page.locator("#toast").inner_text()
+        assert "3 downloads started" in said, "it said %r" % said
+        deadline = time.time() + 90
+        names = []
+        while time.time() < deadline:
+            ls = api.get("/local/ls?path=" + urllib.parse.quote(target))[1] or {}
+            names = [e["name"] for e in ls.get("entries", [])]
+            if "f1.txt" in names and "dst" in names:
+                break
+            time.sleep(2)
+        assert "f1.txt" in names and "dst" in names, "%s holds %s" % (target, names)
+        return "%r · %s now holds %s" % (said, target, ", ".join(sorted(names)))
+    step(page, watch, "Download three at once (V-78 #1)", download_three, toast_ok=True)
+
+
+def schedule_row(page, sid):
+    return page.locator('#tab-schedules tr:has([data-sched-switch="%s"])' % sid)
+
+
+def check_schedules(page, watch, api, ctx):
+    task = ctx["task"]
+
+    def from_card():
+        page.click('#tabs button[data-tab="tasks"]')
+        page.click('#tab-tasks [data-sched-new="%s"]' % task)
+        page.wait_for_selector("#schedbox:not(.hidden)", timeout=5000)
+        chosen = page.input_value("#sched-task")
+        assert chosen == task, "the form chose %r" % chosen
+        assert page.is_checked('input[name="sched-mode"][value="daily"]'), "not daily"
+        days = page.locator("#sched-daily [data-day]:checked").count()
+        assert days == 7, "%d days ticked" % days
+        assert page.input_value("#sched-time") == "06:30", page.input_value("#sched-time")
+        assert page.is_checked("#sched-active"), "not switched on"
+        return "the task chosen · every day · 06:30 · switched on"
+    step(page, watch, "Schedules: Schedule on a task's card (V-41 #1)", from_card)
+
+    def weekdays():
+        before = {x["id"] for x in api.get("/schedules")[1] or []}
+        for day in ("sat", "sun"):
+            page.uncheck('#sched-daily [data-day="%s"]' % day)
+        page.fill("#sched-time", "07:00")
+        page.locator('#sched-form button[type="submit"]').click()
+        page.wait_for_selector("#schedbox.hidden", state="attached", timeout=10000)
+        made = [x for x in api.get("/schedules")[1] or [] if x["id"] not in before]
+        assert len(made) == 1, "%d new schedules" % len(made)
+        ctx["ui_schedule"] = made[0]["id"]
+        page.click('#tabs button[data-tab="schedules"]')
+        row = schedule_row(page, made[0]["id"])
+        row.wait_for(timeout=10000)
+        text = row.inner_text()
+        assert "Mon" in text and "Fri" in text and "07:00" in text, "the row says %r" % text
+        assert made[0].get("nextRun"), "no next run"
+        page.click('#tabs button[data-tab="tasks"]')
+        card = page.locator('#tab-tasks .card:has([data-sched-new="%s"])' % task)
+        assert "07:00" in card.inner_text(), "the task's card has no ⏱ line"
+        return "%r · next %s · on the task's card" % (" ".join(text.split())[:60], made[0]["nextRun"])
+    step(page, watch, "Schedules: Mon–Fri at 07:00 (V-41 #2)", weekdays, toast_ok=True)
+
+    if not ctx.get("ui_schedule"):
+        return
+    sid = ctx["ui_schedule"]
+
+    def to_cron():
+        page.click('#tabs button[data-tab="schedules"]')
+        page.click('[data-sched-edit="%s"]' % sid)
+        page.wait_for_selector("#schedbox:not(.hidden)", timeout=5000)
+        page.check('input[name="sched-mode"][value="cron"]')
+        page.fill("#sched-cron", "30 6,18 * * MON-FRI")
+        page.locator('#sched-form button[type="submit"]').click()
+        page.wait_for_selector("#schedbox.hidden", state="attached", timeout=10000)
+        page.wait_for_function("document.querySelector('#tab-schedules').innerText.includes('6,18')",
+                               timeout=10000)
+        text = " ".join(schedule_row(page, sid).inner_text().split())
+        one = next(x for x in api.get("/schedules")[1] if x["id"] == sid)
+        assert one.get("cron") == "30 6,18 * * MON-FRI", one
+        return "%s · next %s" % (text[:70], one.get("nextRun"))
+    step(page, watch, "Schedules: Edit to a cron expression (V-41 #5)", to_cron, toast_ok=True)
+
+    def off_and_on():
+        page.click('[data-sched-switch="%s"]' % sid)
+        # Its button says what pressing it would do: "Switch on" once it is off.
+        page.wait_for_selector('[data-sched-switch="%s"]:text-is("Switch on")' % sid, timeout=10000)
+        off = " ".join(schedule_row(page, sid).inner_text().split())
+        assert "—" in off, "next run still shown when off: %r" % off
+        page.click('[data-sched-switch="%s"]' % sid)
+        page.wait_for_timeout(800)
+        on = next(x for x in api.get("/schedules")[1] if x["id"] == sid)
+        assert on["active"], "not on again"
+        return "off: next run — · on again"
+    step(page, watch, "Schedules: Switch off and on (V-41 #8)", off_and_on)
+
+    def drop():
+        page.click('[data-sched-drop="%s"]' % sid)
+        answer(page, "Delete the schedule")
+        schedule_row(page, sid).wait_for(state="detached", timeout=10000)
+        st, _, _ = api.get("/tasks/" + urllib.parse.quote(task, safe=""))
+        assert st == 200, "its task went too (%s)" % st
+        ctx["ui_schedule"] = None
+        return "gone · the task is still there"
+    step(page, watch, "Schedules: Delete keeps the task (V-41 #13)", drop)
+
+
+def job_card(page, rid):
+    return page.locator('#tab-jobs .card:has([data-job-open="%s"])' % rid)
+
+
+def check_serve_and_stop(page, watch, api, ctx):
+    remote, scratch = ctx["remote"], ctx["scratch"]
+
+    def serve():
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        entry_row(page, scratch + "/a.txt").wait_for(timeout=WAIT)
+        clear_choice(page)
+        before = {j["requestId"] for j in api.get("/jobs")[1] or []}
+        page.click("#remote-serve")
+        page.wait_for_selector("#serve-go", timeout=5000)
+        page.select_option("#serve-protocol", "webdav")
+        page.fill("#serve-port", "18911")
+        page.fill("#serve-user", "ui")
+        page.fill("#serve-pass", "check-ui-pass")
+        page.click("#serve-go")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        made = [j for j in api.get("/jobs")[1] or [] if j["requestId"] not in before and j["kind"] == "serve"]
+        assert made, "no serve job"
+        ctx["serve_job"] = made[0]["requestId"]
+        page.click('#tabs button[data-tab="jobs"]')
+        card = job_card(page, made[0]["requestId"])
+        card.wait_for(timeout=10000)
+        copy = card.locator("[data-copy-text]")
+        address = copy.get_attribute("data-copy-text")
+        assert address and "18911" in address, "the card's address: %r" % address
+        copy.click()
+        page.wait_for_timeout(500)
+        if shown(page, "#askbox"):
+            value = page.input_value("#ask-value")
+            assert value == address, "the box offers %r" % value
+            page.click("#ask-yes")
+            how = "offered in a box to copy (no clipboard here)"
+        else:
+            how = "copied"
+        return "%s · Copy address: %s" % (address, how)
+    step(page, watch, "Serve over WebDAV: the card has the address (V-52 #5, V-63 #4)", serve, toast_ok=True)
+
+    if not ctx.get("serve_job"):
+        return
+    rid = ctx["serve_job"]
+
+    def stop():
+        card = job_card(page, rid)
+        card.locator('[data-stop="%s"]' % rid).click()
+        answer(page, "Stop", yes=False)
+        page.wait_for_timeout(500)
+        job = next((j for j in api.get("/jobs")[1] if j["requestId"] == rid), {})
+        assert job.get("running"), "Cancel stopped it anyway"
+        card.locator('[data-stop="%s"]' % rid).click()
+        answer(page, "Stop")
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            job = next((j for j in api.get("/jobs")[1] if j["requestId"] == rid), {})
+            if not job.get("running"):
+                break
+            time.sleep(1)
+        assert not job.get("running"), "still serving"
+        ctx["serve_job"] = None
+        return "asked · Cancel kept it · Yes stopped it (%s)" % job.get("state")
+    step(page, watch, "Stop a job: asked first (V-80 #5)", stop)
+
+
+def free_drive_letter():
+    for letter in "YXWVUTS":
+        if not os.path.exists(letter + ":\\"):
+            return letter + ":"
+    return None
+
+
+def check_mount(page, watch, api, ctx):
+    remote, scratch = ctx["remote"], ctx["scratch"]
+    windows = ctx.get("windows")
+    point = free_drive_letter() if windows else ctx.get("local_src")
+    if not point:
+        return say("skip", "Mount", "no free drive letter / no folder to mount on")
+
+    def mount():
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        entry_row(page, scratch + "/a.txt").wait_for(timeout=WAIT)
+        clear_choice(page)
+        page.click("#remote-mount")
+        page.wait_for_selector("#mount-go", timeout=5000)
+        for part in ("#mount-point", "#mount-cache", "#mount-ro", "#mount-volume", "#mount-extra",
+                     "#mount-save", "#mount-auto", "#mount-script"):
+            assert page.locator(part).count() == 1, "no %s in the form" % part
+        page.fill("#mount-point", point)
+        page.check("#mount-ro")
+        # Keeping it as a task, and the script, are under More.
+        page.locator("#result-body summary", has_text="More").click()
+        page.fill("#mount-save", "zz ui mount")
+        if windows and ctx.get("local_src"):
+            page.fill("#mount-script", ctx["local_src"].replace("/", "\\") + "\\after.cmd")
+        before = {j["requestId"] for j in api.get("/jobs")[1] or []}
+        page.click("#mount-go")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        made = [j for j in api.get("/jobs")[1] or [] if j["requestId"] not in before and j["kind"] == "mount"]
+        assert made, "no mount job"
+        ctx["mount_job"] = made[0]["requestId"]
+        saved = [t for t in api.get("/tasks")[1] or [] if t.get("name") == "zz ui mount"]
+        assert saved, "not saved as a task"
+        ctx.setdefault("form_tasks", []).append(saved[0]["id"])
+        return "on %s · read-only · kept as the task \"zz ui mount\"" % point
+    step(page, watch, "Mount: the form, kept as a task (V-36 #3, V-75 #2)", mount, toast_ok=True)
+
+    rid = ctx.get("mount_job")
+    if not rid:
+        return
+
+    def wait_job_settled(seconds=20):
+        deadline = time.time() + seconds
+        job = {}
+        while time.time() < deadline:
+            job = next((j for j in api.get("/jobs")[1] if j["requestId"] == rid), {})
+            if not job.get("running") or (job.get("script") or {}).get("exitCode") is not None:
+                if not job.get("running") or not windows:
+                    return job
+            if windows and os.path.exists(point + "\\a.txt") and job.get("running"):
+                time.sleep(2)
+                return next((j for j in api.get("/jobs")[1] if j["requestId"] == rid), {})
+            time.sleep(1)
+        return job
+
+    if not windows:
+        def fails_with_reason():
+            job = wait_job_settled()
+            assert not job.get("running"), "still running"
+            assert job.get("state") == "error", "ended %s" % job.get("state")
+            log = api.get("/jobs/%s/log?tail=20" % urllib.parse.quote(rid, safe=""))[1]
+            log = log.decode() if isinstance(log, bytes) else str(log)
+            reason = next((l for l in log.splitlines() if "Fatal" in l or "ERROR" in l or "CRITICAL" in l), "")
+            assert reason, "no reason from rclone in the log"
+            page.click('#tabs button[data-tab="jobs"]')
+            return "error · rclone said: %s" % reason.split(": ", 1)[-1][:90]
+        step(page, watch, "Mount where it cannot: an error, rclone's words (V-36 #7)", fails_with_reason)
+        return
+
+    def mounted():
+        job = wait_job_settled(40)
+        assert job.get("running"), "not mounted: %s" % job.get("state")
+        assert os.path.exists(point + "\\a.txt"), "no a.txt on %s" % point
+        page.click('#tabs button[data-tab="jobs"]')
+        page.click('[data-job-open="%s"]' % rid)
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        try:
+            page.wait_for_function("document.getElementById('result-body').innerText.includes('mounted on')",
+                                   timeout=20000)
+        except PlaywrightTimeout:
+            told = (next((j for j in api.get("/jobs")[1] if j["requestId"] == rid), {}).get("script") or {})
+            raise AssertionError("the open box still says the script is running; the daemon says %s -- "
+                                 "a program built before the box was drawn again from events?" % told)
+        text = page.locator("#result-body").inner_text()
+        page.click("#result-close")
+        script = job.get("script") or {}
+        return "%s holds a.txt · the script: %s" % (point, " ".join(script.get("output") or [])[:80])
+    step(page, watch, "Mount: the drive is there, the script's output shown (V-36 #3, V-79 #2)", mounted)
+
+    def unmount():
+        page.click('#tabs button[data-tab="jobs"]')
+        job_card(page, rid).locator('[data-stop="%s"]' % rid).click()
+        answer(page, "Unmount")
+        deadline = time.time() + 30
+        while time.time() < deadline and os.path.exists(point + "\\"):
+            time.sleep(1)
+        assert not os.path.exists(point + "\\"), "%s is still there" % point
+        ctx["mount_job"] = None
+        return "%s gone" % point
+    step(page, watch, "Mount: Unmount from its card (V-36 #5)", unmount)
+
+
+def check_browse_and_menu(page, watch, api, ctx):
+    remote, scratch, src = ctx["remote"], ctx["scratch"], ctx.get("local_src")
+    if not src:
+        return say("skip", "Browse in the transfer form", "no folder of this machine")
+    parent, name = src.rsplit("/", 1)
+
+    def jump(path):
+        page.evaluate("p => { picking.path = p; pickLoad(); }", path)
+        page.wait_for_timeout(800)
+
+    def browse_folder():
+        open_upload(page, ctx)
+        page.click("#task-source-browse")
+        page.wait_for_selector("#pickbox:not(.hidden)", timeout=5000)
+        jump(parent)
+        page.locator('#pick-list button[data-pick$="%s"]' % name).click()
+        page.wait_for_timeout(800)
+        page.click("#pick-ok")
+        page.wait_for_selector("#pickbox.hidden", state="attached", timeout=5000)
+        got = page.input_value("#task-source").replace("\\", "/").rstrip("/")
+        to = page.input_value("#task-dest")
+        assert got.endswith(name), "From is %r" % got
+        assert to == scratch + "/" + name, "To is %r" % to
+        return "From = …/%s · To = %s" % (name, to)
+    step(page, watch, "Transfer form: Browse, a folder (V-38 #2)", browse_folder)
+
+    def browse_file():
+        page.click("#task-source-browse")
+        page.wait_for_selector("#pickbox:not(.hidden)", timeout=5000)
+        jump(src)
+        page.locator('#pick-list button[data-pick-file$="a.txt"]').click()
+        page.click("#pick-ok")
+        page.wait_for_selector("#pickbox.hidden", state="attached", timeout=5000)
+        got = page.input_value("#task-source")
+        to = page.input_value("#task-dest")
+        page.click("#task-cancel")
+        assert got.replace("\\", "/").endswith("/a.txt"), "From is %r" % got
+        assert to == scratch, "To is %r" % to
+        return "From = …/a.txt · To = %s again" % to
+    step(page, watch, "Transfer form: Browse, a file (V-38 #3)", browse_file)
+
+    def menu_download():
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        page.click("#remote-refresh")
+        for name_ in ("a.txt", "f1.txt"):
+            entry_row(page, scratch + "/" + name_).wait_for(timeout=WAIT)
+        clear_choice(page)
+        for name_ in ("a.txt", "f1.txt"):
+            entry_row(page, scratch + "/" + name_).locator("input[data-pick]").click()
+        entry_row(page, scratch + "/f1.txt").locator("td").last.click(button="right")
+        page.wait_for_selector("#row-menu:not(.hidden)", timeout=5000)
+        page.click('#row-menu button[data-menu="remote-download"]')
+        page.wait_for_selector("#pickbox:not(.hidden)", timeout=5000)
+        jump(src)
+        page.click("#pick-ok")
+        page.wait_for_selector("#toast:not(.hidden)", timeout=10000)
+        said = page.locator("#toast").inner_text()
+        assert "2 downloads started" in said, "it said %r" % said
+        return said
+    step(page, watch, "Right-click → Download… with two chosen (V-78 #2)", menu_download, toast_ok=True)
+
+
 def check_tasks(page, watch, api, ctx):
     def forget():
         page.click('#tabs button[data-tab="tasks"]')
@@ -489,6 +1410,20 @@ def set_up(api, ctx):
         sys.exit("could not make a task: %s %s" % (st, task))
     ctx["task"] = task["id"]
 
+    # A folder of the program's machine with something in it, for the
+    # transfer form to send: the scratch folder, downloaded there.
+    if ctx.get("windows"):
+        path = "/remotes/%s/receive?path=%s&name=after.cmd" % (ctx["remote"], urllib.parse.quote(ctx["scratch"]))
+        st, body, _ = api.call("POST", path, raw=b"@echo mounted on %5\r\n@exit /b 0\r\n")
+        if st == 202:
+            api.wait_job(body["requestId"])
+    root = verify_live.local_root(api, {"container": ctx.get("container"), "local_root": None})
+    if root:
+        st, body, _ = api.post("/remotes/%s/download" % ctx["remote"],
+                               {"path": ctx["scratch"], "isDir": True, "to": root})
+        if st == 202 and (api.wait_job(body["requestId"]) or {}).get("state") == "finished":
+            ctx["local_src"] = root.rstrip("/\\") + "/" + ctx["scratch"]
+
 
 def clean_up(api, ctx):
     if ctx.get("task") and not ctx.get("task_gone"):
@@ -496,6 +1431,16 @@ def clean_up(api, ctx):
             if entry.get("taskId") == ctx["task"]:
                 api.call("DELETE", "/queue/" + urllib.parse.quote(entry["requestId"], safe=""))
         api.call("DELETE", "/tasks/" + urllib.parse.quote(ctx["task"], safe=""))
+    for entry in (api.get("/queue")[1] or []):
+        if entry.get("taskId") in ctx.get("form_tasks", []):
+            api.call("DELETE", "/queue/" + urllib.parse.quote(entry["requestId"], safe=""))
+    for task in ctx.get("form_tasks", []):
+        api.call("DELETE", "/tasks/" + urllib.parse.quote(task, safe=""))
+    for job in ("serve_job", "mount_job"):
+        if ctx.get(job):
+            api.post("/jobs/%s/stop" % urllib.parse.quote(ctx[job], safe=""))
+    if ctx.get("ui_schedule"):
+        api.call("DELETE", "/schedules/" + urllib.parse.quote(ctx["ui_schedule"], safe=""))
     if ctx.get("backup_schedule"):
         api.call("DELETE", "/schedules/" + urllib.parse.quote(ctx["backup_schedule"], safe=""))
     if ctx.get("backup_task"):
@@ -512,6 +1457,8 @@ def clean_up(api, ctx):
         st, _, _ = api.post("/remotes/%s/delete" % ctx["remote"], {"path": ctx["scratch"], "isDir": True})
         say("pass" if st == 200 else "fail", "scratch folder removed from the remote",
             "%s:%s -> %s" % (ctx["remote"], ctx["scratch"], st))
+    if ctx.get("local_src"):
+        say("look", "left on the program's machine (delete it by hand)", ctx["local_src"])
 
 
 def main():
@@ -523,6 +1470,9 @@ def main():
     parser.add_argument("--show", action="store_true", help="open the browser window, to watch it")
     parser.add_argument("--app-js", help="use this app.js instead of the one the program serves: "
                         "a change to the page, tried without building anything")
+    parser.add_argument("--from-source", action="store_true",
+                        help="the page from src/webui (index.html, app.js, app.css) instead of the one "
+                             "built into the program: a change to it, tried without building anything")
     parser.add_argument("--slow", type=int, default=0, help="ms between actions, with --show")
     args = parser.parse_args()
     for stream in (sys.stdout, sys.stderr):
@@ -538,6 +1488,9 @@ def main():
     api = Api(args.base, token)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     ctx = {"remote": args.remote, "scratch": "zz-rb-ui-" + stamp, "base": args.base.rstrip("/"),
+           "container": args.container,
+           "windows": not args.container and urllib.parse.urlparse(args.base).hostname in ("127.0.0.1", "localhost")
+                      and os.name == "nt",
            "local": "/media" if args.container else os.path.expanduser("~")}
 
     print("Clicking through %s with remote %s, scratch folder %s\n" % (args.base, args.remote, ctx["scratch"]))
@@ -549,12 +1502,28 @@ def main():
             context = browser.new_context(viewport={"width": 1366, "height": 900})
             # Signed in the way the page keeps it: the token in its storage.
             context.add_init_script("localStorage.setItem('rb.token', %r)" % token)
+            served = {}
+            if args.from_source:
+                webui = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "webui")
+                served = {"/": "index.html", "/index.html": "index.html",
+                          "/app.js": "app.js", "/app.css": "app.css"}
+                served = {k: os.path.join(webui, v) for k, v in served.items()}
             if args.app_js:
-                with open(args.app_js, "rb") as f:
-                    script = f.read()
-                context.route("**/app.js", lambda route: route.fulfill(
-                    status=200, body=script, headers={"Content-Type": "application/javascript"}))
-                print("app.js from %s\n" % args.app_js)
+                served["/app.js"] = args.app_js
+            kinds = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
+                     ".css": "text/css"}
+
+            def from_disk(route):
+                path = urllib.parse.urlparse(route.request.url).path
+                if path not in served:
+                    return route.continue_()
+                with open(served[path], "rb") as f:
+                    body = f.read()
+                route.fulfill(status=200, body=body,
+                              headers={"Content-Type": kinds[os.path.splitext(served[path])[1]]})
+            if served:
+                context.route(ctx["base"] + "/**", from_disk)
+                print("the page from %s\n" % ", ".join(sorted(set(served.values()))))
             page = context.new_page()
             watch = Watch(page)
 
@@ -567,6 +1536,13 @@ def main():
             check_tabs(page, watch)
             check_queue(page, watch, api, ctx)
             check_remote(page, watch, api, ctx)
+            check_transfer_form(page, watch, api, ctx)
+            check_history_and_addresses(page, watch, api, ctx)
+            check_copy_move(page, watch, api, ctx)
+            check_browse_and_menu(page, watch, api, ctx)
+            check_serve_and_stop(page, watch, api, ctx)
+            check_mount(page, watch, api, ctx)
+            check_schedules(page, watch, api, ctx)
             check_many(page, watch, api, ctx)
             check_api_tab(page, watch, api, ctx)
             check_backup_and_schedule(page, watch, api, ctx)
