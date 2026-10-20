@@ -678,6 +678,17 @@ void ApiServer::listDirectory(QTcpSocket *socket, const HttpRequest &request,
   listing->start();
 }
 
+// The one answer to a request that was held -- marked "stream" so nothing
+// else is read from its connection meanwhile -- and the end of that
+// connection. Left open, the browser sends its next request down it and that
+// request is dropped unread: its next GET of the same address then waits
+// behind the lost one, and the page stops hearing anything (2026-10-20).
+static void answerHeld(QTcpSocket *socket, const QByteArray &response) {
+  socket->write(response);
+  socket->flush();
+  socket->disconnectFromHost();
+}
+
 void ApiServer::remoteCapabilities(QTcpSocket *socket, const QString &remote) {
   if (RemoteRegistry::instance().find(remote) == nullptr) {
     socket->write(
@@ -719,7 +730,7 @@ void ApiServer::remoteCapabilities(QTcpSocket *socket, const QString &remote) {
   QObject::connect(wait, &QTimer::timeout, socket, [held, answered, said]() {
     if (held && !*answered) {
       *answered = true;
-      held->write(FormatHttpResponse(200, said(RcloneCapabilities())));
+      answerHeld(held, FormatHttpResponse(200, said(RcloneCapabilities())));
     }
   });
   QObject::connect(&registry, &RcloneCapabilityRegistry::capabilitiesChanged, socket,
@@ -730,7 +741,7 @@ void ApiServer::remoteCapabilities(QTcpSocket *socket, const QString &remote) {
                      }
                      *answered = true;
                      wait->stop();
-                     held->write(FormatHttpResponse(200, said(caps)));
+                     answerHeld(held, FormatHttpResponse(200, said(caps)));
                    });
   wait->start(20000);
 }
@@ -752,7 +763,7 @@ void ApiServer::testWebhook(QTcpSocket *socket, const QString &id) {
     if (!why.isEmpty()) {
       object.insert(QStringLiteral("error"), why);
     }
-    held->write(FormatHttpResponse(why.isEmpty() ? 200 : 502, toJson(object)));
+    answerHeld(held, FormatHttpResponse(why.isEmpty() ? 200 : 502, toJson(object)));
   });
 }
 
@@ -2305,6 +2316,16 @@ void ApiServer::watchWhatHappens() {
                      // is already the rate a dashboard wants. Forwarding them
                      // beats every client polling for them separately.
                      QObject::connect(job, &RunningJob::statsUpdated, this,
+                                      [sendJob, job]() { sendJob(job); });
+                     // A mount's script says things and ends while the mount
+                     // goes on, with no figures to carry the news: each is
+                     // told as it happens, or a page showing the job would
+                     // say "running" with no output for as long as it is open.
+                     QObject::connect(job, &RunningJob::scriptOutputLine, this,
+                                      [sendJob, job]() { sendJob(job); });
+                     QObject::connect(job, &RunningJob::scriptFinished, this,
+                                      [sendJob, job]() { sendJob(job); });
+                     QObject::connect(job, &RunningJob::scriptFailed, this,
                                       [sendJob, job]() { sendJob(job); });
                    });
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,

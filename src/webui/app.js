@@ -447,6 +447,17 @@ function handleEvent(block) {
     // those announces itself in as much detail.
     if (!data.running) refresh();
     else draw();
+
+    // Its box, if it is open, says what it says now -- not what it said
+    // when it was opened. At most once a second: a transfer's figures come
+    // that often, and each drawing asks for the end of its log.
+    if (routedBox && location.hash === "#/jobs/" + encodeURIComponent(data.requestId)) {
+      const now = Date.now();
+      if (now - jobBoxDrawn >= 1000) {
+        jobBoxDrawn = now;
+        openJob(data.requestId, true);
+      }
+    }
     return;
   }
 
@@ -1185,6 +1196,9 @@ function scriptReport(script) {
     figures([["File", script.path], ["Now", how]]) +
     '<pre class="command">' + esc((script.output || []).join("\n") || "—") + "</pre>";
 }
+
+// When the open job's box was last drawn again from an event.
+let jobBoxDrawn = 0;
 
 async function openJob(requestId, fromAddress) {
   const job = state.jobs.find((j) => j.requestId === requestId);

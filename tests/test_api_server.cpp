@@ -2982,6 +2982,33 @@ private slots:
     QCOMPARE(statusOf(tested), 200);
     QCOMPARE(bodyOf(tested).object().value(QStringLiteral("status")).toInt(), 204);
     QVERIFY(received.last().toLower().contains("x-rb-event: test"));
+
+    // An answer held until the address has answered, on a connection kept
+    // alive -- as a browser keeps it. Its next request on that connection
+    // used to vanish: the connection stayed marked as a stream, whose input
+    // is dropped, and the browser's next GET of the same address waited
+    // behind the lost one for good (the page froze, 2026-10-20).
+    {
+      QTcpSocket kept;
+      QVERIFY(openConnection(&kept));
+      kept.write("POST " + testPath + " HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n"
+                 "Authorization: Bearer " + mToken + "\r\nContent-Length: 2\r\n\r\n{}");
+      kept.flush();
+      QByteArray heard;
+      QVERIFY(waitFor(&kept, &heard, "\"status\""));
+      kept.write("GET /api/v1/ping HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n");
+      kept.flush();
+      // Answered there, or the connection closed so a new one is opened:
+      // either is fine. Silence is not.
+      QDeadlineTimer deadline(3000);
+      while (!deadline.hasExpired() && kept.state() == QAbstractSocket::ConnectedState &&
+             heard.count("HTTP/1.1 ") < 2) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        heard += kept.readAll();
+      }
+      QVERIFY2(heard.count("HTTP/1.1 ") >= 2 || kept.state() != QAbstractSocket::ConnectedState,
+               "the next request on the connection went unanswered and the connection stayed open");
+    }
     // And said with the hook.
     for (const QJsonValue &value : bodyOf(ask("GET", "/api/v1/webhooks", mToken)).array()) {
       if (value.toObject().value(QStringLiteral("id")) == hook.value(QStringLiteral("id"))) {
@@ -3664,6 +3691,16 @@ private slots:
     qputenv("FAKE_RCLONE_RC_PORT", QByteArray::number(rc.serverPort()));
     qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
 
+    // What a page with the job open hears: the script's end is news of its
+    // own, while the mount goes on with no figures to carry it.
+    QTcpSocket events;
+    QVERIFY(openConnection(&events));
+    events.write("GET /api/v1/events HTTP/1.1\r\nHost: localhost\r\n"
+                 "Authorization: Bearer " + mToken + "\r\n\r\n");
+    events.flush();
+    QByteArray heard;
+    QVERIFY(waitFor(&events, &heard, "event: hello"));
+
     const QByteArray made = send("POST", "/api/v1/remotes/fake/mount", mToken,
                                  "{\"path\":\"films\",\"mountPoint\":\"X:\",\"script\":\"" +
                                      script.toUtf8() + "\"}");
@@ -3687,6 +3724,26 @@ private slots:
     // Handed the remote-control login, which never comes back out.
     QCOMPARE(output.at(1).toString(), QStringLiteral("login *** ***"));
     QCOMPARE(reported.value(QStringLiteral("running")).toBool(), false);
+    // Heard while the mount is still up -- not only in the news of its end,
+    // which comes when the fake rclone quits.
+    const auto toldWhileUp = [&]() {
+      heard += events.readAll();
+      for (const QByteArray &line : heard.split('\n')) {
+        if (!line.startsWith("data: ")) {
+          continue;
+        }
+        const QJsonObject said = QJsonDocument::fromJson(line.mid(6)).object();
+        if (said.value(QStringLiteral("requestId")).toString() == id &&
+            said.value(QStringLiteral("running")).toBool() &&
+            said.value(QStringLiteral("script")).toObject().value(QStringLiteral("exitCode")).toInt(-1) == 3) {
+          return true;
+        }
+      }
+      return false;
+    };
+    QTRY_VERIFY2_WITH_TIMEOUT(toldWhileUp(), "the script's end was not announced while the mount went on",
+                              3000);
+    events.close();
 
     RunningJob *job = JobRegistry::instance().find(id);
     QVERIFY(job != nullptr);

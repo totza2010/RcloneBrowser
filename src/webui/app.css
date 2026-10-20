@@ -281,6 +281,10 @@ tbody tr.chosen, tbody tr.chosen:hover { background: var(--panel-2); box-shadow:
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 12px 40px var(--shadow);
+  /* Above the box it is opened from -- a run in full has a Log button --
+     which comes later in the page and so was drawn over it. The page's own
+     questions (.modal.ask) stay above both. */
+  z-index: 45;
 }
 
 .logbox-head {
