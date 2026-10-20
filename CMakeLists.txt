@@ -25,7 +25,15 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "This project supports only 64-bit Windows builds.")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+# The window, or not: OFF builds the program with no window at all -- the
+# daemon and the web page, linked to QtCore, QtNetwork and QtSql alone. That
+# is what the web-only image is (docker/Dockerfile, target web).
+option(RB_BUILD_GUI "Build the window (OFF: the daemon and web page only)" ON)
+if(RB_BUILD_GUI)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+else()
+  find_package(Qt6 REQUIRED COMPONENTS Core Network Sql)
+endif()
 # Multimedia is only used for the optional finished-transfer notification
 # sound, and is not packaged by every distribution. Treat it as optional so
 # the app still builds on Qt kits that do not ship it.

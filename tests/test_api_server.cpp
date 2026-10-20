@@ -1605,10 +1605,13 @@ private slots:
     QVERIFY(ask("GET", "/app.css", QByteArray()).contains("text/css"));
 
     // A remote's picture is asked for by the name of its kind, which is the
-    // one place a name from outside goes into a file name. The pictures
-    // belong to the window and are not in this test's build, so the answer
-    // for a real one is "none here" -- never an error, and never a file.
-    QCOMPARE(statusOf(ask("GET", "/icons/remote/drive.png", QByteArray())), 404);
+    // one place a name from outside goes into a file name. The pictures are
+    // in the core (remote_icons.qrc), so even a build with no window has
+    // them; a kind there is none for gets the one for "unknown".
+    const QByteArray drive = ask("GET", "/icons/remote/drive.png", QByteArray());
+    QCOMPARE(statusOf(drive), 200);
+    QVERIFY(drive.contains("image/png"));
+    QCOMPARE(statusOf(ask("GET", "/icons/remote/nosuchkind.png", QByteArray())), 200);
     for (const char *path :
          {"/icons/remote/../../webui/app.js.png", "/icons/remote/..%2Fx.png",
           "/icons/remote/Drive.png", "/icons/remote/.png",

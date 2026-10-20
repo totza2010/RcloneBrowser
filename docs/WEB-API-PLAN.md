@@ -467,7 +467,13 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
   `docker-rclone-watch.yml` (รายวัน) build `linux/amd64,linux/arm64` ผ่าน QEMU (`setup-qemu-action`) · push ธรรมดาตรวจแค่ amd64 (arm64 ใต้ QEMU ช้า) ·
   base image selkies/alpine และ rclone ของ tgdrive มี arm64 ครบ · **build arm64 บนเครื่องเจอบั๊กจริง**: `-fcf-protection=full` (Intel CET)
   มีแต่บน x86 → arm64 compile ไม่ได้เลย · แก้: ใส่เมื่อ compiler รับ (`check_cxx_compiler_flag`) และ `-mbranch-protection=standard` บน arm64 ·
-  · อิมเมจ web-only ขนาดเล็ก (ต้องย้ายไอคอนมา core)
+  · ~~อิมเมจ web-only ขนาดเล็ก~~ — **ทำแล้ว 2026-10-19**: `docker build --target web` · **200 MB** (แบบมีหน้าต่าง 2.5 GB) ·
+  CMake `RB_BUILD_GUI=OFF` → `rclone-browser` จาก `headless.cpp` + `daemon_main.cpp` link แค่ rbcore (QtCore/Network/Sql ไม่มี Widgets) ·
+  ส่วน headless ของ `main.cpp` ย้ายไป `headless.cpp` ใช้ร่วมทั้งสองแบบ · ไอคอนรีโหมดย้ายไป core (`remote_icons.qrc` path เดิม) ·
+  entrypoint ของ web (`docker/web/entrypoint.sh`): PUID/PGID → init script ตัวเดียวกับ image หลัก → `su-exec abc rclone-browser --daemon` ·
+  `docker/install-rclone.sh` ใช้ร่วมสอง image · workflow: ทุก push build+ตรวจ (ไม่มี Widgets · rclone · --help) · publish tag เดิม + `-web` (amd64+arm64) ·
+  **ตรวจจริง**: หน้าเว็บ/API/ไอคอน 200 · รันเป็น abc · rclone 1.75.4 · database สร้างใน /config · `docker stop` → SIGTERM → exit 0 · ลบของทดสอบแล้ว ·
+  image หลักยังใช้ได้ (dev 19991 build ใหม่)
 - ~~ลบโฟลเดอร์ของ Alpine ใน `/media`~~ — **ทำแล้ว 2026-10-19**: image ไม่มี `cdrom` `floppy` `usb` · volume เก่าลบตอนเริ่ม container
   (`rmdir` — เฉพาะที่ว่าง) · ยืนยันใน dev container: เหลือ `films` · ~~รัน test บน Linux (CI)~~ — CI เขียวแล้ว ดูบรรทัด CI ข้างบน
 - ตัวตรวจว่า test อยู่ใน `private slots:` · ขั้นยืนยันว่าตัวโปรแกรมถูก build จริงก่อนรัน test

@@ -36,6 +36,26 @@ Raspberry Pi 4/5, an ARM NAS or a Mac with Apple silicon, pull the same tag
 and each gets its own image. (arm64 is built by emulation, so only for what
 is published; ordinary pushes check amd64.)
 
+## The web-only image
+
+For a server or a NAS where nobody will look at the window: the same tags
+with **`-web`** on the end (`latest-web`, `tgdrive-1.75.4-web`, ...). It is
+`RB_MODE=web` without the other two modes in it -- no desktop, no streaming,
+no X server, nothing of QtWidgets -- and about **200 MB** where the image with
+the window is about 2.5 GB.
+
+```bash
+docker run -d --name rclonebrowser -p 19999:19999 \
+  -v rclonebrowser-config:/config -v /path/to/files:/media \
+  -v /path/to/rclone-config:/rclone-config \
+  ghcr.io/totza2010/rclonebrowser:latest-web
+```
+
+Everything else is the same as `RB_MODE=web` on the other image: the same
+`/config` layout (a volume moves between them as it is), `PUID`/`PGID`,
+`RB_LOCAL_ROOTS`, `/rclone-config`, `RB_RCLONE_REPO`/`RB_RCLONE_VERSION` and
+`/opt/rclone`. Built from the same Dockerfile: `docker build --target web`.
+
 ## Which rclone, and which tag
 
 Two variants, differing only in the rclone inside.

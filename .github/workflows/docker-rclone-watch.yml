@@ -199,6 +199,24 @@ jobs:
             RCLONE_VERSION=${{ steps.rclone.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.name }}
 
+      # The web-only image beside it, the same tags with "-web".
+      - name: Publish the web-only image
+        if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: web
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.check.outputs.exact }}-web
+            ${{ steps.check.outputs.byrclone }}-web
+            ${{ steps.check.outputs.moving }}-web
+          build-args: |
+            RCLONE_REPO=${{ matrix.repo }}
+            RCLONE_VERSION=${{ steps.rclone.outputs.version }}
+
       - name: Say what happened
         if: always() && steps.app.outputs.skip != 'true'
         run: |

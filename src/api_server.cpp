@@ -57,6 +57,7 @@
 static void InitWebUiResources() {
   Q_INIT_RESOURCE(webui);
   Q_INIT_RESOURCE(webui_i18n);
+  Q_INIT_RESOURCE(remote_icons);
 }
 
 namespace {
@@ -2187,9 +2188,8 @@ bool ApiServer::serveWebUi(const HttpRequest &request, QByteArray *body,
   }
 
   // The pictures the window puts beside each kind of remote, so the page can
-  // show the same ones. They are in the application's resources rather than
-  // the web interface's, so a build without the window has none and says
-  // 404, which a page can live with.
+  // show the same ones. In the core's resources (remote_icons.qrc), so the
+  // build with no window has them too; a kind there is none for is 404.
   //
   // The one place a name from outside becomes part of a file name, so it is
   // held to lower-case letters, digits and underscores -- nothing that can

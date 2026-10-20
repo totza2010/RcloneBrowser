@@ -15,7 +15,11 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 # ---- Qt6 Components ----
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
+if(RB_BUILD_GUI)
+  find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
+else()
+  find_package(Qt6 REQUIRED COMPONENTS Core Network Sql)
+endif()
 find_package(Qt6 QUIET OPTIONAL_COMPONENTS Multimedia)
 
 if(Qt6Multimedia_FOUND)
@@ -141,7 +145,7 @@ set(CORE_HEADER
 
 # The Web UI travels inside the library that serves it, so a daemon has no
 # files to go looking for. See docs/WEB-UI.md.
-set(CORE_RESOURCE webui.qrc)
+set(CORE_RESOURCE webui.qrc remote_icons.qrc)
 
 # The page's languages: every webui/i18n/<language>.json, compiled in under
 # :/webui/i18n/. Listed when CMake runs, so a new file needs CMake run again
@@ -165,6 +169,18 @@ add_library(rbcore STATIC ${CORE_SOURCE} ${CORE_HEADER} ${CORE_RESOURCE})
 target_link_libraries(rbcore PUBLIC Qt6::Core Qt6::Network Qt6::Sql)
 target_include_directories(rbcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_precompile_headers(rbcore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch_core.h")
+
+# ---- The program with no window (RB_BUILD_GUI=OFF) ----
+# The core and its own main(): the daemon, --run-task and --list-tasks, the
+# API and the page. No QtWidgets, no QtGui, nothing to draw with -- which is
+# what the web-only image is made from. Same name as the window's program, so
+# whatever starts one starts the other.
+if(NOT RB_BUILD_GUI)
+  add_executable(rclone-browser headless.cpp headless.h daemon_main.cpp)
+  target_link_libraries(rclone-browser PRIVATE rbcore)
+  install(TARGETS rclone-browser RUNTIME DESTINATION bin)
+  return()
+endif()
 
 set(UI
   main_window.ui
@@ -226,6 +242,7 @@ set(OTHER
 set(SOURCE
   pch.cpp
   main.cpp
+  headless.cpp
   main_window.cpp
   remote_widget.cpp
   transfer_dialog.cpp

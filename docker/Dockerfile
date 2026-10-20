@@ -39,6 +39,71 @@ RUN cmake -S /src -B /build -G Ninja \
         -DRB_BUILD_TESTS=OFF \
     && cmake --build /build --parallel
 
+# ---- The web-only image: docker build --target web ---------------------------
+#
+# The daemon and its web page and nothing to draw a window with: no desktop,
+# no streaming, no X server, no QtWidgets. For a server or a NAS where nobody
+# will ever look at the window, at a fraction of the size. It is RB_MODE=web
+# of the image below, without carrying the other two modes.
+
+FROM alpine:${ALPINE_VERSION} AS build-web
+
+RUN apk add --no-cache build-base cmake ninja qt6-qtbase-dev
+
+COPY . /src
+
+RUN cmake -S /src -B /build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DRB_BUILD_TESTS=OFF \
+        -DRB_BUILD_GUI=OFF \
+    && cmake --build /build --parallel
+
+FROM alpine:${ALPINE_VERSION} AS web
+
+ARG RCLONE_REPO=tgdrive/rclone
+ARG RCLONE_VERSION=latest
+ARG TARGETARCH=amd64
+
+# qt6-qtbase-sqlite: the run history's database driver, a package of its own
+# on Alpine (see the image below). shadow and su-exec: the entrypoint gives
+# the user the ids it is asked for, then runs the program as that user.
+COPY docker/install-rclone.sh /usr/lib/rclone-browser/install-rclone.sh
+RUN apk add --no-cache \
+        ca-certificates \
+        fuse3 \
+        qt6-qtbase \
+        qt6-qtbase-sqlite \
+        shadow \
+        su-exec \
+        tzdata \
+    && sh /usr/lib/rclone-browser/install-rclone.sh "${RCLONE_REPO}" "${RCLONE_VERSION}" "${TARGETARCH}" \
+    && addgroup -g 1000 abc \
+    && adduser -D -u 1000 -G abc -h /config -s /bin/sh abc \
+    && mkdir -p /config /media \
+    && echo "web" > /etc/rclone-browser-image
+
+COPY --from=build-web /build/build/rclone-browser /usr/bin/rclone-browser
+# The same preparation the image below runs at start, from the same file.
+COPY docker/rootfs/etc/s6-overlay/s6-rc.d/init-rclonebrowser/run /usr/lib/rclone-browser/init.sh
+COPY docker/web/entrypoint.sh /entrypoint.sh
+COPY VERSION /
+RUN chmod +x /entrypoint.sh
+
+# The same layout and the same boundaries as RB_MODE=web of the image below,
+# so a volume moves from one to the other as it is.
+ENV RB_MODE=web \
+    RB_LOCAL_ROOTS=/media \
+    RB_API_ADDRESS=0.0.0.0 \
+    HOME=/config \
+    XDG_CONFIG_HOME=/config \
+    XDG_DATA_HOME=/config
+
+EXPOSE 19999
+VOLUME ["/config"]
+ENTRYPOINT ["/entrypoint.sh"]
+
+# ---- The image with the window (the default) ----------------------------------
+
 FROM ghcr.io/linuxserver/baseimage-selkies:${SELKIES_TAG}
 
 # Which rclone goes in the image.
@@ -62,6 +127,8 @@ FROM ghcr.io/linuxserver/baseimage-selkies:${SELKIES_TAG}
 ARG RCLONE_REPO=tgdrive/rclone
 ARG RCLONE_VERSION=latest
 ARG TARGETARCH=amd64
+
+COPY docker/install-rclone.sh /usr/lib/rclone-browser/install-rclone.sh
 
 # font-noto-thai is here because the remote and folder names in use are
 # Thai. font-noto-cjk is left out at roughly 100 MB.
@@ -88,29 +155,7 @@ RUN apk add --no-cache \
         qt6-qtbase-x11 \
         qt6-qtmultimedia \
         xterm \
-    && version="${RCLONE_VERSION}" \
-    && if [ "$version" = "latest" ]; then \
-           version="$(wget -qO- "https://api.github.com/repos/${RCLONE_REPO}/releases/latest" \
-                      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
-                      | head -1)"; \
-           [ -n "$version" ] || { echo "cannot resolve the latest ${RCLONE_REPO} release" >&2; exit 1; }; \
-           echo "resolved ${RCLONE_REPO} latest to v${version}"; \
-       fi \
-    && wget -q -O /tmp/rclone.zip \
-        "https://github.com/${RCLONE_REPO}/releases/download/v${version}/rclone-v${version}-linux-${TARGETARCH}.zip" \
-    && unzip -q /tmp/rclone.zip -d /tmp \
-    # Kept out of /usr/bin, which holds only a link to whichever rclone is in
-    # use. The container may be told at start to use a different one
-    # (RB_RCLONE_REPO, RB_RCLONE_VERSION, or one mounted at /opt/rclone), and
-    # whatever happens to that choice, this one is still here to fall back on.
-    && mkdir -p /usr/lib/rclone-bundled \
-    && mv /tmp/rclone-*-linux-${TARGETARCH}/rclone /usr/lib/rclone-bundled/rclone \
-    && chmod +x /usr/lib/rclone-bundled/rclone \
-    && ln -s /usr/lib/rclone-bundled/rclone /usr/bin/rclone \
-    && rm -rf /tmp/rclone* \
-    # Recorded so a running container can say where its rclone came from
-    # without anyone having to remember how it was built.
-    && printf '%s v%s\n' "${RCLONE_REPO}" "$version" > /etc/rclone-source
+    && sh /usr/lib/rclone-browser/install-rclone.sh "${RCLONE_REPO}" "${RCLONE_VERSION}" "${TARGETARCH}"
 
 COPY --from=build /build/build/rclone-browser /usr/bin/rclone-browser
 
