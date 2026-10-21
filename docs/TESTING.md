@@ -158,6 +158,8 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
   แก้หน้าเว็บแล้วลองได้ทันทีโดยไม่ต้อง build อะไร
 - ฉบับเบา (core + หน้าเว็บ): `docker compose -f docker/compose.dev.yaml --profile lite up -d --build` แล้ว
   `--base http://127.0.0.1:19992 --container rclonebrowser-dev-lite` — ทั้ง `check_ui` และ `verify_live` ต้องผ่านเท่าฉบับเต็ม
+- `--only new_remote,log_level` รันเฉพาะบางกลุ่ม (ชื่อกลุ่มดูได้จาก `--only x`) — ระหว่างแก้เท่านั้น
+  แก้ส่วนไหนรันกลุ่มนั้น · รันทั้งชุดเป็นครั้งคราว (เช่น ก่อนออกรุ่น)
 - `--app-js <ไฟล์>` ใช้ app.js ไฟล์นั้นแทน (เช่นเวอร์ชันเก่า เพื่อดูว่า test จับบั๊กได้)
 
 **ข้อไหน FAIL**: เมื่อสิ่งที่มันตรวจเองไม่เป็นตามนั้น **หรือ** มีอย่างใดอย่างหนึ่งต่อไปนี้ระหว่างทาง:
@@ -184,6 +186,7 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
 | Serve WebDAV: ที่อยู่บนการ์ด · Copy address · Log ระหว่างรันเปิดได้ · Stop: ถามก่อน (Cancel / Yes) | V-52 · V-80 · V-86 |
 | Jobs ระหว่าง transfer (จำกัดความเร็ว): ไฟล์ทั้งหมด · ความเร็วตอนนี้ = ผลรวมรายไฟล์ · ค่าเฉลี่ย | V-87 |
 | API → Program settings: ระดับ log ของ rclone (เลือก · บันทึก · ตั้งกลับ) | V-88 |
+| New remote: ชนิดขึ้นแม้ daemon ยังอ่านอยู่ (จำลองด้วยคำตอบ "ยังอ่านอยู่") · Sign in เฉพาะชนิดที่ต้อง · ไม่บันทึกอะไร | V-90 |
 | Mount: ฟอร์ม · เก็บเป็น task · Docker (ไม่มี FUSE): error พร้อมคำของ rclone · Windows: ไดรฟ์ขึ้นจริง · สคริปต์ · Unmount จากการ์ด | V-36 · V-75 · V-79 |
 | Schedules: จากการ์ด task (ค่าเริ่มต้น) · Mon–Fri 07:00 · แก้เป็น cron · ปิด/เปิด · ลบ (task ยังอยู่) | V-41 |
 | Tasks: ลบ task (ถามก่อน) | V-38 |

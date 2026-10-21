@@ -24,3 +24,4 @@ ui-report.md
 ui-failures/
 # tests/ui: Playwright, a test dependency only
 tests/ui/.venv/
+graphify-out/

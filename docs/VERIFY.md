@@ -2242,6 +2242,21 @@ marker: `ProcessFor` ใน `rclone_config.cpp`
 | 1 | test: กล่องรีโหมดใหม่ · Save · Cancel ทันที · กล่องหาย | หน้าต่างยังอยู่ (ก่อนแก้: crash) | ✅ **PASS** | AI / 2026-10-20 · `test_window` · ไม่มีตัวแก้ → exit 139 · มี → ผ่าน |
 | 2 | หน้าต่าง · New remote… · กรอก · Save แล้วกด Cancel เร็วๆ | หน้าต่างไม่ปิดตัวเอง | ⬜ | |
 
+### V-90 · ฟอร์ม New remote บนหน้าเว็บ: ชนิดของรีโหมดขึ้นแม้เพิ่งเริ่ม · Sign in เฉพาะชนิดที่ต้อง
+
+marker: `loadProviderList` (ถามซ้ำเมื่อ `loaded: false`) · `drawRemoteFields` (ซ่อน Sign in ก่อน)
+
+ผู้ใช้เจอบน container แบบเบาที่เพิ่งเริ่ม (2026-10-21): New remote → พิมพ์ "te" → รายการชนิดว่าง · กล่อง Sign in ขึ้นทั้งที่ยังไม่เลือกชนิด ·
+สาเหตุ: daemon ยังถาม rclone อยู่ ตอบ `{"loaded":false,"providers":[]}` หน้าเว็บถือว่ารายการว่างคือคำตอบ ไม่ถามซ้ำ ·
+และเมื่อไม่มีชนิดที่เลือก ฟอร์มไม่ซ่อน Sign in ของชนิดที่เลือกครั้งก่อน
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | `check_ui --only new_remote`: สองคำตอบแรกของ `/providers` เป็น "ยังอ่านอยู่" | รายการขึ้นเอง (71 ชนิด · "te" เจอ teldrive) · Sign in ซ่อน | ✅ **PASS** | AI / 2026-10-21 · 19992 · app.js ก่อนแก้ → FAIL |
+| 2 | เลือก drive → Sign in ขึ้น · Cancel · เปิดใหม่ | Sign in ซ่อน (เดิมค้าง) | ✅ **PASS** | AI / 2026-10-21 · 19992 · ก่อนแก้ → FAIL |
+| 3 | `check_ui` ทั้งชุดบน 19991 และ 19992 | ผ่านครบ | ✅ **PASS** | AI / 2026-10-21 · 19991 86/86 · 19992 86/86 (รอบก่อน Drive ช้า rename 85 วิ → 4 FAIL, รันใหม่ผ่าน) |
+| 4 | หน้าต่าง: New remote ทันทีหลังเปิดโปรแกรม | รายการชนิดขึ้นเมื่อ rclone ตอบ (กล่องของหน้าต่างรอ `whenBackendsKnown` อยู่แล้ว) | ⬜ | |
+
 ### V-89 · compose แบบเบา (core + หน้าเว็บ) และ .env ที่มีทุกตัวเลือก
 
 marker: `docker/compose.lite.yaml` · `docker/.env.example` · profile `lite` ใน `compose.dev.yaml` · `chown abc:abc /config /media` (Dockerfile ชั้น web)

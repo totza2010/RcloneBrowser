@@ -3972,10 +3972,25 @@ dropTarget.addEventListener("drop", async (event) => {
 
 const remoteForm = { editing: null, provider: null, shown: {}, providers: [], question: null, made: "" };
 
+// The kinds of remote rclone has. Just after the program starts it is still
+// asking rclone, and says so ("loaded": false) with an empty list: asked
+// again each second while the form is open, rather than taking the empty
+// list for the answer -- a form with no kinds in it, and nothing to say why
+// (2026-10-21, the light container just started).
 async function loadProviderList() {
   if (remoteForm.providers.length) return remoteForm.providers;
-  const answer = await api("GET", "/providers");
-  if (answer.status === 200) remoteForm.providers = answer.data.providers || [];
+  for (let tries = 0; tries < 30; tries++) {
+    const answer = await api("GET", "/providers").catch(() => null);
+    if (answer && answer.status === 200 && (answer.data.loaded || (answer.data.providers || []).length)) {
+      remoteForm.providers = answer.data.providers || [];
+      return remoteForm.providers;
+    }
+    if ($("remotebox").classList.contains("hidden")) return remoteForm.providers; // closed meanwhile
+    $("remote-form-type").innerHTML = "<option>reading the kinds of remote from rclone…</option>";
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  $("remote-form-about").textContent =
+    "rclone has not said what kinds of remote it has. Cancel, and open this again in a moment.";
   return remoteForm.providers;
 }
 
@@ -4028,6 +4043,9 @@ function remoteField(option, current, isSet) {
 async function drawRemoteFields() {
   const type = remoteForm.editing ? remoteForm.editing.type : $("remote-form-type").value;
   remoteForm.provider = null;
+  // No kind chosen: nothing to sign in to. Left as it was, the sign-in of
+  // the kind chosen the last time the form was open stayed on show.
+  $("remote-form-signin").classList.add("hidden");
   $("remote-form-fields").innerHTML = "";
   $("remote-form-more").innerHTML = "";
   $("remote-form-advanced").classList.add("hidden");

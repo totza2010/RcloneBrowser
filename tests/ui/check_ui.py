@@ -149,7 +149,8 @@ def step(page, watch, name, action, allowed=(), toast_ok=False):
     # Whatever is left open is closed, so the next step starts clean.
     # The transfer form is left open for the next step to go on with,
     # unless this one went wrong.
-    for close in ("#ask-no", "#log-close", "#result-close") + (("#pick-cancel", "#task-cancel") if problems else ()):
+    for close in ("#ask-no", "#log-close", "#result-close") + (
+            ("#pick-cancel", "#task-cancel", "#remote-form-cancel") if problems else ()):
         if shown(page, close):
             page.click(close)
     page.evaluate("document.getElementById('toast').classList.add('hidden')")
@@ -347,6 +348,59 @@ def check_many(page, watch, api, ctx):
             entry_row(page, scratch + "/" + name).wait_for(state="detached", timeout=WAIT)
         return "asked %r · both gone" % asked
     step(page, watch, "remote: choose two, Delete both (V-64)", delete_two, toast_ok=True)
+
+
+def check_new_remote_form(page, watch, api, ctx):
+    """New remote, opened while the program is still asking rclone what kinds
+    of remote there are, as just after it starts: the kinds come once they
+    are known, and Sign in shows only for a kind that signs in (V-90).
+    Nothing is saved: the form is cancelled."""
+    answered_early = {"n": 0}
+
+    def still_reading(route):
+        if answered_early["n"] < 2:
+            answered_early["n"] += 1
+            route.fulfill(status=200, content_type="application/json",
+                          body='{"loaded":false,"providers":[]}')
+        else:
+            route.continue_()
+
+    def open_form():
+        page.goto(ctx["base"] + "/#/remotes")
+        page.wait_for_selector("#tab-remotes.on", timeout=5000)
+        page.click("[data-remote-new]")
+        page.wait_for_selector("#remotebox:not(.hidden)", timeout=5000)
+
+    def kinds_come():
+        page.route("**/api/v1/providers", still_reading)
+        try:
+            open_form()
+            page.wait_for_function("document.querySelectorAll('#remote-form-type option[value]').length > 10",
+                                   timeout=15000)
+        finally:
+            page.unroute("**/api/v1/providers", still_reading)
+        kinds = page.locator("#remote-form-type option[value]").count()
+        assert answered_early["n"] == 2, "asked %d times while still reading" % answered_early["n"]
+        assert not shown(page, "#remote-form-signin"), "Sign in shown with no kind chosen"
+        page.fill("#remote-form-filter", "te")
+        teldrive = page.locator('#remote-form-type option[value="teldrive"]').count()
+        return "%d kinds after two 'still reading' answers · Sign in hidden · 'te' %s teldrive" % (
+            kinds, "finds" if teldrive else "does not find (this rclone has none)")
+    step(page, watch, "New remote: the kinds come even just after a start (V-90)", kinds_come)
+
+    def sign_in_only_for_its_kind():
+        page.fill("#remote-form-filter", "drive")
+        page.select_option("#remote-form-type", "drive")
+        page.wait_for_selector("#remote-form-signin:not(.hidden)", timeout=10000)
+        page.click("#remote-form-cancel")
+        open_form()
+        page.wait_for_function("document.querySelectorAll('#remote-form-type option[value]').length > 10",
+                               timeout=15000)
+        page.wait_for_timeout(500)
+        assert not shown(page, "#remote-form-signin"), "the last kind's Sign in is still on show"
+        page.click("#remote-form-cancel")
+        return "drive: Sign in · opened again: hidden"
+    step(page, watch, "New remote: Sign in only for a kind that signs in (V-90)", sign_in_only_for_its_kind)
 
 
 def check_api_tab(page, watch, api, ctx):
@@ -1553,6 +1607,9 @@ def main():
     parser.add_argument("--from-source", action="store_true",
                         help="the page from src/webui (index.html, app.js, app.css) instead of the one "
                              "built into the program: a change to it, tried without building anything")
+    parser.add_argument("--only", help="run only these groups of steps, comma-separated "
+                        "(tabs, queue, remote, transfer_form, ..., phone) -- while working on one; "
+                        "the groups a change touches; the whole run now and then")
     parser.add_argument("--slow", type=int, default=0, help="ms between actions, with --show")
     args = parser.parse_args()
     for stream in (sys.stdout, sys.stderr):
@@ -1613,23 +1670,36 @@ def main():
                 return page.title()
             step(page, watch, "the page opens, signed in", load)
 
-            check_tabs(page, watch)
-            check_queue(page, watch, api, ctx)
-            check_remote(page, watch, api, ctx)
-            check_transfer_form(page, watch, api, ctx)
-            check_history_and_addresses(page, watch, api, ctx)
-            check_copy_move(page, watch, api, ctx)
-            check_browse_and_menu(page, watch, api, ctx)
-            check_serve_and_stop(page, watch, api, ctx)
-            check_running_transfer(page, watch, api, ctx)
-            check_mount(page, watch, api, ctx)
-            check_schedules(page, watch, api, ctx)
-            check_many(page, watch, api, ctx)
-            check_api_tab(page, watch, api, ctx)
-            check_log_level_setting(page, watch, api, ctx)
-            check_backup_and_schedule(page, watch, api, ctx)
-            check_tasks(page, watch, api, ctx)
-            check_phone(page, watch, ctx)
+            # In order: some lean on what one before them made (the remote
+            # steps make the folders the transfer form sends, and so on).
+            checks = [
+                ("tabs", lambda: check_tabs(page, watch)),
+                ("queue", lambda: check_queue(page, watch, api, ctx)),
+                ("remote", lambda: check_remote(page, watch, api, ctx)),
+                ("transfer_form", lambda: check_transfer_form(page, watch, api, ctx)),
+                ("history", lambda: check_history_and_addresses(page, watch, api, ctx)),
+                ("copy_move", lambda: check_copy_move(page, watch, api, ctx)),
+                ("browse", lambda: check_browse_and_menu(page, watch, api, ctx)),
+                ("serve", lambda: check_serve_and_stop(page, watch, api, ctx)),
+                ("running_transfer", lambda: check_running_transfer(page, watch, api, ctx)),
+                ("mount", lambda: check_mount(page, watch, api, ctx)),
+                ("schedules", lambda: check_schedules(page, watch, api, ctx)),
+                ("many", lambda: check_many(page, watch, api, ctx)),
+                ("new_remote", lambda: check_new_remote_form(page, watch, api, ctx)),
+                ("api_tab", lambda: check_api_tab(page, watch, api, ctx)),
+                ("log_level", lambda: check_log_level_setting(page, watch, api, ctx)),
+                ("backup", lambda: check_backup_and_schedule(page, watch, api, ctx)),
+                ("tasks", lambda: check_tasks(page, watch, api, ctx)),
+                ("phone", lambda: check_phone(page, watch, ctx)),
+            ]
+            only = set(filter(None, (args.only or "").split(",")))
+            unknown = only - {name for name, _ in checks}
+            if unknown:
+                sys.exit("no such group: %s (there are: %s)" % (
+                    ", ".join(sorted(unknown)), ", ".join(name for name, _ in checks)))
+            for name, run in checks:
+                if not only or name in only:
+                    run()
             browser.close()
     finally:
         clean_up(api, ctx)
