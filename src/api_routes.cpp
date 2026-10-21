@@ -212,8 +212,11 @@ QList<Route> build() {
         "", "", "200: the settings"),
       r("PUT", "/api/v1/settings", kSystem, "Change the program's own settings",
         "Only what is given changes. A value the environment sets is "
-        "refused. An empty localRoots is every folder of this machine.",
-        "", R"({"streamIdleMinutes":30,"localRoots":["/media","/downloads"]})",
+        "refused. An empty localRoots is every folder of this machine. "
+        "rcloneLogLevel: how much rclone writes into a transfer's log -- "
+        "ERROR, NOTICE, INFO (what was copied) or DEBUG; from the next "
+        "transfer on.",
+        "", R"({"streamIdleMinutes":30,"localRoots":["/media","/downloads"],"rcloneLogLevel":"INFO"})",
         "200: the settings now; 400: not a number of minutes, or not a "
         "folder; 409: the environment sets it"),
       r("GET", "/api/v1/watches", kTasks, "Tasks that run when their folder changes",

@@ -288,6 +288,14 @@ Nothing outside it can be listed, uploaded from or downloaded to, including
 through a link that points out. More than one folder: mount each somewhere
 and list them, separated by semicolons, in `RB_LOCAL_ROOTS`.
 
+## How much rclone writes into a transfer's log
+
+`RB_RCLONE_LOG_LEVEL`: `ERROR`, `NOTICE`, `INFO` (the default: each file
+copied) or `DEBUG` (everything rclone does -- long). Without it, the level is
+chosen on the page (API → Program settings) or in the window (Preferences →
+Logs); set here, it is shown there and cannot be changed there. Each job's log
+is under its Log button, while it runs as well as afterwards.
+
 ## What each mode costs
 
 The image is the same size whichever mode is chosen, about 635 MB: an image

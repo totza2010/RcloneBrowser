@@ -26,6 +26,7 @@ docs/TESTING.md.
 """
 
 import argparse
+import re
 import datetime
 import os
 import sys
@@ -398,6 +399,32 @@ def check_api_tab(page, watch, api, ctx):
         drop.wait_for(state="detached", timeout=10000)
         return "Cancel kept it, Yes removed it"
     step(page, watch, "API tab: remove a webhook, asked first", drop_hook)
+
+
+def check_log_level_setting(page, watch, api, ctx):
+    """API tab → Program settings: how much rclone writes into a transfer's
+    log (V-88). Set, read back, and put back as it was."""
+    st, settings, _ = api.get("/settings")
+    if st != 200 or "rcloneLogLevel" not in (settings or {}):
+        return say("fail", "Program settings: rclone's log level (V-88)", "not in /settings: %s" % settings)
+    was = settings["rcloneLogLevel"]
+    if settings.get("rcloneLogLevelFromEnvironment"):
+        return say("skip", "Program settings: rclone's log level (V-88)", "set by RB_RCLONE_LOG_LEVEL")
+
+    def choose():
+        page.click('#tabs button[data-tab="api"]')
+        page.wait_for_selector("#set-log-level", timeout=10000)
+        offered = page.locator("#set-log-level option").all_inner_texts()
+        page.select_option("#set-log-level", "DEBUG")
+        page.locator("#settings-form button[type=submit]").click()
+        page.wait_for_timeout(800)
+        now = api.get("/settings")[1].get("rcloneLogLevel")
+        assert now == "DEBUG", "the program says %r" % now
+        return "offered %s · DEBUG saved" % ", ".join(o.split(" ")[0] for o in offered)
+    try:
+        step(page, watch, "Program settings: rclone's log level (V-88)", choose, toast_ok=True)
+    finally:
+        api.call("PUT", "/settings", {"rcloneLogLevel": was})
 
 
 def check_backup_and_schedule(page, watch, api, ctx):
@@ -1156,6 +1183,16 @@ def check_serve_and_stop(page, watch, api, ctx):
         copy = card.locator("[data-copy-text]")
         address = copy.get_attribute("data-copy-text")
         assert address and "18911" in address, "the card's address: %r" % address
+        # Its log while it runs: opened, with what it runs at the top -- a 404
+        # before, for a serve nobody had used yet (2026-10-21). What rclone has
+        # said, if anything yet, follows.
+        card.locator('[data-log="%s"]' % made[0]["requestId"]).click()
+        page.wait_for_selector("#logbox:not(.hidden)", timeout=10000)
+        page.wait_for_function("document.getElementById('log-body').innerText.includes('# command:')",
+                               timeout=10000)
+        said = [l for l in page.locator("#log-body").inner_text().splitlines()
+                if re.search(r"\d{4}/\d\d/\d\d \d\d:\d\d:\d\d", l)]
+        page.click("#log-close")
         copy.click()
         page.wait_for_timeout(500)
         if shown(page, "#askbox"):
@@ -1165,8 +1202,9 @@ def check_serve_and_stop(page, watch, api, ctx):
             how = "offered in a box to copy (no clipboard here)"
         else:
             how = "copied"
-        return "%s · Copy address: %s" % (address, how)
-    step(page, watch, "Serve over WebDAV: the card has the address (V-52 #5, V-63 #4)", serve, toast_ok=True)
+        return "%s · Copy address: %s · its log while serving opens: %d lines from rclone so far" % (address, how, len(said))
+    step(page, watch, "Serve over WebDAV: the card has the address, its log while it runs (V-52 #5, V-86)",
+         serve, toast_ok=True)
 
     if not ctx.get("serve_job"):
         return
@@ -1362,6 +1400,48 @@ def check_browse_and_menu(page, watch, api, ctx):
     step(page, watch, "Right-click → Download… with two chosen (V-78 #2)", menu_download, toast_ok=True)
 
 
+def check_running_transfer(page, watch, api, ctx):
+    """A transfer while it runs, on the Jobs tab: every file of its source,
+    the speed now and on average (V-87). Slowed so it is still running."""
+    path = "/remotes/%s/receive?path=%s&name=slow.bin" % (ctx["remote"], urllib.parse.quote(ctx["scratch"]))
+    st, body, _ = api.call("POST", path, raw=os.urandom(6 * 1024 * 1024), timeout=600)
+    if st != 202:
+        return say("fail", "a running transfer on the Jobs tab", "could not start one: %s" % st)
+    rid = body["requestId"]
+    for _ in range(30):
+        st, _, _ = api.post("/jobs/%s/bandwidth" % urllib.parse.quote(rid, safe=""), {"rate": "150k"})
+        if st == 200:
+            break
+        time.sleep(1)
+    else:
+        return say("skip", "a running transfer on the Jobs tab", "it ended before it could be slowed")
+    ctx["slow_job"] = rid
+
+    def on_the_card():
+        page.click('#tabs button[data-tab="jobs"]')
+        card = job_card(page, rid)
+        card.wait_for(timeout=10000)
+        page.wait_for_function(
+            "(() => { const c = document.querySelector('#tab-jobs [data-job-open=\"%s\"]');"
+            " return c && c.closest('.card').innerText.includes('of 1 files'); })()" % rid, timeout=20000)
+        line = " ".join(card.inner_text().split())
+        page.click('[data-job-open="%s"]' % rid)
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=10000)
+        page.wait_for_function("document.getElementById('result-body').innerText.includes('on average')",
+                               timeout=15000)
+        speed = next((l for l in page.locator("#result-body").inner_text().splitlines() if "/s" in l), "")
+        job = next(j for j in api.get("/jobs")[1] if j["requestId"] == rid)
+        s = job.get("stats") or {}
+        now = sum((f.get("speed") or 0) for f in s.get("transferring") or [])
+        assert s.get("sourceFiles") == 1, "sourceFiles %s" % s.get("sourceFiles")
+        assert not now or abs((s.get("speed") or 0) - now) < now * 0.5 + 1, \
+            "the speed shown %s is not what the files go at (%s)" % (s.get("speed"), now)
+        return "card: %s · box: %s" % (line[:90], speed.strip()[:80])
+    step(page, watch, "Jobs: a running transfer -- every file, speed now and on average (V-87)", on_the_card)
+    api.post("/jobs/%s/stop" % urllib.parse.quote(rid, safe=""))
+    ctx["slow_job"] = None
+
+
 def check_tasks(page, watch, api, ctx):
     def forget():
         page.click('#tabs button[data-tab="tasks"]')
@@ -1436,7 +1516,7 @@ def clean_up(api, ctx):
             api.call("DELETE", "/queue/" + urllib.parse.quote(entry["requestId"], safe=""))
     for task in ctx.get("form_tasks", []):
         api.call("DELETE", "/tasks/" + urllib.parse.quote(task, safe=""))
-    for job in ("serve_job", "mount_job"):
+    for job in ("serve_job", "mount_job", "slow_job"):
         if ctx.get(job):
             api.post("/jobs/%s/stop" % urllib.parse.quote(ctx[job], safe=""))
     if ctx.get("ui_schedule"):
@@ -1541,10 +1621,12 @@ def main():
             check_copy_move(page, watch, api, ctx)
             check_browse_and_menu(page, watch, api, ctx)
             check_serve_and_stop(page, watch, api, ctx)
+            check_running_transfer(page, watch, api, ctx)
             check_mount(page, watch, api, ctx)
             check_schedules(page, watch, api, ctx)
             check_many(page, watch, api, ctx)
             check_api_tab(page, watch, api, ctx)
+            check_log_level_setting(page, watch, api, ctx)
             check_backup_and_schedule(page, watch, api, ctx)
             check_tasks(page, watch, api, ctx)
             check_phone(page, watch, ctx)

@@ -135,6 +135,13 @@ void JobLogWriter::appendLine(const QString &line) {
   }
 
   mStream << line << '\n';
+  // In the file now, not when the job ends: the log is read while the job
+  // runs -- the page's and the window's Log -- and a program that dies mid-job
+  // keeps what was said. Held in the stream's buffer, a 1.17 TB upload showed
+  // its header alone for as long as it ran. rclone prints a line per file, not
+  // per byte, so writing each one out costs nothing worth saving.
+  mStream.flush();
+  mFile.flush();
 
   // Bytes, not characters. QString::size() counts UTF-16 units, so a log full
   // of Thai or CJK file names counted about a third of what it was really

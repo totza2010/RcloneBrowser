@@ -99,6 +99,20 @@ private slots:
     QVERIFY(text.contains("(finished)"));
   }
 
+  // Readable while the job runs, not only once it has ended. Found on a real
+  // 1.17 TB upload: after ten minutes and three files copied the file held
+  // its header alone -- every line rclone had printed was waiting in a
+  // buffer -- so the page's and the window's Log showed nothing, and a
+  // program that died mid-job would have lost them.
+  void eachLineIsInTheFileAsSoonAsItIsWritten() {
+    JobLogWriter writer;
+    writer.begin("copy", "running1", {"rclone", "copy", "src", "dst"});
+    writer.appendLine("2026/10/21 00:19:12 INFO  : a.mkv: Copied (new)");
+    const QString text = readAll(writer.filePath());
+    QVERIFY2(text.contains("a.mkv: Copied (new)"), qPrintable(text));
+    writer.finish("finished");
+  }
+
   // Found on a real 388 GiB copy of files with Thai names: the counter said
   // 1,298,410 and the file was 1,615,532. It was counting QString characters,
   // so anything outside ASCII counted as less than it wrote -- which both

@@ -79,6 +79,12 @@ QString JobKindToString(JobKind kind);
 // is kept.
 bool JobKindIsQuestion(JobKind kind);
 
+// What "rclone size" is given to count a transfer's source as the transfer
+// will see it: the source, and the job's filters (and nothing else -- a
+// flag of copy's own would be refused). Empty for what is not a copy, sync
+// or move of a source to a destination.
+QStringList SourceCountArgs(const QStringList &jobArgs);
+
 // What the job is, in words, for whoever is showing it. Derived from the task
 // when the job is created; kept here so an API can report it without asking
 // the window.
@@ -295,5 +301,8 @@ private:
   bool mStopRequested = false;
   JobStats mStats;
   JobStats mTotals; // what rclone stated on its way out
+  qint64 mSourceFiles = -1;
+  QProcess *mCounter = nullptr; // "rclone size" of the source, while it counts
+  void countSource();
   bool mHaveTotals = false;
 };

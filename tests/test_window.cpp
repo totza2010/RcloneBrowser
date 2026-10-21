@@ -20,6 +20,7 @@
 #include "running_job.h"
 #include "serve_dialog.h"
 #include "transfer_dialog.h"
+#include "program_settings.h"
 #include "progress_dialog.h"
 #include "remote_widget.h"
 #include "utils.h"
@@ -834,6 +835,23 @@ private slots:
     GetSettings()->setValue(QStringLiteral("Settings/defaultRcloneOptions"), QString());
   }
 
+  // Preferences → Logs: how much rclone writes into a transfer's log, the
+  // value the page's Program settings changes too.
+  void theLogLevelIsChosenInPreferences() {
+    auto *menuItem = mWindow->findChild<QAction *>(QStringLiteral("preferences"));
+    QVERIFY(menuItem != nullptr);
+    auto chosen = onNextBox([](QWidget *box) {
+      auto *level = box->findChild<QComboBox *>(QStringLiteral("rcloneLogLevel"));
+      level->setCurrentIndex(level->findData(QStringLiteral("DEBUG")));
+      box->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    menuItem->trigger();
+    QTRY_VERIFY(chosen->seen);
+    QCOMPARE(ProgramSettings::RcloneLogLevel(), QStringLiteral("DEBUG"));
+    QCOMPARE(ProgramSettings::RcloneLogLevelFlags(), QStringList{QStringLiteral("-vv")});
+    QVERIFY(ProgramSettings::SetRcloneLogLevel(QStringLiteral("INFO"), nullptr));
+  }
+
   // A job's card: Stop asks first; No leaves it running, Yes stops it.
   void aJobsCardStopsItAfterAsking() {
     qputenv("FAKE_RCLONE_SLEEP_MS", "20000");
@@ -851,6 +869,12 @@ private slots:
     }(), 10000);
     // Where a person would see it: the Jobs tab.
     find<QTabWidget>("tabs")->setCurrentIndex(1);
+    // Out of every file the source has (the fake's "size" says 3), not of
+    // the files rclone has begun so far (2026-10-21).
+    auto *transferred = card->findChild<QLineEdit *>(QStringLiteral("transferred"));
+    QVERIFY(transferred != nullptr);
+    QTRY_VERIFY2_WITH_TIMEOUT(transferred->text().endsWith(QLatin1String("/ 3")),
+                              qPrintable(transferred->text()), 5000);
     auto *stop = card->findChild<QToolButton *>(QStringLiteral("cancel"));
     QVERIFY(stop != nullptr);
     QVERIFY2(card->isRunning, qPrintable(QStringLiteral("the card says it is not running; the job is %1")

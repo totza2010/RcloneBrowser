@@ -167,6 +167,11 @@ QJsonObject describeSettings() {
                 QJsonArray::fromStringList(ProgramSettings::LocalRoots()));
   object.insert(QStringLiteral("localRootsFromEnvironment"),
                 ProgramSettings::LocalRootsFromEnvironment());
+  object.insert(QStringLiteral("rcloneLogLevel"), ProgramSettings::RcloneLogLevel());
+  object.insert(QStringLiteral("rcloneLogLevels"),
+                QJsonArray::fromStringList(ProgramSettings::RcloneLogLevels()));
+  object.insert(QStringLiteral("rcloneLogLevelFromEnvironment"),
+                ProgramSettings::RcloneLogLevelFromEnvironment());
   return object;
 }
 
@@ -2309,25 +2314,38 @@ void ApiServer::watchWhatHappens() {
     broadcast(QStringLiteral("job"), describe(*job));
   };
 
+  const auto follow = [this, sendJob](RunningJob *job) {
+    // The figures come from rclone about once a second, which is already the
+    // rate a dashboard wants. Forwarding them beats every client polling for
+    // them separately.
+    QObject::connect(job, &RunningJob::statsUpdated, this,
+                     [sendJob, job]() { sendJob(job); });
+    // A mount's script says things and ends while the mount goes on, with no
+    // figures to carry the news: each is told as it happens, or a page
+    // showing the job would say "running" with no output for as long as it
+    // is open.
+    QObject::connect(job, &RunningJob::scriptOutputLine, this,
+                     [sendJob, job]() { sendJob(job); });
+    QObject::connect(job, &RunningJob::scriptFinished, this,
+                     [sendJob, job]() { sendJob(job); });
+    QObject::connect(job, &RunningJob::scriptFailed, this,
+                     [sendJob, job]() { sendJob(job); });
+  };
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobStarted, this,
-                   [this, sendJob](RunningJob *job) {
+                   [sendJob, follow](RunningJob *job) {
                      sendJob(job);
-                     // The figures come from rclone about once a second, which
-                     // is already the rate a dashboard wants. Forwarding them
-                     // beats every client polling for them separately.
-                     QObject::connect(job, &RunningJob::statsUpdated, this,
-                                      [sendJob, job]() { sendJob(job); });
-                     // A mount's script says things and ends while the mount
-                     // goes on, with no figures to carry the news: each is
-                     // told as it happens, or a page showing the job would
-                     // say "running" with no output for as long as it is open.
-                     QObject::connect(job, &RunningJob::scriptOutputLine, this,
-                                      [sendJob, job]() { sendJob(job); });
-                     QObject::connect(job, &RunningJob::scriptFinished, this,
-                                      [sendJob, job]() { sendJob(job); });
-                     QObject::connect(job, &RunningJob::scriptFailed, this,
-                                      [sendJob, job]() { sendJob(job); });
+                     follow(job);
                    });
+  // And those already running. Watching begins with the first page that
+  // listens, and a job can be older than that: the window runs a task the
+  // moment it opens. Such a job sent no news of itself for as long as it ran
+  // -- a 1.17 TB upload moved on the page only every 30 s, when it read
+  // everything again (2026-10-21).
+  for (RunningJob *job : JobRegistry::instance().jobs()) {
+    if (job->isRunning()) {
+      follow(job);
+    }
+  }
   QObject::connect(&JobRegistry::instance(), &JobRegistry::jobFinished, this,
                    sendJob);
 
@@ -3179,6 +3197,12 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
                           QStringLiteral("bad_field"), why);
       }
     }
+    if (given.contains(QStringLiteral("rcloneLogLevel")) &&
+        !ProgramSettings::SetRcloneLogLevel(given.value(QStringLiteral("rcloneLogLevel")).toString(),
+                                            &why)) {
+      return refuseTask(ProgramSettings::RcloneLogLevelFromEnvironment() ? 409 : 400,
+                        QStringLiteral("bad_field"), why);
+    }
     qCDebug(rbApp) << "API changed the program's settings";
     *body = toJson(describeSettings());
     return 200;
@@ -3964,6 +3988,20 @@ int ApiServer::get(const HttpRequest &request, QByteArray *body,
                  path.size() - QStringLiteral("/api/v1/jobs//log").size());
 
     const QString file = logPathFor(id);
+    // Running, and nothing said yet -- a serve nobody has used, a copy still
+    // listing. Its file is made with its first line; until then it is still
+    // a job with a log to open, and what it runs is the start of that log.
+    // (A 404 here answered the Log button on a running job's card.)
+    const RunningJob *running = JobRegistry::instance().find(id);
+    if ((file.isEmpty() || !QFileInfo::exists(file)) && running != nullptr &&
+        running->isRunning() && !JobKindIsQuestion(running->kind()) &&
+        JobLogWriter::isEnabled()) {
+      *contentType = "text/plain; charset=utf-8";
+      *body = "# rclone-browser job log\n# command: " +
+              running->displayCommand().join(QLatin1Char(' ')).toUtf8() +
+              "\n\n# rclone has printed nothing yet\n";
+      return 200;
+    }
     if (file.isEmpty() || !QFileInfo::exists(file)) {
       // Told apart on purpose: a job that wrote no log (logging off, or
       // rclone printed nothing) is not the same as a job that never was.

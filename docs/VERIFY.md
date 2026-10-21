@@ -2242,6 +2242,58 @@ marker: `ProcessFor` ใน `rclone_config.cpp`
 | 1 | test: กล่องรีโหมดใหม่ · Save · Cancel ทันที · กล่องหาย | หน้าต่างยังอยู่ (ก่อนแก้: crash) | ✅ **PASS** | AI / 2026-10-20 · `test_window` · ไม่มีตัวแก้ → exit 139 · มี → ผ่าน |
 | 2 | หน้าต่าง · New remote… · กรอก · Save แล้วกด Cancel เร็วๆ | หน้าต่างไม่ปิดตัวเอง | ⬜ | |
 
+### V-88 · ตั้งระดับ log ของ rclone ได้
+
+marker: `ProgramSettings::RcloneLogLevel` · `RcloneLogLevelFlags` · `#set-log-level` · Preferences → Logs
+
+ผู้ใช้ขอ (2026-10-21): "ควรตั้งค่าได้ว่าจะให้ log เป็นแบบไหน info debug error" · ERROR → `--quiet` · NOTICE → ไม่ใส่ ·
+INFO → `--verbose` (เดิม · ค่าเริ่มต้น) · DEBUG → `-vv` · ไม่ใช้ `--log-level` เพราะ rclone ไม่ยอมให้คู่กับ `-v` ที่ task อาจมี ·
+ใช้กับทุก transfer: task · download/upload/receive · copy/move บนหน้ารีโหมด · `RB_RCLONE_LOG_LEVEL` ตั้งได้จาก env (แก้ที่หน้าเว็บ/หน้าต่างไม่ได้)
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | test: ตั้งแต่ละระดับผ่าน API · ดูคำสั่งของ task · copy บนหน้ารีโหมด · ค่าผิด · env | flag ตามระดับ (ไม่มีตัวอื่นปน) · copy ได้ `-vv` · 400 · env → แสดง + 409 | ✅ **PASS** | AI / 2026-10-21 · `test_api_server` |
+| 2 | `test_window`: Preferences → Logs → DEBUG → OK | ค่าถูกเก็บ · flag `-vv` | ✅ **PASS** | AI / 2026-10-21 |
+| 3 | `check_ui`: API → Program settings · มีสี่ระดับ · เลือก DEBUG · Save | daemon บอก DEBUG (แล้วตั้งกลับ) | ✅ **PASS** | AI / 2026-10-21 · 19991 84/84 |
+| 4 | `verify_live`: ตั้ง DEBUG · copy จริงบน gdrive | คำสั่งมี `-vv` · log มีบรรทัด DEBUG (13) · ตั้งกลับ | ✅ **PASS** | AI / 2026-10-21 · 19991 · ก่อนใส่ให้ copy บนหน้ารีโหมด: FAIL "0 DEBUG lines" |
+| 5 | หน้าต่าง (Release ใหม่): Preferences → Logs → DEBUG · อัปโหลด · เปิด Log | บรรทัด DEBUG · ตั้งกลับ INFO แล้วงานถัดไปเป็นปกติ | ⬜ | |
+
+### V-87 · งานที่รันอยู่: ความเร็วตอนนี้ · ไฟล์ทั้งหมด · หน้าเว็บได้ข่าวทุกวินาที
+
+marker: `JobStats::speed` (ผลรวมความเร็วรายไฟล์) · `averageSpeed` · `SourceCountArgs` / `countSource` · `follow` ใน `watchWhatHappens`
+
+เจอจากการอัปโหลดจริง 1.17 TB ไป teldrive (2026-10-21) — ผู้ใช้เห็นสามอย่าง:
+· ความเร็วรวม 21.4 MiB/s ข้างไฟล์ที่ 48.6 กับ 16.4 — ตัวเลขรวมคือค่าเฉลี่ยทั้งงานของ rclone (upload ที่ resume ทำให้เพี้ยนมาก) · ETA 19 ชม. แทน 7.5
+· "Transfers 0 / 2" ของโฟลเดอร์ 328 ไฟล์ — totalTransfers ของ rclone นับแค่ไฟล์ที่เริ่มแล้ว
+· /jobs บนหน้าเว็บอัปเดตช้าและค้าง — **daemon ไม่ส่งข่าวของงานที่เริ่มก่อนหน้าเว็บแรกเปิด** (ตรวจ 60 วิ: ไม่มีเหตุการณ์ job เลย) หน้าเว็บเห็นการเปลี่ยนแค่ทุก 30 วิ
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | test: core/stats จริงของ teldrive (29.1 + 13.2 MB/s · speed ของ rclone 16.4) | speed = ผลรวม 42.37 · averageSpeed = 16.4 · ETA จากความเร็วนี้ · ไม่มีไฟล์กำลังส่ง → ค่าของ rclone | ✅ **PASS** | AI / 2026-10-21 · `test_job_stats` · ไม่มีตัวแก้ → FAIL |
+| 2 | test: Transfers ก่อน/หลังนับ | "3 / 5" → "3 / 328" | ✅ **PASS** | AI / 2026-10-21 · `test_job_stats` · ไม่มีตัวแก้ → FAIL |
+| 3 | test: `SourceCountArgs` · transfer จริงกับ fake | size ได้ต้นทาง + filter (ไม่มี --transfers) · sourceFiles = 3 ระหว่างรัน | ✅ **PASS** | AI / 2026-10-21 · `test_api_server` · ไม่มีตัวแก้ → FAIL |
+| 4 | test: งานเริ่มก่อน API · แล้วค่อยเปิดสตรีม · สถิติมา | ได้เหตุการณ์ job ของงานนั้น | ✅ **PASS** | AI / 2026-10-21 · `test_api_events` (ใหม่) · ไม่มีตัวแก้ → FAIL |
+| 5 | `test_window`: การ์ดงาน Transfers | ลงท้าย "/ 3" | ✅ **PASS** | AI / 2026-10-21 |
+| 6 | `verify_live`: transfer ที่ถูกจำกัดความเร็ว | sourceFiles 1 · averageSpeed กับ speed แยกกัน | ✅ **PASS** | AI / 2026-10-21 · 19991 · daemon เก่า → FAIL "sourceFiles None" |
+| 7 | `check_ui`: Jobs ระหว่างส่ง | การ์ด "of 1 files" · รายละเอียด "… on average" · speed = ผลรวมรายไฟล์ | ✅ **PASS** | AI / 2026-10-21 · 19991 83/83 (ลองใช้ speedAvg ก่อน — check_ui จับได้ว่ายังน้อยกว่ารายไฟล์ จึงเปลี่ยน) |
+| 8 | หลัง build Release ใหม่: อัปโหลดโฟลเดอร์ใหญ่จากหน้าต่าง · เปิดหน้าเว็บทีหลัง | Speed ≈ ผลรวมรายไฟล์ · Transfers x / ไฟล์ทั้งหมด · /jobs ขยับทุกวินาที | ⬜ | |
+
+### V-86 · log ของงานอ่านได้ระหว่างที่งานรัน
+
+marker: `appendLine` flush ใน `job_log.cpp` · "printed nothing yet" ใน `/jobs/{id}/log`
+
+เจอจากการอัปโหลดจริง 1.17 TB (2026-10-21): 10 นาที ส่งเสร็จ 3 ไฟล์ แต่ไฟล์ log มีแค่ส่วนหัว — บรรทัดของ rclone
+ค้างใน buffer จนงานจบ · Log บนหน้าเว็บและหน้าต่างว่างตลอดเวลาที่รัน · โปรแกรมที่ล้มกลางทางจะเสียบรรทัดเหล่านั้น
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | test: เขียนบรรทัดแล้วอ่านไฟล์ก่อนงานจบ | บรรทัดอยู่ในไฟล์แล้ว | ✅ **PASS** | AI / 2026-10-21 · `test_job_log` · ไม่มีตัวแก้ → FAIL |
+| 2 | test: `/jobs/{id}/log` ระหว่างงานรัน | มีบรรทัดที่ rclone พิมพ์แล้ว | ✅ **PASS** | AI / 2026-10-21 · `test_api_server` · ไม่มีตัวแก้ → FAIL |
+| 3 | test: งานที่รันอยู่และยังไม่ได้พิมพ์อะไร · เปิด log | 200 · คำสั่งที่รัน · "nothing yet" (เดิม 404) · จบแล้วยังไม่พิมพ์ → 404 เหมือนเดิม | ✅ **PASS** | AI / 2026-10-21 · `test_api_server` · ไม่มีตัวแก้ → FAIL |
+| 4 | `verify_live`: log ของ transfer ที่ถูกจำกัดความเร็ว ระหว่างรัน | มีบรรทัดของ rclone | ✅ **PASS** | AI / 2026-10-21 · 19991 · daemon เก่า → FAIL "0 lines" |
+| 5 | `check_ui`: Log ของงาน serve ที่กำลังรัน | เปิดได้ เห็นคำสั่ง (เดิม 404) | ✅ **PASS** | AI / 2026-10-21 · 19991 82/82 |
+| 6 | หลัง build Release ใหม่: อัปโหลดโฟลเดอร์ใหญ่ · เปิด Log ระหว่างส่ง (หน้าเว็บและหน้าต่าง) | เห็น "Copied (new)" ของไฟล์ที่เสร็จแล้ว | ⬜ | |
+
 ### V-85 · หน้าเว็บไม่ค้างหลังคำตอบที่ถูกพักไว้
 
 marker: `answerHeld` ใน `api_server.cpp`

@@ -61,7 +61,8 @@ QT_QPA_PLATFORM=offscreen build/build/Debug/test_window.exe
 | Check · Dedupe: ตัวเลือกที่ติ๊ก → คำสั่ง · Serve: protocol · port · user · password | V-35 · V-33 · V-52 |
 | รีโหมด: สร้าง (`config create`) · แก้ (`config update` ไม่ส่ง token ซ้ำ) · ลบ (No / Yes) — กับ fake rclone ไม่แตะ rclone.conf จริง | V-49 |
 | Save แล้ว Cancel ทันทีในกล่องรีโหมด: หน้าต่างไม่ล้ม | V-83 |
-| Preferences: ค่าที่พิมพ์ถูกเก็บ · การ์ดงาน: Stop ถาม (No ไม่หยุด · Yes หยุด) | V-18 |
+| Preferences: ค่าที่พิมพ์ถูกเก็บ · การ์ดงาน: Stop ถาม (No ไม่หยุด · Yes หยุด) · Transfers ลงท้ายด้วยไฟล์ทั้งหมด | V-18 · V-87 |
+| Preferences → Logs: ระดับ log ของ rclone ถูกเก็บ | V-88 |
 
 ---
 
@@ -178,14 +179,16 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
 | Copy: กล่องเลือกโฟลเดอร์เดินเข้า-ออก · Dry run ไม่คัดลอก · โฟลเดอร์ลงใต้ชื่อตัวเอง · 3 รายการพร้อมกัน · ใส่ในตัวเองถูกปฏิเสธ | V-34 · V-64 |
 | Move: หายจากต้นทางเอง · สองรายการ: อะไรปิด อะไรใช้ได้ · Download รายการเดียว = ฟอร์มเต็ม · 3 รายการ = ถึงโฟลเดอร์ของเครื่อง | V-34 · V-64 · V-78 |
 | Browse ในฟอร์ม Transfer: โฟลเดอร์ → To ต่อชื่อ · ไฟล์ → To กลับ · คลิกขวา → Download… สองรายการ | V-38 · V-78 |
-| Serve WebDAV: ที่อยู่บนการ์ด · Copy address · Stop: ถามก่อน (Cancel / Yes) | V-52 · V-80 |
+| Serve WebDAV: ที่อยู่บนการ์ด · Copy address · Log ระหว่างรันเปิดได้ · Stop: ถามก่อน (Cancel / Yes) | V-52 · V-80 · V-86 |
+| Jobs ระหว่าง transfer (จำกัดความเร็ว): ไฟล์ทั้งหมด · ความเร็วตอนนี้ = ผลรวมรายไฟล์ · ค่าเฉลี่ย | V-87 |
+| API → Program settings: ระดับ log ของ rclone (เลือก · บันทึก · ตั้งกลับ) | V-88 |
 | Mount: ฟอร์ม · เก็บเป็น task · Docker (ไม่มี FUSE): error พร้อมคำของ rclone · Windows: ไดรฟ์ขึ้นจริง · สคริปต์ · Unmount จากการ์ด | V-36 · V-75 · V-79 |
 | Schedules: จากการ์ด task (ค่าเริ่มต้น) · Mon–Fri 07:00 · แก้เป็น cron · ปิด/เปิด · ลบ (task ยังอยู่) | V-41 |
 | Tasks: ลบ task (ถามก่อน) | V-38 |
 | จอกว้าง 375 px ทุกแท็บ: หน้าไม่กว้างเกินจอ | V-69 |
 
 ตรวจแล้วว่าจับบั๊กจริงได้: ป้อน app.js ก่อนแก้ (`--app-js`) → **7 ข้อ FAIL** พร้อม
-`GET /remotes//[object Object]?path=undefined -> 404` ตรงกับที่ผู้ใช้เห็น · app.js ปัจจุบัน → ผ่าน 82/82 บน 19991 · 19999: 82/83 จนกว่าจะ build Release ใหม่ (V-84)
+`GET /remotes//[object Object]?path=undefined -> 404` ตรงกับที่ผู้ใช้เห็น · app.js ปัจจุบัน → ผ่าน 84/84 บน 19991
 
 สิ่งที่สคริปต์ยังไม่กด: แก้รีโหมดบนหน้าเว็บ (19991 ใช้ rclone.conf จริงของผู้ใช้ — ไม่แตะ) · Copy ข้ามรีโหมด ·
 mount autostart · หน้าต่างกับหน้าเว็บเห็นกันและกัน (เปิดทั้งคู่พร้อมกัน) · หน้าตา · มือถือจริง · โปรแกรมอื่น

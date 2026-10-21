@@ -1,4 +1,5 @@
 #include "remote_ops.h"
+#include "program_settings.h"
 #include "debug_log.h"
 #include "job_options.h"
 #include "job_registry.h"
@@ -274,6 +275,9 @@ RunningJob *CopyBetween(bool move, const QString &sourceRemote,
 
   QStringList command{move ? QStringLiteral("move") : QStringLiteral("copy"),
                       source, dest};
+  // The log level the program is set to, as for a task's transfer -- before
+  // the options given, so a -v among them still adds to it.
+  command << ProgramSettings::RcloneLogLevelFlags();
   command << args;
 
   return start(JobKind::Transfer, command,

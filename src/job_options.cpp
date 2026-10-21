@@ -1,4 +1,5 @@
 #include "job_options.h"
+#include "program_settings.h"
 #include <QDateTime>
 #include "utils.h"
 #include <QRegularExpression>
@@ -258,11 +259,12 @@ QStringList JobOptions::getOptions() const {
   list << "--stats"
        << "0";
 
-  // -v as a baseline so the output pane shows what was copied. rclone
-  // accumulates verbosity rather than letting the last flag win, so a user
-  // who puts -vv or -vvv in the extra options still gets that level; verified
-  // that "-vvv --verbose" and "--verbose -vvv" both come out at DEBUG.
-  list << "--verbose";
+  // The level the program is set to -- -v (what was copied) unless changed
+  // in Preferences or on the page (ProgramSettings). rclone accumulates
+  // verbosity rather than letting the last flag win, so a user who puts -vv
+  // or -vvv in the extra options still gets that level; verified that "-vvv
+  // --verbose" and "--verbose -vvv" both come out at DEBUG.
+  list << ProgramSettings::RcloneLogLevelFlags();
 
   if (dryRun) {
     list << "--dry-run";

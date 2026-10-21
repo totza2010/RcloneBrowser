@@ -105,6 +105,42 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
     });
   }
 
+  // How much rclone writes into a transfer's log -- the same value the
+  // page's Program settings changes (ProgramSettings).
+  {
+    auto *page = new QWidget(this);
+    auto *layout = new QFormLayout(page);
+    auto *level = new QComboBox(page);
+    level->setObjectName(QStringLiteral("rcloneLogLevel"));
+    const QMap<QString, QString> words = {
+        {QStringLiteral("ERROR"), tr("ERROR — only what went wrong")},
+        {QStringLiteral("NOTICE"), tr("NOTICE — and rclone's notices")},
+        {QStringLiteral("INFO"), tr("INFO — and each file copied (the usual)")},
+        {QStringLiteral("DEBUG"), tr("DEBUG — everything rclone does; long")}};
+    for (const QString &one : ProgramSettings::RcloneLogLevels()) {
+      level->addItem(words.value(one, one), one);
+    }
+    level->setCurrentIndex(qMax(0, level->findData(ProgramSettings::RcloneLogLevel())));
+    level->setEnabled(!ProgramSettings::RcloneLogLevelFromEnvironment());
+    if (!level->isEnabled()) {
+      level->setToolTip(tr("RB_RCLONE_LOG_LEVEL sets it"));
+    }
+    layout->addRow(tr("How much rclone writes into a transfer's log"), level);
+    auto *note = new QLabel(tr("From the next transfer on. What it wrote is under each job's "
+                               "Log, here and on the web page."),
+                            page);
+    note->setWordWrap(true);
+    layout->addRow(note);
+    ui.tabWidget->addTab(page, tr("Logs"));
+    QObject::connect(this, &QDialog::accepted, this, [this, level]() {
+      QString why;
+      if (level->isEnabled() &&
+          !ProgramSettings::SetRcloneLogLevel(level->currentData().toString(), &why)) {
+        QMessageBox::warning(this, tr("Logs"), why);
+      }
+    });
+  }
+
   // hide elements used for testing only
 
   ui.cb_font_6->hide();

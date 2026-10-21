@@ -100,6 +100,10 @@ QJsonObject Write(const RunningJob &job, int streamIdleSeconds) {
     figures.insert(QStringLiteral("speed"), stats.speed);
     figures.insert(QStringLiteral("etaSeconds"), double(stats.etaSeconds));
     figures.insert(QStringLiteral("percent"), stats.percent());
+    figures.insert(QStringLiteral("averageSpeed"), stats.averageSpeed);
+    if (stats.sourceFiles >= 0) {
+      figures.insert(QStringLiteral("sourceFiles"), double(stats.sourceFiles));
+    }
     figures.insert(QStringLiteral("totalTransfers"),
                    double(stats.totalTransfers));
     figures.insert(QStringLiteral("checks"), double(stats.checks));

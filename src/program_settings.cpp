@@ -49,6 +49,51 @@ bool SetStreamIdleMinutes(int minutes, QString *why) {
   return true;
 }
 
+QStringList RcloneLogLevels() {
+  return {QStringLiteral("ERROR"), QStringLiteral("NOTICE"), QStringLiteral("INFO"),
+          QStringLiteral("DEBUG")};
+}
+
+bool RcloneLogLevelFromEnvironment() {
+  return RcloneLogLevels().contains(qEnvironmentVariable("RB_RCLONE_LOG_LEVEL").trimmed().toUpper());
+}
+
+QString RcloneLogLevel() {
+  const QString level = RcloneLogLevelFromEnvironment()
+                            ? qEnvironmentVariable("RB_RCLONE_LOG_LEVEL")
+                            : GetSettings()->value("Settings/rcloneLogLevel").toString();
+  const QString upper = level.trimmed().toUpper();
+  return RcloneLogLevels().contains(upper) ? upper : QStringLiteral("INFO");
+}
+
+bool SetRcloneLogLevel(const QString &level, QString *why) {
+  if (RcloneLogLevelFromEnvironment()) {
+    return refuse(why, QStringLiteral("RB_RCLONE_LOG_LEVEL sets it; change it "
+                                      "where the program is started"));
+  }
+  const QString upper = level.trimmed().toUpper();
+  if (!RcloneLogLevels().contains(upper)) {
+    return refuse(why, QStringLiteral("one of ERROR, NOTICE, INFO, DEBUG"));
+  }
+  GetSettings()->setValue("Settings/rcloneLogLevel", upper);
+  GetSettings()->sync();
+  return true;
+}
+
+QStringList RcloneLogLevelFlags() {
+  const QString level = RcloneLogLevel();
+  if (level == QLatin1String("ERROR")) {
+    return {QStringLiteral("--quiet")};
+  }
+  if (level == QLatin1String("NOTICE")) {
+    return {}; // rclone's own default
+  }
+  if (level == QLatin1String("DEBUG")) {
+    return {QStringLiteral("-vv")};
+  }
+  return {QStringLiteral("--verbose")};
+}
+
 bool LocalRootsFromEnvironment() {
   return !qEnvironmentVariable("RB_LOCAL_ROOTS").trimmed().isEmpty();
 }

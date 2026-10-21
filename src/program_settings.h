@@ -27,4 +27,16 @@ bool LocalRootsFromEnvironment();
 // Refused when one is not a folder that is there.
 bool SetLocalRoots(const QStringList &roots, QString *why);
 
+// How much rclone writes into a transfer's log: ERROR, NOTICE, INFO (what
+// was copied -- the default, and what -v always gave) or DEBUG (everything,
+// -vv). RB_RCLONE_LOG_LEVEL sets it in a container.
+QStringList RcloneLogLevels();
+QString RcloneLogLevel();
+bool RcloneLogLevelFromEnvironment();
+bool SetRcloneLogLevel(const QString &level, QString *why);
+// The flags for it, as a transfer is given them. -q / -v / -vv rather than
+// --log-level: rclone refuses --log-level beside a -v, and a task's own extra
+// options may hold one.
+QStringList RcloneLogLevelFlags();
+
 } // namespace ProgramSettings

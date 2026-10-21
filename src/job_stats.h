@@ -61,7 +61,14 @@ struct JobStats {
   qint64 renames = 0;
   qint64 errors = 0;
   qint64 listed = 0;
-  double speed = 0.0;         // bytes per second
+  // Bytes per second, now: what the files in flight are going at, added up.
+  // rclone's own figure for the whole job is averageSpeed.
+  double speed = 0.0;
+  double averageSpeed = 0.0;  // rclone's "speed": the job's average so far
+  // Every file the source has, counted apart ("rclone size", with the job's
+  // filters) -- rclone's totalTransfers counts only the files it has begun.
+  // -1 until the count is in.
+  qint64 sourceFiles = -1;
   qint64 etaSeconds = -1;     // -1 when rclone reports null
   double elapsedSeconds = 0.0;
   bool fatalError = false;

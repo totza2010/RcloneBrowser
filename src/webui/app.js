@@ -658,7 +658,10 @@ function jobCard(job) {
     figures.push(bytes(stats.bytes));
   }
   if (job.running && stats.phase && stats.phase !== "transferring") figures.push(esc(stats.phase) + "…");
-  if (stats.transfers) figures.push(stats.transfers + (stats.totalTransfers ? " of " + stats.totalTransfers : "") + " files");
+  // Out of every file the source has, once counted: rclone's own total is
+  // the files begun so far ("0 of 2" for a folder of 328).
+  const allFiles = stats.sourceFiles !== undefined ? stats.sourceFiles : stats.totalTransfers;
+  if (stats.transfers || stats.sourceFiles) figures.push((stats.transfers || 0) + (allFiles ? " of " + allFiles : "") + " files");
   if (stats.totalChecks) figures.push(stats.checks + " of " + stats.totalChecks + " checked");
   if (stats.deletes) figures.push(stats.deletes + " deleted");
   if (stats.errors) figures.push(stats.errors + " errors");
@@ -1218,10 +1221,13 @@ async function openJob(requestId, fromAddress) {
       ["Started", when(job.startedAt) + " by " + (job.startedBy || "?") + (job.askedBy ? ", asked by " + job.askedBy : "")],
       ["Now", job.running ? (s.phase || "running") : job.state],
       ["Moved", s.totalBytes ? bytes(s.bytes) + " of " + bytes(s.totalBytes) + " (" + (s.percent || 0) + "%)" : bytes(s.bytes || 0)],
-      ["Files", (s.transfers || 0) + (s.totalTransfers ? " of " + s.totalTransfers : "") +
+      ["Files", (s.transfers || 0) +
+        ((s.sourceFiles !== undefined ? s.sourceFiles : s.totalTransfers) ?
+          " of " + (s.sourceFiles !== undefined ? s.sourceFiles : s.totalTransfers) : "") +
         (s.totalChecks ? " · " + s.checks + " of " + s.totalChecks + " checked" : "") +
         (s.errors ? " · " + s.errors + " errors" : "")],
-      ["Speed", job.running ? bytes(s.speed || 0) + "/s" + (job.bandwidth ? " (limited to " + job.bandwidth + ")" : "") : "—"],
+      ["Speed", job.running ? bytes(s.speed || 0) + "/s" + (job.bandwidth ? " (limited to " + job.bandwidth + ")" : "") +
+        (s.averageSpeed ? " · " + bytes(s.averageSpeed) + "/s on average" : "") : "—"],
     ]) +
     (job.running ? fileBars(s.transferring || []) : "") +
     (job.script ? scriptReport(job.script) : "") +
@@ -2429,6 +2435,14 @@ async function drawKeys(made) {
 
 // ---- the program's own settings ---------------------------------------------------
 
+// What each of rclone's log levels puts in a transfer's log.
+const logLevelWords = {
+  ERROR: "ERROR — only what went wrong",
+  NOTICE: "NOTICE — and rclone's notices",
+  INFO: "INFO — and each file copied (the usual)",
+  DEBUG: "DEBUG — everything rclone does; long",
+};
+
 async function drawSettings() {
   const box = $("api-settings");
   if (!box) return;
@@ -2450,7 +2464,13 @@ async function drawSettings() {
       '<p><label>The folders of the machine the program runs on that the API may use — one a line; empty: every folder' +
         '<textarea id="set-roots" rows="4"' + fixed(s.localRootsFromEnvironment, "RB_LOCAL_ROOTS") + ">" +
         esc((s.localRoots || []).join("\n")) + "</textarea></label></p>" +
-      ((s.streamIdleFromEnvironment || s.localRootsFromEnvironment)
+      '<p><label>How much rclone writes into a transfer\'s log — from the next transfer on' +
+        '<select id="set-log-level"' + fixed(s.rcloneLogLevelFromEnvironment, "RB_RCLONE_LOG_LEVEL") + ">" +
+        (s.rcloneLogLevels || ["ERROR", "NOTICE", "INFO", "DEBUG"]).map((level) =>
+          '<option value="' + level + '"' + (level === s.rcloneLogLevel ? " selected" : "") + ">" +
+          esc(logLevelWords[level] || level) + "</option>").join("") +
+        "</select></label></p>" +
+      ((s.streamIdleFromEnvironment || s.localRootsFromEnvironment || s.rcloneLogLevelFromEnvironment)
         ? '<p class="muted">What the environment sets is shown, and is changed where the program is started.</p>' : "") +
       '<p><button type="submit" class="small">Save</button> <span id="settings-state" class="error"></span></p>' +
     "</form>";
@@ -2458,6 +2478,7 @@ async function drawSettings() {
     event.preventDefault();
     const body = {};
     if (!s.streamIdleFromEnvironment) body.streamIdleMinutes = Number($("set-idle").value);
+    if (!s.rcloneLogLevelFromEnvironment) body.rcloneLogLevel = $("set-log-level").value;
     if (!s.localRootsFromEnvironment) {
       body.localRoots = $("set-roots").value.split("\n").map((l) => l.trim()).filter(Boolean);
       if (!body.localRoots.length && (s.localRoots || []).length &&

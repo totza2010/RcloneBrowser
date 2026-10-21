@@ -36,6 +36,50 @@ private slots:
     QVERIFY(first.speed > 0.0);
   }
 
+  // The speed is what the files are going at now, not rclone's average for
+  // the whole job. Recorded on a real 1.17 TB upload to teldrive
+  // (2026-10-21): two files at 29.1 and 13.2 MB/s, 10.98 GB in 260 s -- and
+  // rclone's own figure said 16.4 MB/s, with an ETA of 19 hours for what was
+  // seven and a half. The window showed 21.4 MiB/s beside two files at 48.6
+  // and 16.4.
+  void theSpeedIsWhatTheFilesAreGoingAtNow() {
+    const QByteArray json =
+        "{\"bytes\":10976526336,\"totalBytes\":1156675748104,\"speed\":16413457.56,"
+        "\"eta\":69802,\"transfers\":0,\"totalTransfers\":2,\"checks\":3,"
+        "\"transferring\":["
+        "{\"name\":\"a.mkv\",\"bytes\":7544471552,\"size\":18677440707,\"percentage\":40,"
+        "\"speed\":29141956.9,\"speedAvg\":29000000.0,\"eta\":1685},"
+        "{\"name\":\"b.mkv\",\"bytes\":3432054784,\"size\":4741713667,\"percentage\":72,"
+        "\"speed\":13232066.3,\"speedAvg\":13000000.0,\"eta\":135}]}";
+    const JobStats stats = JobStats::fromCoreStats(json);
+    QVERIFY(stats.valid);
+    // The files' speeds, added up: the same figures shown beside each file.
+    QCOMPARE(qRound64(stats.speed), Q_INT64_C(42374023));
+    // rclone's figure is still there, as what it is.
+    QCOMPARE(qRound64(stats.averageSpeed), Q_INT64_C(16413458));
+    // And the time left follows the speed shown.
+    QCOMPARE(stats.etaSeconds,
+             static_cast<qint64>((1156675748104.0 - 10976526336.0) / (29141956.9 + 13232066.3)));
+
+    // Between files, nothing in flight: rclone's figures as they are.
+    const JobStats idle = JobStats::fromCoreStats(
+        "{\"bytes\":100,\"totalBytes\":1000,\"speed\":50.0,\"eta\":18,\"transferring\":[]}");
+    QCOMPARE(qRound64(idle.speed), Q_INT64_C(50));
+    QCOMPARE(idle.etaSeconds, Q_INT64_C(18));
+  }
+
+  // Transfers out of every file the source has, once that is counted --
+  // rclone's own total is the files begun so far: "0 / 2" for a folder of 328
+  // (2026-10-21).
+  void transfersAreOutOfEveryFileOnceCounted() {
+    JobStats stats;
+    stats.transfers = 3;
+    stats.totalTransfers = 5;
+    QCOMPARE(stats.transfersText(), QStringLiteral("3 / 5")); // not counted yet
+    stats.sourceFiles = 328;
+    QCOMPARE(stats.transfersText(), QStringLiteral("3 / 328"));
+  }
+
   // The bug the old parser kept reintroducing: rclone can report more bytes
   // transferred than it first estimated, and the progress label went past
   // 100%.

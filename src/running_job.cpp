@@ -43,6 +43,43 @@ bool RunningJob::isDryRun() const {
   return false;
 }
 
+QStringList SourceCountArgs(const QStringList &jobArgs) {
+  static const QStringList kinds = {QStringLiteral("copy"), QStringLiteral("sync"),
+                                    QStringLiteral("move")};
+  if (jobArgs.size() < 3 || !kinds.contains(jobArgs.at(0))) {
+    return {};
+  }
+  // What decides which files there are, and how they are listed. Each takes
+  // a value unless it is in `alone`.
+  static const QStringList filters = {
+      QStringLiteral("--include"),      QStringLiteral("--exclude"),
+      QStringLiteral("--filter"),       QStringLiteral("--include-from"),
+      QStringLiteral("--exclude-from"), QStringLiteral("--filter-from"),
+      QStringLiteral("--files-from"),   QStringLiteral("--files-from-raw"),
+      QStringLiteral("--min-size"),     QStringLiteral("--max-size"),
+      QStringLiteral("--min-age"),      QStringLiteral("--max-age"),
+      QStringLiteral("--max-depth"),    QStringLiteral("--exclude-if-present"),
+      QStringLiteral("--ignore-case"),  QStringLiteral("--fast-list"),
+      QStringLiteral("--drive-shared-with-me"), QStringLiteral("--drive-trashed-only")};
+  static const QStringList alone = {
+      QStringLiteral("--ignore-case"), QStringLiteral("--fast-list"),
+      QStringLiteral("--drive-shared-with-me"), QStringLiteral("--drive-trashed-only")};
+
+  QStringList args{QStringLiteral("size"), QStringLiteral("--json"), jobArgs.at(1)};
+  for (int i = 3; i < jobArgs.size(); ++i) {
+    const QString &arg = jobArgs.at(i);
+    const QString name = arg.section(QLatin1Char('='), 0, 0);
+    if (!filters.contains(name)) {
+      continue;
+    }
+    args << arg;
+    if (!arg.contains(QLatin1Char('=')) && !alone.contains(name) && i + 1 < jobArgs.size()) {
+      args << jobArgs.at(++i);
+    }
+  }
+  return args;
+}
+
 bool JobKindIsQuestion(JobKind kind) {
   return kind == JobKind::About || kind == JobKind::Size ||
          kind == JobKind::Tree;
@@ -126,7 +163,8 @@ bool RunningJob::start() {
     QObject::connect(mRc, &RcClient::statsReceived, this,
                      [this](const JobStats &stats) {
                        mStats = stats;
-                       emit statsUpdated(stats);
+                       mStats.sourceFiles = mSourceFiles;
+                       emit statsUpdated(mStats);
                      });
     QObject::connect(mRc, &RcClient::unavailable, this,
                      &RunningJob::progressUnavailable);
@@ -190,12 +228,67 @@ bool RunningJob::start() {
   }
   process->start(GetRclone(), mArgs + GetRcloneConf(), QIODevice::ReadOnly);
   mEverStarted = isRunning();
+  if (mKind == JobKind::Transfer && mEverStarted) {
+    countSource();
+  }
 
   // Deliberately not waitForStarted(): that spins the event loop, which would
   // let the first lines of output be emitted before the caller has had a
   // chance to connect to them. A failure to start arrives through
   // errorOccurred instead, which needs no waiting.
   return isRunning();
+}
+
+// How many files the source has, asked of rclone beside the transfer.
+// rclone's own figures say only how many it has begun, so a folder of 328
+// showed "0 / 2" (2026-10-21). Answered once; a source too big or too slow
+// to count simply leaves rclone's figure in place.
+void RunningJob::countSource() {
+  const QStringList args = SourceCountArgs(mArgs);
+  if (args.isEmpty()) {
+    return;
+  }
+  mCounter = new QProcess(this);
+  mCounter->setProcessChannelMode(QProcess::SeparateChannels);
+  UseRclonePassword(mCounter);
+  if (!mEnvironment.isEmpty()) {
+    QProcessEnvironment environment = mCounter->processEnvironment();
+    if (environment.isEmpty()) {
+      environment = QProcessEnvironment::systemEnvironment();
+    }
+    for (auto it = mEnvironment.cbegin(); it != mEnvironment.cend(); ++it) {
+      environment.insert(it.key(), it.value());
+    }
+    mCounter->setProcessEnvironment(environment);
+  }
+  QProcess *counter = mCounter;
+  QObject::connect(counter,
+                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
+                       &QProcess::finished),
+                   this, [this, counter](int status, QProcess::ExitStatus) {
+                     counter->deleteLater();
+                     if (mCounter == counter) {
+                       mCounter = nullptr;
+                     }
+                     const QJsonObject said =
+                         QJsonDocument::fromJson(counter->readAllStandardOutput()).object();
+                     if (status != 0 || !said.contains(QLatin1String("count"))) {
+                       return;
+                     }
+                     mSourceFiles = said.value(QLatin1String("count")).toVariant().toLongLong();
+                     mStats.sourceFiles = mSourceFiles;
+                     qCDebug(rbJob) << "the source has" << mSourceFiles << "files";
+                     emit statsUpdated(mStats);
+                   });
+  QObject::connect(counter, &QProcess::errorOccurred, this, [this, counter](QProcess::ProcessError error) {
+    if (error == QProcess::FailedToStart) {
+      counter->deleteLater();
+      if (mCounter == counter) {
+        mCounter = nullptr;
+      }
+    }
+  });
+  counter->start(GetRclone(), args + GetRcloneConf(), QIODevice::ReadOnly);
 }
 
 void RunningJob::handleOutput() {
@@ -270,6 +363,15 @@ void RunningJob::handleFinished(int exitCode) {
 
   mExitCode = exitCode;
   mFinishedAt = QDateTime::currentDateTime();
+
+  // Still counting when the transfer is over: the count is no longer wanted.
+  if (mCounter != nullptr) {
+    QProcess *counter = mCounter;
+    mCounter = nullptr;
+    counter->disconnect(this);
+    counter->kill();
+    counter->deleteLater();
+  }
 
   // What rclone said it did, in place of what it had done by the last time
   // it was asked. Never smaller than what was already seen: a job that was

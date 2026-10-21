@@ -24,6 +24,7 @@ import datetime
 import http.server
 import json
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -213,6 +214,33 @@ def check_copy_options(api, ctx):
         else "fail", "copy with a filter leaves the .nfo out (V-76)", ", ".join(have) or str(ls))
 
 
+def check_log_level(api, ctx):
+    """rclone's log level, set to DEBUG for one transfer: its log says so
+    (V-88). Put back as it was."""
+    st, settings, _ = api.get("/settings")
+    if st != 200 or "rcloneLogLevel" not in (settings or {}):
+        return say("fail", "rclone's log level is a setting (V-88)", "not in /settings")
+    if settings.get("rcloneLogLevelFromEnvironment"):
+        return say("skip", "rclone's log level is a setting (V-88)", "RB_RCLONE_LOG_LEVEL sets it")
+    was = settings["rcloneLogLevel"]
+    try:
+        st, _, _ = api.call("PUT", "/settings", {"rcloneLogLevel": "DEBUG"})
+        st, body, _ = api.post("/remotes/%s/copy" % ctx["remote"], {
+            "path": ctx["scratch"] + "/a.txt", "isDir": False, "to": ctx["scratch"] + "-copy"})
+        if st != 202:
+            return say("fail", "a transfer at DEBUG logs DEBUG lines (V-88)", "copy refused: %s" % st)
+        ctx["copy_folder"] = ctx["scratch"] + "-copy"
+        api.wait_job(body["requestId"])
+        st, log, _ = api.get("/jobs/%s/log?tail=400" % urllib.parse.quote(body["requestId"], safe=""))
+        text = log.decode("utf-8", "replace") if isinstance(log, bytes) else str(log)
+        command = next((l for l in text.splitlines() if l.startswith("# command:")), "")
+        debug = [l for l in text.splitlines() if " DEBUG : " in l]
+        say("pass" if "-vv" in command.split() and debug else "fail", "a transfer at DEBUG logs DEBUG lines (V-88)",
+            "%d DEBUG lines · command has -vv: %s" % (len(debug), "-vv" in command.split()))
+    finally:
+        api.call("PUT", "/settings", {"rcloneLogLevel": was})
+
+
 def check_history(api, ctx):
     st, rows, _ = api.get("/history?limit=20&q=" + urllib.parse.quote(ctx["scratch"]))
     say("pass" if st == 200 and rows else "fail", "history found by a word (V-60)",
@@ -244,12 +272,26 @@ def check_bandwidth(api, ctx):
         time.sleep(1)
     if not limited:
         return say("skip", "slow a running transfer (V-51)", "it ended before it could be slowed")
+    # Its log while it runs: what rclone has said so far, not an empty file
+    # until it ends (2026-10-21).
+    st, log, _ = api.get("/jobs/%s/log?tail=20" % urllib.parse.quote(rid, safe=""))
+    text = log.decode("utf-8", "replace") if isinstance(log, bytes) else str(log)
+    lines = [l for l in text.splitlines() if re.search(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d", l)]
+    say("pass" if st == 200 and lines else "fail", "the log of a running transfer has rclone's lines (V-86)",
+        "%d lines so far · %s" % (len(lines), lines[-1][:90] if lines else text[-120:]))
     time.sleep(8)
     st, jobs, _ = api.get("/jobs")
     job = next((j for j in jobs if j.get("requestId") == rid), {})
     speed = (job.get("stats") or {}).get("speed", 0)
     say("pass" if speed and speed < 450 * 1024 else "look", "slow a running transfer to 300k (V-51)",
         "rclone says %s · measured %.0f KB/s" % (limited.get("rate"), speed / 1024))
+    # Every file of the source, counted apart from rclone's "begun so far"
+    # (V-87): the folder received into holds the one file.
+    stats = job.get("stats") or {}
+    say("pass" if stats.get("sourceFiles") == 1 else "fail", "a transfer knows every file of its source (V-87)",
+        "sourceFiles %s · rclone's totalTransfers %s · average %s B/s · now %s B/s" % (
+            stats.get("sourceFiles"), stats.get("totalTransfers"), round(stats.get("averageSpeed") or 0),
+            round(stats.get("speed") or 0)))
     api.post("/bandwidth", {"rate": "off"})
     row = api.wait_job(rid, 900)
     say("pass" if row and row.get("state") == "finished" else "fail", "freed, it finishes", row and row.get("state"))
@@ -480,6 +522,7 @@ def main():
             check_question(api, ctx)
             check_copy_options(api, ctx)
             check_history(api, ctx)
+            check_log_level(api, ctx)
             check_keys_and_asked_by(api, ctx)
             check_local_side(api, ctx)
             if "backup" not in skip:

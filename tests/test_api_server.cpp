@@ -2910,6 +2910,119 @@ private slots:
   // A job ending is told to the addresses that asked, as /jobs says it, and
   // signed when there is a secret. Standing in for whoever receives it:
   // something on a port that writes down every POST.
+  // A job's log while it runs: what rclone has said so far, not only once
+  // it has ended (a 1.17 TB upload showed its header alone for as long as it
+  // ran, 2026-10-21).
+  void aRunningJobsLogSaysWhatRcloneHasSaidSoFar() {
+    QVERIFY(useFakeRclone(1));
+    QTcpServer rc;
+    QVERIFY(rc.listen(QHostAddress::LocalHost, 0));
+    qputenv("FAKE_RCLONE_RC_PORT", QByteArray::number(rc.serverPort()));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+    JobOptions *task = makeTask(QStringLiteral("still going"));
+    const QByteArray started = ask("POST", "/api/v1/tasks/" +
+                                               QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+                                   mToken);
+    QCOMPARE(statusOf(started), 202);
+    const QString id = bodyOf(started).object().value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr);
+
+    const QByteArray logPath = "/api/v1/jobs/" + QUrl::toPercentEncoding(id) + "/log";
+    QByteArray said;
+    QTRY_VERIFY_WITH_TIMEOUT((said = ask("GET", logPath, mToken), said.contains("Serving remote control")),
+                             3000);
+    QVERIFY2(job->isRunning(), "read only after the job had ended");
+
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    qunsetenv("FAKE_RCLONE_RC_PORT");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
+  // A job that runs and has said nothing yet -- a serve nobody has used,
+  // a copy still listing -- has a log to open all the same: what it runs.
+  // It answered 404 "that job wrote no log", to a Log button on a running
+  // job's card (2026-10-21).
+  void aRunningJobThatHasSaidNothingStillHasALog() {
+    QVERIFY(useFakeRclone(1));
+    qunsetenv("FAKE_RCLONE_RC_PORT"); // prints nothing at all, then
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+    JobOptions *task = makeTask(QStringLiteral("quiet"));
+    const QByteArray started = ask("POST", "/api/v1/tasks/" +
+                                               QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+                                   mToken);
+    QCOMPARE(statusOf(started), 202);
+    const QString id = bodyOf(started).object().value(QStringLiteral("requestId")).toString();
+    RunningJob *job = JobRegistry::instance().find(id);
+    QVERIFY(job != nullptr && job->isRunning());
+
+    const QByteArray said = ask("GET", "/api/v1/jobs/" + QUrl::toPercentEncoding(id) + "/log", mToken);
+    QCOMPARE(statusOf(said), 200);
+    QVERIFY2(said.contains("# command:"), said.constData());
+    QVERIFY2(said.contains("nothing yet"), said.constData());
+
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+    // Ended without a word: that is still "wrote no log", told apart from
+    // a job that never was.
+    QCOMPARE(statusOf(ask("GET", "/api/v1/jobs/" + QUrl::toPercentEncoding(id) + "/log", mToken)), 404);
+  }
+
+  // What "rclone size" is given to count a transfer's source: the source
+  // and the filters -- a flag of copy's own would make size refuse.
+  void theSourceIsCountedWithTheJobsFilters() {
+    QCOMPARE(SourceCountArgs({QStringLiteral("copy"), QStringLiteral("D:/films"), QStringLiteral("gd:films"),
+                              QStringLiteral("--transfers"), QStringLiteral("4"),
+                              QStringLiteral("--exclude"), QStringLiteral("*.nfo"),
+                              QStringLiteral("--max-age=7d"), QStringLiteral("--fast-list"),
+                              QStringLiteral("--create-empty-src-dirs"), QStringLiteral("--verbose")}),
+             QStringList({QStringLiteral("size"), QStringLiteral("--json"), QStringLiteral("D:/films"),
+                          QStringLiteral("--exclude"), QStringLiteral("*.nfo"),
+                          QStringLiteral("--max-age=7d"), QStringLiteral("--fast-list")}));
+    QVERIFY(SourceCountArgs({QStringLiteral("mount"), QStringLiteral("gd:"), QStringLiteral("X:")}).isEmpty());
+    QVERIFY(SourceCountArgs({QStringLiteral("copy")}).isEmpty());
+  }
+
+  // A transfer knows how many files its source has, while it runs.
+  void aTransferCountsEveryFileOfItsSource() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir logDir;
+    const QString calls = logDir.filePath(QStringLiteral("calls.txt"));
+    qputenv("FAKE_RCLONE_LOG", QFile::encodeName(calls));
+    qputenv("FAKE_RCLONE_SLEEP_MS", "4000");
+    JobOptions *task = makeTask(QStringLiteral("counted"));
+    task->excluded = QStringLiteral("*.nfo");
+    const QByteArray started = ask("POST", "/api/v1/tasks/" +
+                                               QUrl::toPercentEncoding(task->uniqueId.toString()) + "/run",
+                                   mToken);
+    QCOMPARE(statusOf(started), 202);
+    RunningJob *job = JobRegistry::instance().find(
+        bodyOf(started).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    // The fake's "size" says 3.
+    QTRY_COMPARE_WITH_TIMEOUT(job->stats().sourceFiles, Q_INT64_C(3), 3000);
+    QVERIFY(job->isRunning());
+
+    QFile file(calls);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    QString size;
+    for (const QString &line : lines) {
+      if (line.startsWith(QLatin1String("size\t"))) {
+        size = line;
+      }
+    }
+    QVERIFY2(size.contains(QLatin1String("--exclude\t*.nfo")), qPrintable(size));
+    QVERIFY2(!size.contains(QLatin1String("--transfers")), qPrintable(size));
+
+    job->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    qunsetenv("FAKE_RCLONE_LOG");
+    qputenv("FAKE_RCLONE_SLEEP_MS", "0");
+  }
+
   void aJobEndingIsToldToWebhooks() {
     QVERIFY(useFakeRclone(1));
     Webhooks::instance().install(); // what AppCore does when it starts
@@ -3490,6 +3603,65 @@ private slots:
 
   // The program's own settings, changed by the owner, and not where the
   // environment says otherwise.
+  // How much rclone writes into a transfer's log: a setting of the program,
+  // the same from the page and the window, in every transfer's command from
+  // then on (2026-10-21: "ควรตั้งค่าได้ว่าจะให้ log เป็นแบบไหน").
+  void theRcloneLogLevelIsTheProgramsToSet() {
+    const auto commandNow = [this]() {
+      const QByteArray reply =
+          send("POST", "/api/v1/tasks/preview", mToken,
+               taskBody(QString(), QStringLiteral("C:/films"), QStringLiteral("fake:backup")));
+      return bodyOf(reply).object().value(QStringLiteral("command")).toString().split(' ');
+    };
+    const QJsonObject before = bodyOf(ask("GET", "/api/v1/settings", mToken)).object();
+    QCOMPARE(before.value(QStringLiteral("rcloneLogLevel")).toString(), QStringLiteral("INFO"));
+    QVERIFY(commandNow().contains(QStringLiteral("--verbose")));
+
+    const struct {
+      const char *level;
+      const char *flag; // nullptr: none of them
+    } levels[] = {{"DEBUG", "-vv"}, {"ERROR", "--quiet"}, {"NOTICE", nullptr}, {"info", "--verbose"}};
+    for (const auto &one : levels) {
+      const QByteArray put = send("PUT", "/api/v1/settings", mToken,
+                                  QByteArray("{\"rcloneLogLevel\":\"") + one.level + "\"}");
+      QCOMPARE(statusOf(put), 200);
+      QCOMPARE(bodyOf(put).object().value(QStringLiteral("rcloneLogLevel")).toString(),
+               QString::fromLatin1(one.level).toUpper());
+      const QStringList command = commandNow();
+      for (const char *flag : {"-vv", "--quiet", "--verbose"}) {
+        const bool wanted = one.flag != nullptr && qstrcmp(flag, one.flag) == 0;
+        QVERIFY2(command.contains(QString::fromLatin1(flag)) == wanted,
+                 qPrintable(QString::fromLatin1(one.level) + ": " + command.join(' ')));
+      }
+    }
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"rcloneLogLevel\":\"LOUD\"}")), 400);
+
+    // A copy made on a remote's page is a transfer too, and takes the level.
+    QVERIFY(useFakeRclone(1));
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"rcloneLogLevel\":\"DEBUG\"}")), 200);
+    const QByteArray copied = send("POST", "/api/v1/remotes/fake/copy", mToken,
+                                   "{\"path\":\"item-1\",\"isDir\":false,\"to\":\"elsewhere\"}");
+    QCOMPARE(statusOf(copied), 202);
+    RunningJob *copy = JobRegistry::instance().find(
+        bodyOf(copied).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(copy != nullptr);
+    QVERIFY2(copy->displayCommand().contains(QStringLiteral("-vv")),
+             qPrintable(copy->displayCommand().join(' ')));
+    QTRY_VERIFY_WITH_TIMEOUT(!copy->isRunning(), 10000);
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"rcloneLogLevel\":\"INFO\"}")), 200);
+
+    // Set where the program is started: shown, and not changed here.
+    qputenv("RB_RCLONE_LOG_LEVEL", "debug");
+    const QJsonObject fixed = bodyOf(ask("GET", "/api/v1/settings", mToken)).object();
+    QCOMPARE(fixed.value(QStringLiteral("rcloneLogLevel")).toString(), QStringLiteral("DEBUG"));
+    QVERIFY(fixed.value(QStringLiteral("rcloneLogLevelFromEnvironment")).toBool());
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"rcloneLogLevel\":\"INFO\"}")), 409);
+    qunsetenv("RB_RCLONE_LOG_LEVEL");
+    QCOMPARE(bodyOf(ask("GET", "/api/v1/settings", mToken)).object()
+                 .value(QStringLiteral("rcloneLogLevel")).toString(),
+             QStringLiteral("INFO"));
+  }
+
   void theProgramsSettingsAreTheOwnersToChange() {
     qunsetenv("RB_LOCAL_ROOTS");
     qunsetenv("RB_STREAM_IDLE_MINUTES");

@@ -123,7 +123,11 @@ QString JobStats::checksText() const {
 }
 
 QString JobStats::transfersText() const {
-  return QStringLiteral("%1 / %2").arg(transfers).arg(totalTransfers);
+  // Out of every file there is, once that is known: rclone's own total is
+  // the files begun so far -- "0 / 2" for a folder of 328.
+  return QStringLiteral("%1 / %2")
+      .arg(transfers)
+      .arg(sourceFiles >= 0 ? sourceFiles : totalTransfers);
 }
 
 QString JobStats::elapsedText() const {
@@ -218,6 +222,7 @@ JobStats JobStats::fromCoreStats(const QByteArray &json) {
   stats.errors = root.value("errors").toVariant().toLongLong();
   stats.listed = root.value("listed").toVariant().toLongLong();
   stats.speed = root.value("speed").toDouble();
+  stats.averageSpeed = stats.speed;
   stats.elapsedSeconds = root.value("elapsedTime").toDouble();
   stats.fatalError = root.value("fatalError").toBool(false);
   stats.retryError = root.value("retryError").toBool(false);
@@ -228,6 +233,7 @@ JobStats JobStats::fromCoreStats(const QByteArray &json) {
   stats.etaSeconds = eta.isNull() ? -1 : eta.toVariant().toLongLong();
 
   const QJsonArray transferring = root.value("transferring").toArray();
+  double now = 0.0;
   for (const QJsonValue &value : transferring) {
     const QJsonObject item = value.toObject();
     JobTransferItem entry;
@@ -248,6 +254,22 @@ JobStats JobStats::fromCoreStats(const QByteArray &json) {
                            ? -1
                            : itemEta.toVariant().toLongLong();
     stats.transferring.append(entry);
+    now += entry.speed;
+  }
+
+  // The speed shown is what the files in flight are going at now, added up:
+  // the same figures shown beside each file, so the total is never less than
+  // its parts. (Each file's speedAvg was tried, and lagged far behind a file
+  // just begun -- the total read 63 KB/s beside files at 343.) rclone's
+  // "speed" is an average for the whole job, which a resumed upload throws
+  // well off: a real 1.17 TB upload to teldrive showed 16.4 MB/s beside two
+  // files at 29.1 and 13.2, and a time left of 19 hours for 7.5 (2026-10-21).
+  // Between files nothing is in flight, and rclone's figures stand.
+  if (now > 0) {
+    stats.speed = now;
+    if (stats.totalBytes > stats.bytes) {
+      stats.etaSeconds = static_cast<qint64>((stats.totalBytes - stats.bytes) / now);
+    }
   }
 
   stats.valid = true;
