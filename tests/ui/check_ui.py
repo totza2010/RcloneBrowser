@@ -103,6 +103,35 @@ def shown(page, selector):
     return page.locator(selector).is_visible()
 
 
+def tool(page, selector):
+    """A toolbar button, pressed as a person would: its menu opened first
+    when it is in one (V-91)."""
+    page.evaluate("""s => {
+        const menu = document.querySelector(s).closest('.tool-menu');
+        if (menu && menu.classList.contains('hidden')) menu.previousElementSibling.click();
+    }""", selector)
+    page.click(selector)
+
+
+# How far apart two colours are to a reader (WCAG): 4.5 is what body text
+# needs. Computed in the page, from what it actually painted.
+CONTRAST_JS = r"""el => {
+    const rgb = (c) => (c.match(/[0-9.]+/g) || [0, 0, 0]).slice(0, 3).map(Number);
+    const lum = (c) => {
+        const [r, g, b] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    let back = el, bg = 'rgba(0, 0, 0, 0)';
+    while (back) {
+        bg = getComputedStyle(back).backgroundColor;
+        if (!/rgba\(.*, 0\)$/.test(bg) && bg !== 'transparent') break;
+        back = back.parentElement;
+    }
+    const a = lum(getComputedStyle(el).color), b = lum(bg);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}"""
+
+
 def on_screen_errors(page, toast_ok=False):
     found = []
     if shown(page, "#toast") and not toast_ok:
@@ -269,7 +298,7 @@ def check_remote(page, watch, api, ctx):
     for button, title in (("#remote-size", "Size of"), ("#remote-tree", "Folders under"),
                           ("#remote-about", "About")):
         def question(button=button, title=title):
-            page.click(button)
+            tool(page, button)
             page.wait_for_selector("#resultbox:not(.hidden)", timeout=5000)
             heading = page.locator("#result-title").inner_text()
             assert heading.startswith(title), "the box says %r" % heading
@@ -279,7 +308,7 @@ def check_remote(page, watch, api, ctx):
         step(page, watch, "remote: %s (rclone's answer in the box)" % title.split()[0], question)
 
     def size_cancel():
-        page.click("#remote-size")
+        tool(page, "#remote-size")
         page.wait_for_selector("#resultbox:not(.hidden)", timeout=5000)
         cancel = page.locator("#result-body [data-ask-cancel]")
         if cancel.count():
@@ -317,7 +346,7 @@ def check_remote(page, watch, api, ctx):
 
     def view():
         pick(page, scratch + "/a.txt")
-        page.click("#remote-view")
+        tool(page, "#remote-view")
         page.wait_for_selector("#resultbox:not(.hidden) .viewer-text", timeout=WAIT)
         text = page.locator("#result-body .viewer-text").inner_text()
         assert "hello from" in text, "shows %r" % text[:60]
@@ -348,6 +377,98 @@ def check_many(page, watch, api, ctx):
             entry_row(page, scratch + "/" + name).wait_for(state="detached", timeout=WAIT)
         return "asked %r · both gone" % asked
     step(page, watch, "remote: choose two, Delete both (V-64)", delete_two, toast_ok=True)
+
+
+def check_menus(page, watch, api, ctx):
+    """The menus on the remotes page, in both themes: the right-click menu
+    could not be read on a light page (white on white), the toolbar ran to
+    two lines, and a remote's card had no menu (V-91)."""
+    remote, scratch = ctx["remote"], ctx["scratch"]
+
+    def open_folder():
+        page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
+        page.locator("#listing tr[data-entry]").first.wait_for(timeout=WAIT)
+
+    def theme(name):
+        page.evaluate("t => document.documentElement.setAttribute('data-theme', t)", name)
+
+    def readable(selector):
+        worst = None
+        for item in page.locator(selector).all():
+            if item.is_enabled():
+                ratio = item.evaluate(CONTRAST_JS)
+                worst = ratio if worst is None else min(worst, ratio)
+        assert worst is not None, "nothing to read in %s" % selector
+        return worst
+
+    def row_menu_readable():
+        open_folder()
+        said = []
+        for name in ("light", "dark"):
+            theme(name)
+            page.locator("#listing tr[data-entry] td").last.click(button="right")
+            page.wait_for_selector("#row-menu:not(.hidden)", timeout=5000)
+            worst = readable("#row-menu button")
+            page.keyboard.press("Escape")
+            assert worst >= 4.5, "%s: the menu's text is %.1f:1 against it (4.5 needed)" % (name, worst)
+            said.append("%s %.1f:1" % (name, worst))
+        return "right-click menu: " + " · ".join(said)
+    step(page, watch, "Right-click menu can be read, light and dark (V-91)", row_menu_readable)
+
+    def toolbar_menus():
+        open_folder()
+        said = []
+        for name in ("light", "dark"):
+            theme(name)
+            openers = page.locator(".toolbar .tool-open")
+            for i in range(openers.count()):
+                opener = openers.nth(i)
+                opener.click()
+                menu = opener.locator("xpath=following-sibling::div[contains(@class,'tool-menu')]")
+                assert menu.is_visible(), "%s did not open" % opener.inner_text()
+                assert page.locator(".tool-menu:not(.hidden)").count() == 1, "more than one menu open"
+                box = menu.bounding_box()
+                assert box["x"] + box["width"] <= page.viewport_size["width"], "%s runs off the page" % opener.inner_text()
+                worst = readable(".tool-menu:not(.hidden) button")
+                assert worst >= 4.5, "%s %s: %.1f:1" % (name, opener.inner_text(), worst)
+                if name == "light":
+                    said.append("%s (%d)" % (opener.inner_text().rstrip(" ▾"), menu.locator("button").count()))
+            page.keyboard.press("Escape")
+            assert page.locator(".tool-menu:not(.hidden)").count() == 0, "Escape left a menu open"
+        # Chosen from a menu: it does that, and the menu shuts.
+        tool(page, "#remote-about")
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=5000)
+        assert page.locator(".tool-menu:not(.hidden)").count() == 0, "the menu stayed open"
+        page.click("#result-close")
+        # One line at this width: every button's top the same.
+        tops = page.evaluate("""() => [...document.querySelectorAll('.toolbar > button, .toolbar > .tool-group')]
+            .filter((b) => b.offsetParent).map((b) => Math.round(b.getBoundingClientRect().top))""")
+        assert len(set(tops)) == 1, "the toolbar is %d lines" % len(set(tops))
+        return "one line · " + ", ".join(said) + " · Escape shuts · readable light and dark"
+    step(page, watch, "Toolbar: the rest in menus, one line (V-91)", toolbar_menus)
+
+    def card_menu():
+        open_folder()
+        theme("light")
+        page.locator('#remote-list button[data-remote="%s"]' % remote).click(button="right")
+        page.wait_for_selector("#card-menu:not(.hidden)", timeout=5000)
+        items = page.locator("#card-menu button").all_inner_texts()
+        assert items == ["Open", "Settings…", "Info", "New remote…"], "it offers %r" % items
+        worst = readable("#card-menu button")
+        assert worst >= 4.5, "the card menu's text is %.1f:1" % worst
+        page.click('#card-menu button[data-card="info"]')
+        page.wait_for_selector("#resultbox:not(.hidden)", timeout=5000)
+        title = page.locator("#result-title").inner_text()
+        assert title.startswith("About " + remote), "Info opened %r" % title
+        page.click("#result-close")
+        page.locator("#remote-list button[data-remote-new]").click(button="right")
+        page.wait_for_selector("#card-menu:not(.hidden)", timeout=5000)
+        only = page.locator("#card-menu button").all_inner_texts()
+        page.keyboard.press("Escape")
+        assert only == ["New remote…"], "on + New remote it offers %r" % only
+        return "%s: %s · Info → %r · + New remote: %s" % (remote, ", ".join(items), title, only[0])
+    step(page, watch, "A remote's card has a right-click menu (V-91)", card_menu)
+    theme("dark")
 
 
 def check_new_remote_form(page, watch, api, ctx):
@@ -539,7 +660,7 @@ def open_upload(page, ctx):
     page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(ctx["remote"]),
                                                   urllib.parse.quote(ctx["scratch"])))
     entry_row(page, ctx["scratch"] + "/a.txt").wait_for(timeout=WAIT)
-    page.click("#remote-upload")
+    tool(page, "#remote-upload")
     page.wait_for_selector("#taskbox:not(.hidden)", timeout=5000)
 
 
@@ -1220,7 +1341,7 @@ def check_serve_and_stop(page, watch, api, ctx):
         entry_row(page, scratch + "/a.txt").wait_for(timeout=WAIT)
         clear_choice(page)
         before = {j["requestId"] for j in api.get("/jobs")[1] or []}
-        page.click("#remote-serve")
+        tool(page, "#remote-serve")
         page.wait_for_selector("#serve-go", timeout=5000)
         page.select_option("#serve-protocol", "webdav")
         page.fill("#serve-port", "18911")
@@ -1303,7 +1424,7 @@ def check_mount(page, watch, api, ctx):
         page.goto(ctx["base"] + "/#/remotes/%s/%s" % (urllib.parse.quote(remote), urllib.parse.quote(scratch)))
         entry_row(page, scratch + "/a.txt").wait_for(timeout=WAIT)
         clear_choice(page)
-        page.click("#remote-mount")
+        tool(page, "#remote-mount")
         page.wait_for_selector("#mount-go", timeout=5000)
         for part in ("#mount-point", "#mount-cache", "#mount-ro", "#mount-volume", "#mount-extra",
                      "#mount-save", "#mount-auto", "#mount-script"):
@@ -1685,6 +1806,7 @@ def main():
                 ("mount", lambda: check_mount(page, watch, api, ctx)),
                 ("schedules", lambda: check_schedules(page, watch, api, ctx)),
                 ("many", lambda: check_many(page, watch, api, ctx)),
+                ("menus", lambda: check_menus(page, watch, api, ctx)),
                 ("new_remote", lambda: check_new_remote_form(page, watch, api, ctx)),
                 ("api_tab", lambda: check_api_tab(page, watch, api, ctx)),
                 ("log_level", lambda: check_log_level_setting(page, watch, api, ctx)),

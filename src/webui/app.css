@@ -562,9 +562,22 @@ button.name.link:hover { text-decoration: underline; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   box-shadow: 0 8px 28px var(--shadow); display: flex; flex-direction: column;
 }
-.row-menu button { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 4px; }
+/* Its own colour: a button's is the text on the accent, white on a light
+   page -- the menu was there, and nothing could be read in it. */
+.row-menu button { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 4px; color: var(--text); font-weight: 400; }
 .row-menu button:hover:not(:disabled) { background: var(--hover, rgba(127, 127, 127, 0.12)); }
 .row-menu button:disabled { opacity: 0.45; }
+/* The toolbar's menus: a button that opens a column of the others. */
+.tool-group { position: relative; display: inline-block; }
+.tool-menu {
+  position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; min-width: 200px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 28px var(--shadow); display: flex; flex-direction: column;
+}
+.tool-menu.to-left { left: auto; right: 0; }
+.tool-menu.hidden { display: none; }
+.tool-menu button { text-align: left; border: 0; background: none; color: var(--text); font-weight: 400; padding: 6px 10px; }
+.tool-menu button:hover:not(:disabled) { background: var(--hover, rgba(127, 127, 127, 0.12)); }
 .row-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.08)); }
 

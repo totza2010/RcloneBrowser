@@ -96,29 +96,52 @@
       <div id="browser" class="hidden">
         <div id="remote-info"></div>
         <div class="toolbar">
+          <!-- What is done most stays in sight; the rest in four menus, so
+               the row is one line, not two or three. A button in a menu
+               keeps its id: the row menu and the scripts press the same one. -->
           <button id="remote-refresh" class="ghost small">Refresh</button>
           <button id="remote-mkdir" class="ghost small">New folder</button>
-          <button id="remote-rename" class="ghost small" disabled>Rename</button>
-          <button id="remote-upload-local" class="ghost small" title="files from the computer this browser is on — or drag them onto the list">Upload from this computer</button>
-          <button id="remote-upload" class="ghost small" title="from a folder of the machine the program runs on, with every transfer option">Upload</button>
+          <div class="tool-group">
+            <button type="button" class="ghost small tool-open" aria-haspopup="menu">Upload ▾</button>
+            <div class="tool-menu hidden" role="menu">
+              <button id="remote-upload-local" class="ghost small" title="files from the computer this browser is on — or drag them onto the list">From this computer…</button>
+              <button id="remote-upload" class="ghost small" title="from a folder of the machine the program runs on, with every transfer option">From the program's machine…</button>
+            </div>
+          </div>
           <input type="file" id="upload-files" multiple class="hidden">
-          <button id="remote-view" class="ghost small" disabled title="or double-click the file">View</button>
           <button id="remote-download" class="ghost small" disabled>Download</button>
           <button id="remote-copy" class="ghost small" disabled>Copy</button>
           <button id="remote-move" class="ghost small" disabled>Move</button>
+          <button id="remote-rename" class="ghost small" disabled>Rename</button>
           <button id="remote-delete" class="danger small" disabled>Delete</button>
-          <button id="remote-size" class="ghost small">Size</button>
-          <button id="remote-tree" class="ghost small">Tree</button>
-          <button id="remote-about" class="ghost small">Info</button>
-          <button id="remote-settings" class="ghost small">Settings</button>
-          <button id="remote-mount" class="ghost small">Mount</button>
-          <button id="remote-serve" class="ghost small">Serve</button>
-          <button id="remote-stream" class="ghost small">Stream</button>
-          <button id="remote-check" class="ghost small">Check</button>
-          <button id="remote-export" class="ghost small">Export</button>
-          <button id="remote-link" class="ghost small" disabled>Link</button>
-          <button id="remote-dedupe" class="ghost small">Dedupe</button>
-          <button id="remote-cleanup" class="ghost small">Cleanup</button>
+          <div class="tool-group">
+            <button type="button" class="ghost small tool-open" aria-haspopup="menu">Open ▾</button>
+            <div class="tool-menu hidden" role="menu">
+              <button id="remote-view" class="ghost small" disabled title="or double-click the file">View</button>
+              <button id="remote-stream" class="ghost small">Stream</button>
+              <button id="remote-mount" class="ghost small">Mount…</button>
+              <button id="remote-serve" class="ghost small">Serve…</button>
+              <button id="remote-link" class="ghost small" disabled>Public link</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <button type="button" class="ghost small tool-open" aria-haspopup="menu">Tools ▾</button>
+            <div class="tool-menu hidden" role="menu">
+              <button id="remote-size" class="ghost small">Size</button>
+              <button id="remote-tree" class="ghost small">Tree</button>
+              <button id="remote-check" class="ghost small">Check…</button>
+              <button id="remote-dedupe" class="ghost small">Dedupe…</button>
+              <button id="remote-cleanup" class="ghost small">Cleanup</button>
+              <button id="remote-export" class="ghost small">Export…</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <button type="button" class="ghost small tool-open" aria-haspopup="menu">Remote ▾</button>
+            <div class="tool-menu hidden" role="menu">
+              <button id="remote-about" class="ghost small">Info</button>
+              <button id="remote-settings" class="ghost small">Settings…</button>
+            </div>
+          </div>
           <span id="remote-chosen" class="muted"></span>
         </div>
         <div class="crumbs-line">
@@ -130,6 +153,8 @@
         <!-- What can be done to the rows under the pointer: the toolbar's
              own buttons, nearer to hand. -->
         <div id="row-menu" class="row-menu hidden" role="menu"></div>
+        <!-- The same, for a remote's card. -->
+        <div id="card-menu" class="row-menu hidden" role="menu"></div>
       </div>
     </section>
     <section id="tab-schedules" class="tab"></section>

@@ -1572,6 +1572,7 @@ function openRowMenu(x, y) {
 
 function closeRowMenu() {
   $("row-menu").classList.add("hidden");
+  $("card-menu").classList.add("hidden");
 }
 
 $("listing").addEventListener("contextmenu", (event) => {
@@ -1590,11 +1591,78 @@ $("row-menu").addEventListener("click", (event) => {
   closeRowMenu();
   $(button.dataset.menu).click();
 });
+
+// A remote's card, right-clicked: what the window's list offers, and the
+// remote opened first, so Settings and Info are of the one under the pointer.
+$("remote-list").addEventListener("contextmenu", (event) => {
+  const card = event.target.closest("button[data-remote], button[data-remote-new]");
+  if (!card) return;
+  event.preventDefault();
+  const name = card.dataset.remote;
+  const menu = $("card-menu");
+  menu.dataset.remote = name || "";
+  menu.innerHTML = (name
+    ? '<button type="button" data-card="open">Open</button>' +
+      '<button type="button" data-card="settings">Settings…</button>' +
+      '<button type="button" data-card="info">Info</button><hr>'
+    : "") +
+    '<button type="button" data-card="new">New remote…</button>';
+  menu.classList.remove("hidden");
+  const box = menu.getBoundingClientRect();
+  menu.style.left = Math.max(4, Math.min(event.clientX, window.innerWidth - box.width - 4)) + "px";
+  menu.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - box.height - 4)) + "px";
+  menu.querySelector("button").focus();
+});
+
+$("card-menu").addEventListener("click", async (event) => {
+  const item = event.target.closest("button[data-card]");
+  if (!item) return;
+  const name = $("card-menu").dataset.remote;
+  closeRowMenu();
+  if (item.dataset.card === "new") {
+    document.querySelector("[data-remote-new]").click();
+    return;
+  }
+  // Opening it sets the remote before its first wait: what follows is of it.
+  if (browsing.remote !== name || item.dataset.card === "open") browse(name, "");
+  if (item.dataset.card === "settings") $("remote-settings").click();
+  if (item.dataset.card === "info") $("remote-about").click();
+});
+
+// The toolbar's menus: one open at a time, shut by what is chosen in it, by
+// a click anywhere else, and by Escape.
+function closeToolMenus(except) {
+  for (const menu of document.querySelectorAll(".tool-menu")) {
+    if (menu !== except) menu.classList.add("hidden");
+  }
+}
+for (const opener of document.querySelectorAll(".tool-open")) {
+  opener.addEventListener("click", () => {
+    const menu = opener.nextElementSibling;
+    closeToolMenus(menu);
+    menu.classList.toggle("hidden");
+    // Kept on the screen: opened to the left when there is no room right.
+    menu.classList.remove("to-left");
+    if (!menu.classList.contains("hidden") && menu.getBoundingClientRect().right > window.innerWidth - 4) {
+      menu.classList.add("to-left");
+    }
+  });
+}
+for (const menu of document.querySelectorAll(".tool-menu")) {
+  menu.addEventListener("click", (event) => {
+    if (event.target.closest("button")) menu.classList.add("hidden");
+  });
+}
+
 document.addEventListener("mousedown", (event) => {
-  if (!event.target.closest("#row-menu")) closeRowMenu();
+  if (!event.target.closest("#row-menu, #card-menu")) closeRowMenu();
+  if (!event.target.closest(".tool-group")) closeToolMenus();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeRowMenu();
+  if (event.key === "Escape") {
+    closeRowMenu();
+    closeToolMenus();
+  }
 });
 window.addEventListener("scroll", closeRowMenu, true);
 
