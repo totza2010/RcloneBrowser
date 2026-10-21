@@ -49,6 +49,22 @@
 
 #include <memory>
 
+// Qt's own plugins, set before QApplication looks for one: building the
+// program copies Qt beside this test with only the "windows" platform
+// plugin, and run by hand (not through ctest) it stopped at a box saying no
+// platform plugin could be initialized -- one box per run, left on screen.
+#ifdef RB_QT_PLUGINS
+static const bool kPluginsFound = []() {
+  if (qEnvironmentVariableIsEmpty("QT_PLUGIN_PATH")) {
+    qputenv("QT_PLUGIN_PATH", RB_QT_PLUGINS);
+  }
+  if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+  }
+  return true;
+}();
+#endif
+
 // The window, clicked as a person would: the same buttons, the same boxes
 // asking "are you sure?", answered one way and then the other. The web page
 // has tests/ui/check_ui.py for this; this is the window's.

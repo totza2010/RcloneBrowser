@@ -8,6 +8,14 @@ add_executable(fake_rclone fake_rclone.cpp)
 
 # Tests link rbcore only. If a test ever needs Qt6::Widgets to link, something
 # that belongs in the GUI has drifted into the core.
+# Qt's own plugins, not whatever sits beside the tests: building the program
+# copies Qt into the same folder with only the "windows" platform plugin, and
+# offscreen is then not found -- every test that opens a window aborted.
+set(RB_TEST_ENV "QT_QPA_PLATFORM=offscreen")
+if(QT6_INSTALL_PREFIX AND QT6_INSTALL_PLUGINS)
+  list(APPEND RB_TEST_ENV "QT_PLUGIN_PATH=${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
+endif()
+
 function(rb_add_test name)
   add_executable(${name} ${name}.cpp)
   target_link_libraries(${name} PRIVATE rbcore Qt6::Test)
@@ -16,7 +24,7 @@ function(rb_add_test name)
       RB_FAKE_RCLONE="$<TARGET_FILE:fake_rclone>")
   add_dependencies(${name} fake_rclone)
   add_test(NAME ${name} COMMAND ${name})
-  set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT "${RB_TEST_ENV}")
 endfunction()
 
 rb_add_test(test_rclone_capabilities)
@@ -63,9 +71,13 @@ if(TARGET rbgui)
   target_precompile_headers(test_window PRIVATE "${CMAKE_SOURCE_DIR}/src/pch.h")
   target_compile_definitions(test_window PRIVATE
       RB_FAKE_RCLONE="$<TARGET_FILE:fake_rclone>")
+  if(QT6_INSTALL_PREFIX AND QT6_INSTALL_PLUGINS)
+    target_compile_definitions(test_window PRIVATE
+        RB_QT_PLUGINS="${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
+  endif()
   add_dependencies(test_window fake_rclone)
   add_test(NAME test_window COMMAND test_window)
-  set_tests_properties(test_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set_tests_properties(test_window PROPERTIES ENVIRONMENT "${RB_TEST_ENV}")
 endif()
 
 # Not registered as a test: run by hand to regenerate the golden task file

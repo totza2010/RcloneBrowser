@@ -45,6 +45,13 @@ bash scripts/ci_linux_local.sh
 QT_QPA_PLATFORM=offscreen build/build/Debug/test_window.exe
 ```
 
+ctest ตั้ง `QT_PLUGIN_PATH` ไปที่ plugins ของ Qt เอง เพราะการ build ตัวโปรแกรมคัดลอก Qt มาไว้ในโฟลเดอร์เดียวกับ test
+โดยมีแค่ platform plugin "windows" test ที่เปิดหน้าต่างเลยล้มทันที (0xc0000409) และไม่พิมพ์อะไรออกมา
+เมื่อรัน exe เอง `test_window` ตั้ง `QT_PLUGIN_PATH` และ `QT_QPA_PLATFORM=offscreen` ให้ตัวเองถ้ายังไม่ได้ตั้งไว้ จึงไม่ขึ้นกล่อง "no Qt platform plugin" อีก
+
+`test_job_registry` · `test_job_queue` · `test_task_runner` ใช้ rclone จริงที่หาเจอใน PATH (คัดลอกไฟล์ในเครื่อง)
+ถ้า rclone ใน PATH เสีย test พวกนี้จะล้มเอง ไม่ใช่เพราะโค้ด
+
 | กดอะไร | V-xx |
 |---|---|
 | หน้าต่างเปิด · รายชื่อรีโหมดจาก rclone | V-05 |
