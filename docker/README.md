@@ -1,17 +1,35 @@
 # Rclone Browser in a container
 
-One image, three ways to run it. `RB_MODE` chooses:
+## Which one to run
 
-| `RB_MODE` | what runs | where to look |
-|---|---|---|
-| `web` | the application and its own web interface, no window | `http://localhost:19999` |
-| `both` (default) | that, and the window streamed to a browser | `https://localhost:3001` as well |
-| `desktop` | the streamed window only; web interface and API off | `https://localhost:3001` |
+Two images, and a compose file for each. Choose by one question: **will you
+ever want the window?**
+
+| You want | Run | Set in `.env` | Image |
+|---|---|---|---|
+| The web page only, never the window | `compose.lite.yaml` | nothing | `-web`, ~200 MB |
+| The web page now, the window now and then | `compose.yaml` | `RB_MODE=web` | ~2.5 GB |
+| The web page and the window | `compose.yaml` | `RB_MODE=both` (the default) | ~2.5 GB |
+| The window only | `compose.yaml` | `RB_MODE=desktop` | ~2.5 GB |
+
+- **`RB_MODE` is read by `compose.yaml` only.** The light image has no window
+  to choose, so `compose.lite.yaml` has no `RB_MODE`.
+- `RB_MODE=web` and `compose.lite.yaml` run the same thing: the program and its
+  web page. The difference is what is carried: the image for `compose.yaml`
+  has the window in it, unused in `web`, so changing to `both` later is one
+  line and a restart. The light image cannot do that -- and is a twelfth of
+  the size.
+- The two files are **one installation**: the same service, volumes and
+  `/config`. Stop one and start the other, and the tasks, schedules, history,
+  keys and rclone.conf are all still there.
 
 ```bash
-cp docker/.env.example docker/.env    # then set RB_MODE and the passwords
-docker compose -f docker/compose.yaml up -d
+cp docker/.env.example docker/.env    # every setting, explained; keep what you change
+docker compose -f docker/compose.lite.yaml up -d     # or compose.yaml
 ```
+
+Where to look: the web page at `http://localhost:19999`; the window, with
+`compose.yaml` in `both` or `desktop`, at `https://localhost:3001`.
 
 The **web interface** is the application's own: queue, tasks, schedules,
 history, remotes. It asks for the token the container prints when it starts
@@ -28,6 +46,14 @@ the first time.
 In `both`, the window and the web interface are two views of one running
 program: start a transfer in one and it appears in the other.
 
+`RB_MODE` in full, for `compose.yaml`:
+
+| `RB_MODE` | what runs | where to look |
+|---|---|---|
+| `web` | the application and its own web interface, no window | `http://localhost:19999` |
+| `both` (default) | that, and the window streamed to a browser | `https://localhost:3001` as well |
+| `desktop` | the streamed window only; web interface and API off | `https://localhost:3001` |
+
 Published to `ghcr.io/totza2010/rclonebrowser`. Nothing is pushed except
 from a `v*` tag, and by the daily rebuild when a new rclone comes out.
 
@@ -43,6 +69,18 @@ with **`-web`** on the end (`latest-web`, `tgdrive-1.75.4-web`, ...). It is
 `RB_MODE=web` without the other two modes in it -- no desktop, no streaming,
 no X server, nothing of QtWidgets -- and about **200 MB** where the image with
 the window is about 2.5 GB.
+
+With compose, `compose.lite.yaml` beside `compose.yaml`; every setting of
+both is in `docker/.env.example`:
+
+```bash
+cp docker/.env.example docker/.env      # keep only what you change
+docker compose -f docker/compose.lite.yaml up -d
+```
+
+The two files are one installation run two ways -- the same service, volumes
+and `/config` -- so stopping one and starting the other keeps the tasks,
+schedules, history, keys and rclone.conf. Or by hand:
 
 ```bash
 docker run -d --name rclonebrowser -p 19999:19999 \

@@ -1,10 +1,18 @@
-# One image, three ways to run it. Set RB_MODE in docker/.env:
+# The image with the window (~2.5 GB). RB_MODE in docker/.env says what runs:
 #
-#   web       the application's own web interface      http://localhost:19999
-#   both      that, and the window streamed as well    https://localhost:3001
-#   desktop   the streamed window only
+#   web       the web page only        http://localhost:19999
+#   both      the web page and the window, streamed     https://localhost:3001
+#             (the default)
+#   desktop   the window only
 #
-#   cp docker/.env.example docker/.env   # then edit
+# Never going to want the window? Use compose.lite.yaml instead: the same
+# web page from an image a twelfth of the size. RB_MODE=web here is for when
+# the window is wanted now and then -- change it to both and restart.
+#
+# The two files are one installation (same service, volumes, /config):
+# stopping one and starting the other keeps everything.
+#
+#   cp docker/.env.example docker/.env   # every setting, explained
 #   docker compose -f docker/compose.yaml up -d
 #
 # Build from this checkout instead of pulling:
@@ -12,7 +20,7 @@
 
 services:
   rclonebrowser:
-    image: ghcr.io/totza2010/rclonebrowser:latest
+    image: ${RB_IMAGE:-ghcr.io/totza2010/rclonebrowser}:${RB_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -29,10 +37,10 @@ services:
       #
       # The application's own web interface and API. Nothing listens here in
       # desktop mode.
-      - "127.0.0.1:${RB_WEB_PORT:-19999}:19999"
+      - "${RB_BIND:-127.0.0.1}:${RB_WEB_PORT:-19999}:19999"
       # The streamed window, over HTTPS with a self-signed certificate.
       # Nothing listens here in web mode.
-      - "127.0.0.1:${RB_PORT:-3001}:3001"
+      - "${RB_BIND:-127.0.0.1}:${RB_PORT:-3001}:3001"
     environment:
       - RB_MODE=${RB_MODE:-both}
       # Match the owner of any host directory mounted below. Running as root
@@ -59,6 +67,18 @@ services:
       # already fetched needs no network. "latest" asks GitHub at each start.
       - RB_RCLONE_REPO=${RB_RCLONE_REPO:-}
       - RB_RCLONE_VERSION=${RB_RCLONE_VERSION:-}
+      # How far the page may look on this side: /media, where RB_MEDIA is
+      # mounted, unless more is mounted and listed here.
+      - RB_LOCAL_ROOTS=${RB_LOCAL_ROOTS:-/media}
+      # Each of these, left empty, is the program's own setting -- changed on
+      # the page or in Preferences. Set here, it is fixed there.
+      - RB_RCLONE_LOG_LEVEL=${RB_RCLONE_LOG_LEVEL:-}
+      - RB_STREAM_IDLE_MINUTES=${RB_STREAM_IDLE_MINUTES:-}
+      - RB_WATCH_POLL_SECONDS=${RB_WATCH_POLL_SECONDS:-}
+      - RB_UPLOAD_STAGING=${RB_UPLOAD_STAGING:-}
+      - RB_DEBUG=${RB_DEBUG:-}
+      # An rclone.conf kept encrypted: its password, so rclone can open it.
+      - RCLONE_CONFIG_PASS=${RCLONE_CONFIG_PASS:-}
       # Wayland instead of X11 for the streamed window. X11 is the default
       # and the better-trodden path.
       # - PIXELFLUX_WAYLAND=true
@@ -69,6 +89,8 @@ services:
     # application takes up to eight to stop its transfers and record what
     # became of them, and the supervisor around it needs a little as well.
     stop_grace_period: 20s
+    # Up again after a reboot or a crash, mounts set to start with it as well.
+    restart: ${RB_RESTART:-unless-stopped}
     volumes:
       # rclone.conf, saved tasks, the scheduler, and the per-job logs.
       #

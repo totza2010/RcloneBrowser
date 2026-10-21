@@ -80,6 +80,10 @@ RUN apk add --no-cache \
     && addgroup -g 1000 abc \
     && adduser -D -u 1000 -G abc -h /config -s /bin/sh abc \
     && mkdir -p /config /media \
+    # The user's, as on the image with the window: a new named volume takes
+    # the owner of the folder it is mounted over, and a root /media was one
+    # nothing could be downloaded into (2026-10-21).
+    && chown abc:abc /config /media \
     && echo "web" > /etc/rclone-browser-image
 
 COPY --from=build-web /build/build/rclone-browser /usr/bin/rclone-browser

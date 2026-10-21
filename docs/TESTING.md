@@ -156,6 +156,8 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
 - `--show` เปิดหน้าต่าง Chrome ให้ดูมันกด · `--slow 300` ช้าลง
 - `--from-source` ใช้หน้าเว็บจาก `src/webui` (index.html · app.js · app.css) แทนตัวที่ build อยู่ในโปรแกรม —
   แก้หน้าเว็บแล้วลองได้ทันทีโดยไม่ต้อง build อะไร
+- ฉบับเบา (core + หน้าเว็บ): `docker compose -f docker/compose.dev.yaml --profile lite up -d --build` แล้ว
+  `--base http://127.0.0.1:19992 --container rclonebrowser-dev-lite` — ทั้ง `check_ui` และ `verify_live` ต้องผ่านเท่าฉบับเต็ม
 - `--app-js <ไฟล์>` ใช้ app.js ไฟล์นั้นแทน (เช่นเวอร์ชันเก่า เพื่อดูว่า test จับบั๊กได้)
 
 **ข้อไหน FAIL**: เมื่อสิ่งที่มันตรวจเองไม่เป็นตามนั้น **หรือ** มีอย่างใดอย่างหนึ่งต่อไปนี้ระหว่างทาง:

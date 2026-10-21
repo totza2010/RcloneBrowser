@@ -557,6 +557,9 @@ build อิมเมจ dev ใหม่จาก commit `a4ee042` แล้ว
 > คือไฟล์ที่*เริ่ม*แล้ว · core สั่ง `rclone size --json <ต้นทาง> <filter ของงาน>` ข้างงาน → `sourceFiles` · Transfers = x / ไฟล์ทั้งหมด ·
 > ความเร็วรวม = ผลรวมความเร็วรายไฟล์ (ค่าเฉลี่ยทั้งงานของ rclone เป็น `averageSpeed`) · ETA จากความเร็วนี้ ·
 > daemon ส่งข่าวของงานที่เริ่มก่อนหน้าเว็บแรกเปิดด้วย (เดิมไม่ส่งเลย) · V-87
+> · **compose แบบเบา** (ผู้ใช้ขอ 2026-10-21): `docker/compose.lite.yaml` (core + หน้าเว็บ, image `-web` ~200 MB) ·
+> ติดตั้งเดียวกับ compose.yaml (สลับไฟล์ได้) · `.env.example` เขียนใหม่ทุกตัวเลือก · dev profile `lite` พอร์ต 19992 ·
+> เจอ: `/media` ของ image เบาเป็นของ root → volume ใหม่ดาวน์โหลดลงไม่ได้ · แก้ใน Dockerfile + CI ตรวจ · V-89
 > · **ระดับ log ของ rclone ตั้งได้** (ผู้ใช้ขอ 2026-10-21): ERROR · NOTICE · INFO (เดิม) · DEBUG — `ProgramSettings` ที่เดียว ·
 > หน้าเว็บ (Program settings) · หน้าต่าง (Preferences → Logs) · `RB_RCLONE_LOG_LEVEL` · ใช้กับทุก transfer รวม copy/move บนหน้ารีโหมด
 > (ซึ่งเดิมไม่มีระดับ log เลย) · V-88

@@ -9,6 +9,13 @@
 #   web interface     http://localhost:19991
 #   streamed window   https://localhost:3011
 #
+# And the light one (compose.lite.yaml's image, built from here), beside it
+# when asked for:
+#
+#   docker compose -f docker/compose.dev.yaml --profile lite up -d --build
+#
+#   web interface     http://localhost:19992
+#
 # What makes it a development file rather than a second copy of compose.yaml:
 #
 #   * It always builds. There is no image to pull, so what runs is what is in
@@ -100,7 +107,34 @@ services:
     # security_opt:
     #   - apparmor:unconfined
 
+  # The light image: the core and its page, no window. Only with
+  # "--profile lite"; its own name, port and volumes, like the one above.
+  rclonebrowser-dev-lite:
+    profiles: ["lite"]
+    image: rclonebrowser:dev-web
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: web
+    container_name: rclonebrowser-dev-lite
+    ports:
+      - "127.0.0.1:${RB_DEV_LITE_WEB_PORT:-19992}:19999"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Bangkok}
+      - RB_RCLONE_REPO=${RB_DEV_RCLONE_REPO:-}
+      - RB_RCLONE_VERSION=${RB_DEV_RCLONE_VERSION:-}
+      - RB_LOCAL_ROOTS=/media
+    stop_grace_period: 20s
+    volumes:
+      - "rclonebrowser-dev-lite-config:/config"
+      - "${RB_DEV_MEDIA:-rclonebrowser-dev-lite-media}:/media"
+      - "${RB_DEV_RCLONE_CONF:-${RB_RCLONE_CONF:-${APPDATA:-$HOME/.config}/rclone}}:/rclone-config"
+
 volumes:
   rclonebrowser-dev-config:
   rclonebrowser-dev-media:
   rclonebrowser-dev-rclone:
+  rclonebrowser-dev-lite-config:
+  rclonebrowser-dev-lite-media:

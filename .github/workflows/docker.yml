@@ -183,6 +183,15 @@ jobs:
               echo "the web-only program links QtWidgets" >&2
               exit 1
             fi
+            # The user's, as on the other image: a new volume takes the owner
+            # of the folder it is mounted over, and a root /media was one
+            # nothing could be downloaded into.
+            for folder in /config /media; do
+              if [ "$(stat -c %U "$folder")" != abc ]; then
+                echo "$folder is not the user's" >&2
+                exit 1
+              fi
+            done
             rclone version | head -1
             /usr/bin/rclone-browser --help > /dev/null
           '

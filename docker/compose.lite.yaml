@@ -1,0 +1,75 @@
+# The light one: the core and its web page, with no window at all -- about
+# 200 MB where the image with the window is about 2.5 GB. For a server or a
+# NAS where nobody looks at a desktop. Everything is done from the page
+# (http://localhost:19999) or the API.
+#
+#   cp docker/.env.example docker/.env   # then edit
+#   docker compose -f docker/compose.lite.yaml up -d
+#
+# Build from this checkout instead of pulling:
+#   docker compose -f docker/compose.lite.yaml build
+#
+# The same service, the same volumes and the same /config layout as
+# compose.yaml, so the two are one installation run two ways: stop one and
+# start the other and the tasks, schedules, history, keys and rclone.conf are
+# all still there.
+#
+#   docker compose -f docker/compose.yaml down
+#   docker compose -f docker/compose.lite.yaml up -d
+#
+# Every setting is in docker/.env.example; what only the window uses
+# (RB_MODE, RB_PORT, RB_STREAM_USER, ...) does nothing here.
+
+services:
+  rclonebrowser:
+    image: ${RB_IMAGE:-ghcr.io/totza2010/rclonebrowser}:${RB_TAG:-latest}-web
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: web
+    container_name: rclonebrowser
+    ports:
+      # Loopback unless RB_BIND says otherwise. Put a reverse proxy with TLS
+      # in front before letting the network reach it; see the README.
+      - "${RB_BIND:-127.0.0.1}:${RB_WEB_PORT:-19999}:19999"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Bangkok}
+      # Which rclone to run, chosen at start (see .env.example).
+      - RB_RCLONE_REPO=${RB_RCLONE_REPO:-}
+      - RB_RCLONE_VERSION=${RB_RCLONE_VERSION:-}
+      # How far the page may look on this side: /media, where RB_MEDIA is
+      # mounted, unless more is mounted and listed here.
+      - RB_LOCAL_ROOTS=${RB_LOCAL_ROOTS:-/media}
+      # Each of these, left empty, is the program's own setting -- changed on
+      # the page. Set here, it is fixed: shown there and not changed there.
+      - RB_RCLONE_LOG_LEVEL=${RB_RCLONE_LOG_LEVEL:-}
+      - RB_STREAM_IDLE_MINUTES=${RB_STREAM_IDLE_MINUTES:-}
+      - RB_WATCH_POLL_SECONDS=${RB_WATCH_POLL_SECONDS:-}
+      - RB_UPLOAD_STAGING=${RB_UPLOAD_STAGING:-}
+      - RB_DEBUG=${RB_DEBUG:-}
+      # An rclone.conf kept encrypted: its password, so rclone can open it.
+      - RCLONE_CONFIG_PASS=${RCLONE_CONFIG_PASS:-}
+    # The program needs up to eight seconds to stop its transfers and write
+    # down what became of them; "docker stop" waits ten unless told longer.
+    stop_grace_period: 20s
+    restart: ${RB_RESTART:-unless-stopped}
+    volumes:
+      # The same three as compose.yaml: see the comments there.
+      - "${RB_CONFIG:-rclonebrowser-config}:/config"
+      - "${RB_MEDIA:-rclonebrowser-media}:/media"
+      - "${RB_RCLONE_CONF:-${APPDATA:-$HOME/.config}/rclone}:/rclone-config"
+
+    # rclone mount needs FUSE. Left out because it widens what a compromised
+    # container can do and transfers do not need it. Uncomment to mount:
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
+
+volumes:
+  rclonebrowser-config:
+  rclonebrowser-media:

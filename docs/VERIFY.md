@@ -2242,6 +2242,25 @@ marker: `ProcessFor` ใน `rclone_config.cpp`
 | 1 | test: กล่องรีโหมดใหม่ · Save · Cancel ทันที · กล่องหาย | หน้าต่างยังอยู่ (ก่อนแก้: crash) | ✅ **PASS** | AI / 2026-10-20 · `test_window` · ไม่มีตัวแก้ → exit 139 · มี → ผ่าน |
 | 2 | หน้าต่าง · New remote… · กรอก · Save แล้วกด Cancel เร็วๆ | หน้าต่างไม่ปิดตัวเอง | ⬜ | |
 
+### V-89 · compose แบบเบา (core + หน้าเว็บ) และ .env ที่มีทุกตัวเลือก
+
+marker: `docker/compose.lite.yaml` · `docker/.env.example` · profile `lite` ใน `compose.dev.yaml` · `chown abc:abc /config /media` (Dockerfile ชั้น web)
+
+ผู้ใช้ขอ (2026-10-21): compose ที่รองรับ ui+core แบบเบา และ .env ตัวอย่างที่มีตัวเลือกทั้งหมด ·
+compose.yaml (มีหน้าต่าง) กับ compose.lite.yaml (เบา) = ติดตั้งเดียวกัน (service · volume · /config เดียวกัน) สลับไฟล์แล้วของอยู่ครบ ·
+ตัวเลือกใหม่ในทั้งสอง: `RB_IMAGE` · `RB_TAG` · `RB_BIND` · `RB_RESTART` · `RB_LOCAL_ROOTS` · `RB_RCLONE_LOG_LEVEL` · `RB_STREAM_IDLE_MINUTES` ·
+`RB_WATCH_POLL_SECONDS` · `RB_UPLOAD_STAGING` · `RB_DEBUG` · `RCLONE_CONFIG_PASS` · ทดสอบจริงเจอ: **`/media` ของ image เบาเป็นของ root**
+→ volume ใหม่ดาวน์โหลดลงไม่ได้ (verify_live 4 FAIL · check_ui ข้าม 15 ข้อ) → แก้แล้ว + CI ตรวจเจ้าของโฟลเดอร์
+
+| # | ทำอะไร | ต้องได้อะไร | ผล | ผู้ทดสอบ / วันที่ |
+|---|---|---|---|---|
+| 1 | `docker compose config` ทั้งสามไฟล์ กับ `.env.example` · compose.yaml กับ `.env` เดิมของผู้ใช้ | ถูกต้องทั้งหมด · lite: `latest-web` · target web · RB_LOCAL_ROOTS=/media · restart unless-stopped | ✅ **PASS** | AI / 2026-10-21 |
+| 2 | dev `--profile lite` (19992) build จาก source | image 200 MB (เต็ม 2.5 GB) · หน้าเว็บ 200 · `/media` `/config` เป็นของ abc | ✅ **PASS** | AI / 2026-10-21 · ก่อนแก้: `/media` เป็น root |
+| 3 | `verify_live` กับ 19992 | 30 ผ่าน 0 ไม่ผ่าน | ✅ **PASS** | AI / 2026-10-21 · ก่อนแก้: 4 FAIL (ดาวน์โหลดลง /media) |
+| 4 | `check_ui` กับ 19992 | 84/84 เท่าฉบับเต็ม | ✅ **PASS** | AI / 2026-10-21 · ก่อนแก้: 69 (ข้ามข้อที่ใช้โฟลเดอร์ของเครื่อง) |
+| 5 | ติดตั้งจริงด้วย compose.yaml · `down` · `compose.lite.yaml up` | task · ประวัติ · key · rclone.conf อยู่ครบ | ⬜ | |
+| 6 | `RB_BIND=0.0.0.0` · เข้าจากอีกเครื่องในวง LAN | หน้าเว็บขึ้น (หลัง reverse proxy + รหัสผู้ดูแล) | ⬜ | |
+
 ### V-88 · ตั้งระดับ log ของ rclone ได้
 
 marker: `ProgramSettings::RcloneLogLevel` · `RcloneLogLevelFlags` · `#set-log-level` · Preferences → Logs
