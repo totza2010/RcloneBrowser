@@ -4207,18 +4207,43 @@ function showQuestion(question) {
   if (!asking) return;
 
   $("remote-form-q-name").textContent = question.name || "";
-  $("remote-form-q-help").textContent = question.help || "";
+  // Nothing asked: rclone said only what went wrong with the last answer.
+  $("remote-form-q-help").textContent = question.name ? question.help || "" : "Answer to go on: rclone asks again.";
   $("remote-form-q-error").textContent = question.error || "";
   const examples = question.examples || [];
-  $("remote-form-q-input").innerHTML = examples.length && question.exclusive
-    ? '<select id="remote-form-q-answer">' + examples.map((e) =>
-        '<option value="' + esc(e.value) + '"' + (e.value === question.default ? " selected" : "") + ">" +
-        esc(e.value) + (e.help ? " — " + esc(e.help.split("\n")[0]) : "") + "</option>").join("") + "</select>"
-    : '<input id="remote-form-q-answer" type="' + (question.password ? "password" : "text") +
-      '" value="' + esc(question.default || "") + '"' +
-      (examples.length ? ' list="remote-form-q-list"' : "") + ">" +
-      (examples.length ? '<datalist id="remote-form-q-list">' + examples.map((e) =>
-        '<option value="' + esc(e.value) + '">' + esc((e.help || "").split("\n")[0]) + "</option>").join("") + "</datalist>" : "");
+  // What rclone offers is a list to choose from, whether or not it holds to
+  // it. As a box with the first one typed in, the rest were never seen:
+  // onedrive's drives, the first of which may be one that does not work
+  // (2026-10-21). Not held to, "Other…" opens a box to type into.
+  const offered = examples.some((e) => e.value === question.default);
+  const typed = !question.exclusive && !offered && question.default ? question.default : "";
+  const box = '<input id="remote-form-q-text" type="' + (question.password ? "password" : "text") +
+    '" spellcheck="false" value="' + esc(examples.length ? typed : question.default || "") + '"' +
+    (examples.length && !typed ? ' class="hidden"' : "") + ">";
+  $("remote-form-q-input").innerHTML = !question.name ? ""
+    : examples.length
+      ? '<select id="remote-form-q-choice">' + examples.map((e) =>
+          '<option value="' + esc(e.value) + '"' + (e.value === question.default ? " selected" : "") + ">" +
+          esc(e.value) + (e.help ? " — " + esc(e.help.split("\n")[0]) : "") + "</option>").join("") +
+          (question.exclusive ? "" : '<option value="" data-other=""' + (typed ? " selected" : "") + ">Other…</option>") +
+          "</select>" + (question.exclusive ? "" : box)
+      : box;
+  const choice = $("remote-form-q-choice");
+  if (choice) {
+    choice.addEventListener("change", () => {
+      const other = choice.selectedOptions[0] && choice.selectedOptions[0].hasAttribute("data-other");
+      $("remote-form-q-text").classList.toggle("hidden", !other);
+      if (other) $("remote-form-q-text").focus();
+    });
+  }
+}
+
+// What the person answered: the choice, or what they typed under "Other…".
+function questionAnswer() {
+  const choice = $("remote-form-q-choice");
+  const other = choice && choice.selectedOptions[0] && choice.selectedOptions[0].hasAttribute("data-other");
+  if (choice && !other) return choice.value;
+  return $("remote-form-q-text") ? $("remote-form-q-text").value : "";
 }
 
 async function openRemoteForm(editing) {
@@ -4269,7 +4294,7 @@ $("remote-form-authorize-copy").addEventListener("click", async () => {
 // The answer to rclone's question, and whatever it asks next.
 async function answerQuestion() {
   const name = remoteForm.made;
-  const result = $("remote-form-q-answer").value;
+  const result = questionAnswer();
   $("remote-form-save").disabled = true;
   const answer = await api("POST", "/remotes/" + encodeURIComponent(name) + "/answer",
                            { state: remoteForm.question.state, result: result });

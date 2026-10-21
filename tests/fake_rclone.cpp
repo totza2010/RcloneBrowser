@@ -109,11 +109,33 @@ int main(int argc, char *argv[]) {
       // question of its own.
       bool hasToken = false;
       const char *state = "";
+      const char *result = "";
       for (int i = 3; i < argc; ++i) {
         hasToken = hasToken || std::strncmp(argv[i], "token=", 6) == 0;
         if (std::strcmp(argv[i], "--state") == 0 && i + 1 < argc) {
           state = argv[i + 1];
         }
+        if (std::strcmp(argv[i], "--result") == 0 && i + 1 < argc) {
+          result = argv[i + 1];
+        }
+      }
+      // "a" goes on to a choice that is not exclusive, as onedrive's drive
+      // is: the drives rclone found, and the first of them refused -- an
+      // answer that comes back as an error alone, with nothing asked.
+      const bool chooseDrive =
+          (std::strcmp(state, "pick_done") == 0 && std::strcmp(result, "a") == 0) ||
+          std::strcmp(state, "drive_again") == 0;
+      if (chooseDrive) {
+        std::printf("{\"State\":\"drive_final\",\"Option\":{\"Name\":\"config_driveid\","
+                    "\"Help\":\"Select drive you want to use\",\"DefaultStr\":\"bad-drive\","
+                    "\"Exclusive\":false,\"Examples\":[{\"Value\":\"bad-drive\",\"Help\":\"Old (personal)\"},"
+                    "{\"Value\":\"good-drive\",\"Help\":\"OneDrive (personal)\"}]},\"Error\":\"\"}\n");
+        return 0;
+      }
+      if (std::strcmp(state, "drive_final") == 0 && std::strcmp(result, "good-drive") != 0) {
+        std::printf("{\"State\":\"drive_again\",\"Option\":null,\"Error\":"
+                    "\"Failed to query root for drive \\\"%s\\\": HTTP error 400\"}\n", result);
+        return 0;
       }
       if (std::strcmp(state, "*oauth-confirm,pick,,") == 0) {
         std::printf("{\"State\":\"pick_done\",\"Option\":{\"Name\":\"config_pick\","

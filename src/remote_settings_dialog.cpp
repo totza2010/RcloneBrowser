@@ -31,6 +31,10 @@ QString firstLineOf(const QString &help) {
 
 bool signsIn(const Provider &provider) { return SignsInWithBrowser(provider); }
 
+// The data of the "Other…" line under a choice rclone does not hold to: no
+// answer rclone offers looks like it.
+QString otherAnswer() { return QStringLiteral("\x1f" "other"); }
+
 } // namespace
 
 RemoteSettingsDialog::RemoteSettingsDialog(const QString &remote,
@@ -97,6 +101,7 @@ RemoteSettingsDialog::RemoteSettingsDialog(const QString &remote,
   commandRow->addWidget(copy);
   signInLayout->addLayout(commandRow);
   mToken = new QPlainTextEdit(mSignIn);
+  mToken->setObjectName(QStringLiteral("signInToken"));
   mToken->setPlaceholderText(QStringLiteral("{\"access_token\":\"…\",\"token_type\":\"Bearer\",…}"));
   mToken->setMaximumHeight(90);
   signInLayout->addWidget(mToken);
@@ -141,9 +146,22 @@ RemoteSettingsDialog::RemoteSettingsDialog(const QString &remote,
   mQuestionError->setStyleSheet(QStringLiteral("color: #c0392b;"));
   questionLayout->addWidget(mQuestionError);
   mQuestionChoice = new QComboBox(questionPage);
+  mQuestionChoice->setObjectName(QStringLiteral("questionChoice"));
   questionLayout->addWidget(mQuestionChoice);
   mQuestionText = new QLineEdit(questionPage);
+  mQuestionText->setObjectName(QStringLiteral("questionText"));
   questionLayout->addWidget(mQuestionText);
+  // A choice that is not rclone's only answers: "Other…" opens the box.
+  connect(mQuestionChoice, &QComboBox::currentIndexChanged, this, [this]() {
+    if (mQuestionChoice->count() == 0) {
+      return; // being filled
+    }
+    const bool other = mQuestionChoice->currentData().toString() == otherAnswer();
+    mQuestionText->setVisible(other);
+    if (other) {
+      mQuestionText->setFocus();
+    }
+  });
   questionLayout->addStretch();
   mPages->addWidget(questionPage);
 
@@ -498,17 +516,27 @@ void RemoteSettingsDialog::showQuestion(const QJsonObject &question) {
   mSave->setText(QStringLiteral("Answer"));
   mClose->setText(QStringLiteral("Leave the rest"));
 
-  mQuestionName->setText(question.value(QStringLiteral("name")).toString());
+  const QString name = question.value(QStringLiteral("name")).toString();
+  mQuestionName->setText(name);
   mQuestionHelp->setText(question.value(QStringLiteral("help")).toString());
   mQuestionError->setText(question.value(QStringLiteral("error")).toString());
 
   const QJsonArray examples = question.value(QStringLiteral("examples")).toArray();
   const QString fallback = question.value(QStringLiteral("default")).toString();
-  const bool choose = question.value(QStringLiteral("exclusive")).toBool() &&
-                      !examples.isEmpty();
+  const bool exclusive = question.value(QStringLiteral("exclusive")).toBool();
+  // What rclone offers is a list to choose from, whether or not it holds to
+  // it: as a box with the first one typed in, the rest were never seen --
+  // onedrive's drives, the first of which may be one that does not work
+  // (2026-10-21).
+  const bool choose = !examples.isEmpty();
   mQuestionChoice->clear();
   mQuestionChoice->setVisible(choose);
-  mQuestionText->setVisible(!choose);
+  mQuestionText->setVisible(!choose && !name.isEmpty());
+  mQuestionText->clear();
+  if (name.isEmpty()) {
+    // Nothing asked: rclone said only what went wrong with the last answer.
+    mQuestionHelp->setText(QStringLiteral("Answer to go on: rclone asks again."));
+  }
   if (choose) {
     for (const QJsonValue &each : examples) {
       const QJsonObject e = each.toObject();
@@ -517,8 +545,17 @@ void RemoteSettingsDialog::showQuestion(const QJsonObject &question) {
       mQuestionChoice->addItem(help.isEmpty() ? value : value + QStringLiteral(" — ") + help,
                                value);
     }
+    if (!exclusive) {
+      mQuestionChoice->addItem(QStringLiteral("Other…"), otherAnswer());
+    }
     const int at = mQuestionChoice->findData(fallback);
-    mQuestionChoice->setCurrentIndex(at < 0 ? 0 : at);
+    if (at < 0 && !exclusive && !fallback.isEmpty()) {
+      mQuestionText->setText(fallback);
+      mQuestionChoice->setCurrentIndex(mQuestionChoice->count() - 1);
+    } else {
+      mQuestionChoice->setCurrentIndex(at < 0 ? 0 : at);
+    }
+    mQuestionText->setVisible(mQuestionChoice->currentData().toString() == otherAnswer());
   } else {
     mQuestionText->setText(fallback);
     mQuestionText->setEchoMode(question.value(QStringLiteral("password")).toBool()
@@ -533,8 +570,9 @@ void RemoteSettingsDialog::showQuestion(const QJsonObject &question) {
 }
 
 void RemoteSettingsDialog::answer() {
-  const QString result = mQuestionChoice->isVisible()
-                             ? mQuestionChoice->currentData().toString()
+  const QString chosen = mQuestionChoice->currentData().toString();
+  const QString result = mQuestionChoice->count() > 0 && chosen != otherAnswer()
+                             ? chosen
                              : mQuestionText->text();
   setBusy(true);
   ContinueRemote(this, mRemote, mQuestion.value(QStringLiteral("state")).toString(),

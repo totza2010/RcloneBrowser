@@ -26,6 +26,7 @@ docs/TESTING.md.
 """
 
 import argparse
+import json
 import re
 import datetime
 import os
@@ -522,6 +523,71 @@ def check_new_remote_form(page, watch, api, ctx):
         page.click("#remote-form-cancel")
         return "drive: Sign in · opened again: hidden"
     step(page, watch, "New remote: Sign in only for a kind that signs in (V-90)", sign_in_only_for_its_kind)
+
+    def drives_are_a_list():
+        drive_question = {"state": "drive_final", "name": "config_driveid",
+                          "help": "Select drive you want to use", "default": "bad-drive",
+                          "exclusive": False, "password": False, "error": "",
+                          "examples": [{"value": "bad-drive", "help": "Old (personal)"},
+                                       {"value": "good-drive", "help": "OneDrive (personal)"}]}
+        refused = {"state": "drive_again", "name": "", "help": "", "default": "", "exclusive": False,
+                   "password": False, "examples": [],
+                   "error": 'Failed to query root for drive "bad-drive": HTTP error 400'}
+        answers = []
+
+        def made(route):
+            if route.request.method != "POST":
+                return route.continue_()
+            route.fulfill(status=201, content_type="application/json",
+                          body=json.dumps({"name": "zz-rb-ui-fake", "question": drive_question}))
+
+        def answered(route):
+            result = json.loads(route.request.post_data or "{}").get("result")
+            answers.append(result)
+            following = refused if result == "bad-drive" else drive_question
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"question": following}))
+
+        page.route("**/api/v1/remotes", made)
+        page.route("**/api/v1/remotes/*/answer", answered)
+        try:
+            open_form()
+            page.wait_for_function("document.querySelectorAll('#remote-form-type option[value]').length > 10",
+                                   timeout=15000)
+            page.fill("#remote-form-filter", "local")
+            page.select_option("#remote-form-type", "local")
+            page.wait_for_timeout(500)
+            page.fill("#remote-form-name", "zz-rb-ui-fake")
+            page.click("#remote-form-save")
+            page.wait_for_selector("#remote-form-q-choice", timeout=5000)
+            offered = page.locator("#remote-form-q-choice option").all_inner_texts()
+            assert len(offered) == 3 and "OneDrive (personal)" in offered[1] and offered[2] == "Other…", \
+                "the drives offered: %r" % offered
+            assert page.input_value("#remote-form-q-choice") == "bad-drive", "rclone's default not chosen"
+            assert not shown(page, "#remote-form-q-text"), "a box to type in, unasked"
+            page.select_option("#remote-form-q-choice", label="Other…")
+            assert shown(page, "#remote-form-q-text"), "Other… opened no box"
+            page.select_option("#remote-form-q-choice", "bad-drive")
+            page.click("#remote-form-save")
+            page.wait_for_function("document.getElementById('remote-form-q-error').innerText.includes('Failed to query root')",
+                                   timeout=5000)
+            assert page.locator("#remote-form-q-input input, #remote-form-q-input select").count() == 0, \
+                "something to answer in, with nothing asked"
+            page.click("#remote-form-save")
+            page.wait_for_selector("#remote-form-q-choice", timeout=5000)
+            page.select_option("#remote-form-q-choice", "good-drive")
+            page.click("#remote-form-save")
+            page.wait_for_timeout(800)
+        finally:
+            page.unroute("**/api/v1/remotes", made)
+            page.unroute("**/api/v1/remotes/*/answer", answered)
+            if shown(page, "#remotebox"):
+                page.click("#remote-form-cancel")
+        assert answers == ["bad-drive", "", "good-drive"], "answered %r" % answers
+        return "3 offered (2 drives, Other…) · the refused one: its error alone · asked again · good-drive sent"
+    # Ends with "Leave the rest", which says so in the bar.
+    step(page, watch, "New remote: rclone's choices are a list, held to or not (V-91)", drives_are_a_list,
+         toast_ok=True)
 
 
 def check_api_tab(page, watch, api, ctx):

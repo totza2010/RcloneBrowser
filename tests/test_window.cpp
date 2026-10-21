@@ -811,6 +811,64 @@ private slots:
     }
   }
 
+  // rclone's questions after a sign-in: a choice it holds to, then one it
+  // does not (onedrive's drive). Both are lists -- the second had been a box
+  // with the first drive typed in, and the others never seen -- and an
+  // answer refused comes back as the error alone, then the question again.
+  void rclonesChoicesAreAListEvenWhenNotExclusive() {
+    RemoteSettingsDialog box(QString(), mWindow.get());
+    box.show();
+    auto *kind = box.findChild<QComboBox *>(QStringLiteral("remoteKind"));
+    QTRY_VERIFY_WITH_TIMEOUT(kind->findText(QStringLiteral("fakeoauth"), Qt::MatchStartsWith) >= 0, 10000);
+    kind->setCurrentIndex(kind->findText(QStringLiteral("fakeoauth"), Qt::MatchStartsWith));
+    QPlainTextEdit *token = nullptr;
+    QTRY_VERIFY((token = box.findChild<QPlainTextEdit *>(QStringLiteral("signInToken"))) != nullptr &&
+                token->isVisible());
+    box.findChild<QLineEdit *>(QStringLiteral("remoteName"))->setText(QStringLiteral("drives"));
+    token->setPlainText(QStringLiteral("{\"access_token\":\"AT\",\"expiry\":\"2026-10-19T12:00:00Z\"}"));
+    buttonSaying(&box, QStringLiteral("Save"))->click();
+
+    auto *choice = box.findChild<QComboBox *>(QStringLiteral("questionChoice"));
+    auto *text = box.findChild<QLineEdit *>(QStringLiteral("questionText"));
+    QVERIFY(choice && text);
+    // Held to: the two answers, nothing else.
+    QTRY_VERIFY_WITH_TIMEOUT(choice->isVisible() && choice->findData(QStringLiteral("a")) >= 0, 10000);
+    QCOMPARE(choice->count(), 2);
+    QVERIFY(!text->isVisible());
+    choice->setCurrentIndex(choice->findData(QStringLiteral("a")));
+    sent();
+    buttonSaying(&box, QStringLiteral("Answer"))->click();
+
+    // Not held to: every drive, and Other… to type one.
+    QTRY_VERIFY_WITH_TIMEOUT(choice->findData(QStringLiteral("good-drive")) >= 0, 10000);
+    QCOMPARE(choice->count(), 3);
+    QCOMPARE(choice->currentData().toString(), QStringLiteral("bad-drive"));
+    QVERIFY(choice->itemText(1).contains(QLatin1String("OneDrive (personal)")));
+    QVERIFY(!text->isVisible());
+    choice->setCurrentIndex(2);
+    QVERIFY(text->isVisible());
+    choice->setCurrentIndex(0);
+    QVERIFY(!text->isVisible());
+
+    // The one that does not work: the error alone, nothing to type into.
+    buttonSaying(&box, QStringLiteral("Answer"))->click();
+    QStringList lines;
+    QTRY_VERIFY_WITH_TIMEOUT((lines += sent(), lines.join('\n').contains(QLatin1String("--result\tbad-drive"))), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!choice->isVisible(), 10000);
+    QVERIFY(!text->isVisible());
+    bool saidWhy = false;
+    for (QLabel *label : box.findChildren<QLabel *>()) {
+      saidWhy = saidWhy || label->text().contains(QLatin1String("Failed to query root"));
+    }
+    QVERIFY(saidWhy);
+    // Answered: asked again, and the other drive works.
+    buttonSaying(&box, QStringLiteral("Answer"))->click();
+    QTRY_VERIFY_WITH_TIMEOUT(choice->isVisible() && choice->findData(QStringLiteral("good-drive")) >= 0, 10000);
+    choice->setCurrentIndex(choice->findData(QStringLiteral("good-drive")));
+    buttonSaying(&box, QStringLiteral("Answer"))->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!box.isVisible(), 10000);
+  }
+
   // Save, then Cancel straight away: the box goes while rclone is still
   // making the remote. That took the window down: the process was the box's
   // child, and its last word reached a box already half taken apart.
