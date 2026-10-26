@@ -80,6 +80,30 @@ private slots:
     QCOMPARE(stats.transfersText(), QStringLiteral("3 / 328"));
   }
 
+  // Less the files rclone checked and found already there: 327 of 328 on
+  // the remote leaves one to send, not "0 / 328" (2026-10-22). Never fewer
+  // than rclone has begun.
+  void filesAlreadyThereAreNotCountedAsToSend() {
+    JobStats stats;
+    stats.sourceFiles = 328;
+    stats.checks = 327;
+    stats.totalChecks = 327;
+    stats.transfers = 0;
+    stats.totalTransfers = 1;
+    QCOMPARE(stats.filesToTransfer(), Q_INT64_C(1));
+    QCOMPARE(stats.transfersText(), QStringLiteral("0 / 1"));
+    // Halfway through the checking: what is left to look at is still counted.
+    stats.checks = 100;
+    QCOMPARE(stats.filesToTransfer(), Q_INT64_C(228));
+    // rclone has begun more than the count says (files added meanwhile).
+    stats.checks = 327;
+    stats.totalTransfers = 4;
+    QCOMPARE(stats.filesToTransfer(), Q_INT64_C(4));
+    // Not counted yet: rclone's own total.
+    stats.sourceFiles = -1;
+    QCOMPARE(stats.filesToTransfer(), Q_INT64_C(4));
+  }
+
   // The bug the old parser kept reintroducing: rclone can report more bytes
   // transferred than it first estimated, and the progress label went past
   // 100%.

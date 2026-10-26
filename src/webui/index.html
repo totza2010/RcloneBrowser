@@ -84,6 +84,7 @@
     <button data-tab="tasks">Tasks</button>
     <button data-tab="schedules">Schedules</button>
     <button data-tab="history">History</button>
+    <button data-tab="settings">Settings</button>
     <button data-tab="api">API</button>
   </nav>
 
@@ -159,6 +160,7 @@
     </section>
     <section id="tab-schedules" class="tab"></section>
     <section id="tab-history" class="tab"></section>
+    <section id="tab-settings" class="tab"></section>
     <section id="tab-api" class="tab"></section>
   </main>
 
@@ -381,7 +383,10 @@
       <div class="modal-actions">
         <button type="button" id="task-cancel" class="ghost">Cancel</button>
         <span class="grow"></span>
-        <button type="button" data-act="dry" class="ghost">Save and Dry run</button>
+        <!-- Dry run and Run save nothing, as the window's do with no name:
+             what is on the form runs once. -->
+        <button type="button" data-act="dry" class="ghost" title="a trial with no changes made (--dry-run) — nothing is saved">Dry run</button>
+        <button type="button" data-act="once" class="ghost" title="runs what is on the form once — nothing is saved">Run</button>
         <button type="button" data-act="run">Save and Run</button>
         <button type="button" data-act="save" class="ghost">Save task</button>
       </div>

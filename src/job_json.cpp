@@ -104,6 +104,8 @@ QJsonObject Write(const RunningJob &job, int streamIdleSeconds) {
     if (stats.sourceFiles >= 0) {
       figures.insert(QStringLiteral("sourceFiles"), double(stats.sourceFiles));
     }
+    // What the page shows as "x of y files": the same rule as the window's.
+    figures.insert(QStringLiteral("filesToTransfer"), double(stats.filesToTransfer()));
     figures.insert(QStringLiteral("totalTransfers"),
                    double(stats.totalTransfers));
     figures.insert(QStringLiteral("checks"), double(stats.checks));

@@ -122,12 +122,19 @@ QString JobStats::checksText() const {
   return QStringLiteral("%1 / %2").arg(checks).arg(totalChecks);
 }
 
+qint64 JobStats::filesToTransfer() const {
+  if (sourceFiles < 0) {
+    return totalTransfers;
+  }
+  // A file rclone checks and finds the same is skipped, and counted as a
+  // check; one that differs is sent, and is not.
+  return qMax(totalTransfers, qMax<qint64>(0, sourceFiles - checks));
+}
+
 QString JobStats::transfersText() const {
-  // Out of every file there is, once that is known: rclone's own total is
-  // the files begun so far -- "0 / 2" for a folder of 328.
-  return QStringLiteral("%1 / %2")
-      .arg(transfers)
-      .arg(sourceFiles >= 0 ? sourceFiles : totalTransfers);
+  // Out of the files this run sends: rclone's own total is the files begun
+  // so far -- "0 / 2" for a folder of 328.
+  return QStringLiteral("%1 / %2").arg(transfers).arg(filesToTransfer());
 }
 
 QString JobStats::elapsedText() const {

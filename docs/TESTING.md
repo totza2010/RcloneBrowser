@@ -184,7 +184,8 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
 | API: สร้าง key ระดับ read · Take back (Cancel / Yes) · เพิ่ม webhook · ลบ (Cancel / Yes) | V-44 · V-54 |
 | Tasks: New backup → task + ตารางเวลา · Schedules: ปิด/เปิด · ลบ (Cancel / Yes) | V-41 · V-56 |
 | ฟอร์ม Transfer: To = โฟลเดอร์ที่ดูอยู่ · 7 แท็บ · ค่าเริ่มต้น · From บอกว่ามีไหม · Sync เปิดตัวเลือกลบ · ตัวเลขกับหน่วย · include/exclude/filter (ซ้ำไม่ได้ · ลำดับ · ↑) · extra (ค้น · ไม่มีค่า · ต้องมีค่า) | V-38 · V-39 |
-| ฟอร์ม Transfer: Save task ไม่ใส่ชื่อ → `_tmp_…` · Edit (ค่าเดิม · ไม่มี task ใหม่) · New upload task ว่าง · Save and Dry run · Save and Run (ไฟล์ถึง) · Add to the queue | V-38 |
+| ฟอร์ม Transfer: Save task ไม่ใส่ชื่อ → `_tmp_…` · Edit (ค่าเดิม · ไม่มี task ใหม่) · New upload task ว่าง · Save and Run (ไฟล์ถึง) · Add to the queue | V-38 |
+| ฟอร์ม Transfer: Dry run และ Run ไม่บันทึก task (Run: ไฟล์ถึง) · Run กับ Add to the queue บอกให้บันทึก · Jobs: ความเร็วรวมตามข่าวของแต่ละงาน (งานสมมุติ ไม่รันอะไร) | V-92 |
 | History: ค้น (กล่องไม่หลุดโฟกัส) · คลิกแถว → รายละเอียด · Log · ที่อยู่ `#/history/<id>` · Back ปิด | V-60 · V-66 |
 | Back ผ่านแท็บ · Back จากโฟลเดอร์สองชั้น · F5 อยู่แท็บเดิม | V-66 |
 | Tasks: task เต็ม (ตั้งค่า · เมื่อไร · ครั้งล่าสุด · คำสั่ง) · คลิกรอบ · `#/tasks/<id>` · F5 · Back | V-67 |
@@ -193,7 +194,9 @@ tests/ui/.venv/Scripts/python tests/ui/check_ui.py --container rclonebrowser-dev
 | Browse ในฟอร์ม Transfer: โฟลเดอร์ → To ต่อชื่อ · ไฟล์ → To กลับ · คลิกขวา → Download… สองรายการ | V-38 · V-78 |
 | Serve WebDAV: ที่อยู่บนการ์ด · Copy address · Log ระหว่างรันเปิดได้ · Stop: ถามก่อน (Cancel / Yes) | V-52 · V-80 · V-86 |
 | Jobs ระหว่าง transfer (จำกัดความเร็ว): ไฟล์ทั้งหมด · ความเร็วตอนนี้ = ผลรวมรายไฟล์ · ค่าเฉลี่ย | V-87 |
-| API → Program settings: ระดับ log ของ rclone (เลือก · บันทึก · ตั้งกลับ) | V-88 |
+| Settings → Program: ระดับ log ของ rclone (เลือก · บันทึก · ตั้งกลับ) | V-88 |
+| Jobs: การ์ดนับไฟล์จากที่ต้องส่ง ไม่ใช่ทุกไฟล์ของต้นทาง (งานสมมุติ 328 ไฟล์ เช็กแล้ว 327) | V-94 |
+| แท็บ Settings: ทุกตัวจาก `/settings` แสดงค่าที่โปรแกรมมี · เปลี่ยนแล้วบันทึกเฉพาะตัวนั้น (แล้วตั้งกลับ) · flag ที่รันโปรแกรมถูกปฏิเสธแบบทั้งหมดหรือไม่เลย | V-93 |
 | New remote: ชนิดขึ้นแม้ daemon ยังอ่านอยู่ (จำลองด้วยคำตอบ "ยังอ่านอยู่") · Sign in เฉพาะชนิดที่ต้อง · ไม่บันทึกอะไร | V-90 |
 | เมนู: คลิกขวาอ่านได้ (ความต่างของสีอย่างน้อย 4.5:1 ทั้งธีมสว่างและมืด) · แถบเครื่องมือบรรทัดเดียว เมนูเปิด/ปิด/ไม่ล้นจอ · เมนูคลิกขวาของการ์ดรีโหมด | V-91 |
 | New remote: คำถามที่ไม่บังคับให้เลือกจากรายการเป็นรายการพร้อม Other… · ตอบผิดแล้วขึ้นแต่ข้อผิดพลาด · ถามใหม่ (สกัดในเบราว์เซอร์ ไม่ถึง rclone.conf) | V-91 |

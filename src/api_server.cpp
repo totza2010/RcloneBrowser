@@ -172,6 +172,31 @@ QJsonObject describeSettings() {
                 QJsonArray::fromStringList(ProgramSettings::RcloneLogLevels()));
   object.insert(QStringLiteral("rcloneLogLevelFromEnvironment"),
                 ProgramSettings::RcloneLogLevelFromEnvironment());
+  // The window's Preferences that are the program's rather than the
+  // window's, each with what it may be.
+  QJsonArray preferences;
+  for (const ProgramSettings::Preference &p : ProgramSettings::Preferences()) {
+    QJsonObject one;
+    one.insert(QStringLiteral("name"), p.name);
+    one.insert(QStringLiteral("group"), p.group);
+    one.insert(QStringLiteral("kind"), p.kind);
+    one.insert(QStringLiteral("label"), p.label);
+    one.insert(QStringLiteral("help"), p.help);
+    one.insert(QStringLiteral("value"), QJsonValue::fromVariant(ProgramSettings::PreferenceValue(p)));
+    if (!p.choices.isEmpty()) {
+      one.insert(QStringLiteral("choices"), QJsonArray::fromStringList(p.choices));
+    }
+    if (p.kind == QLatin1String("number")) {
+      one.insert(QStringLiteral("min"), p.min);
+      one.insert(QStringLiteral("max"), p.max);
+    }
+    one.insert(QStringLiteral("fromEnvironment"), ProgramSettings::PreferenceFromEnvironment(p));
+    if (!p.environment.isEmpty()) {
+      one.insert(QStringLiteral("environment"), p.environment);
+    }
+    preferences.append(one);
+  }
+  object.insert(QStringLiteral("preferences"), preferences);
   return object;
 }
 
@@ -2945,6 +2970,59 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
     return 200;
   }
 
+  // tasks/once -- run what a task would, once, saving nothing: the window's
+  // Run with no name. Held to every rule making a task is held to.
+  if (post && parts.size() == 2 && parts.at(0) == QLatin1String("tasks") &&
+      parts.at(1) == QLatin1String("once")) {
+    const QJsonObject given = options(request);
+    if (given.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_field"),
+                        QStringLiteral("what to run needs to be described"));
+    }
+    JobOptions task(given.value(QStringLiteral("type")).toString() ==
+                    QLatin1String("download"));
+    task.operation = JobOptions::Copy;
+    task.syncTiming = JobOptions::During;
+
+    QString why;
+    if (!TaskJson::Read(given, &task, &why)) {
+      return refuseTask(400, QStringLiteral("bad_field"), why);
+    }
+    if (task.operation == JobOptions::Mount) {
+      return refuseTask(400, QStringLiteral("bad_field"),
+                        QStringLiteral("a mount is started from the remote's Mount"));
+    }
+    why = flagsProblem(task.extra);
+    if (!why.isEmpty()) {
+      return refuseTask(400, QStringLiteral("bad_flag"), why);
+    }
+    const TaskBuilder::Problem problem = TaskBuilder::Check(task);
+    if (problem != TaskBuilder::Problem::None &&
+        problem != TaskBuilder::Problem::NoName) {
+      return refuseTask(400, QStringLiteral("incomplete"),
+                        TaskBuilder::Explain(problem));
+    }
+    const TaskRefusal ends = endsProblem(task, nullptr);
+    if (ends.status != 0) {
+      return refuseTask(ends.status, ends.code, ends.why);
+    }
+    if (task.description.trimmed().isEmpty()) {
+      task.description = QStringLiteral("%1 from %2")
+                             .arg(task.jobType == JobOptions::Download
+                                      ? QStringLiteral("Download")
+                                      : QStringLiteral("Upload"),
+                                  task.source);
+    }
+
+    const QString requestId = QUuid::createUuid().toString();
+    qCDebug(rbApp) << "API running once, unsaved" << task.description
+                   << "request=" << requestId;
+    StartTask(&task, mCallerName.isEmpty() ? QStringLiteral("api") : mCallerName,
+              requestId, given.value(QStringLiteral("dryRun")).toBool(false));
+    *body = startedJob(requestId, QStringLiteral("now"));
+    return 202;
+  }
+
   // tasks -- make one
   if (post && parts.size() == 1 && parts.at(0) == QLatin1String("tasks")) {
     const QJsonObject given = options(request);
@@ -3203,7 +3281,39 @@ int ApiServer::command(const HttpRequest &request, QByteArray *body) {
       return refuseTask(ProgramSettings::RcloneLogLevelFromEnvironment() ? 409 : 400,
                         QStringLiteral("bad_field"), why);
     }
-    qCDebug(rbApp) << "API changed the program's settings";
+    // The rest of Preferences, all or none: what was changed before one is
+    // refused is put back.
+    const QJsonObject preferences = given.value(QStringLiteral("preferences")).toObject();
+    QList<QPair<QString, QVariant>> before;
+    for (auto it = preferences.begin(); it != preferences.end(); ++it) {
+      const ProgramSettings::Preference p = ProgramSettings::FindPreference(it.key());
+      int status = 0;
+      QString code = QStringLiteral("bad_field");
+      if (p.name.isEmpty()) {
+        status = 400;
+        why = QStringLiteral("there is no setting called %1").arg(it.key());
+      } else if (ProgramSettings::PreferenceFromEnvironment(p)) {
+        status = 409;
+        why = QStringLiteral("%1 sets it; change it where the program is started")
+                  .arg(p.environment);
+      } else if (p.kind == QLatin1String("flags") && it.value().isString() &&
+                 !(why = flagsProblem(it.value().toString())).isEmpty()) {
+        status = 400;
+        code = QStringLiteral("bad_flag");
+      } else {
+        const QVariant was = ProgramSettings::PreferenceValue(p);
+        if (ProgramSettings::SetPreference(p.name, it.value().toVariant(), &why)) {
+          before.append({p.name, was});
+          continue;
+        }
+        status = 400;
+      }
+      for (const auto &undo : before) {
+        ProgramSettings::SetPreference(undo.first, undo.second, nullptr);
+      }
+      return refuseTask(status, code, why);
+    }
+    qCDebug(rbApp) << "API changed the program's settings" << preferences.keys();
     *body = toJson(describeSettings());
     return 200;
   }

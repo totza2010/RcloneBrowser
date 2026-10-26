@@ -646,6 +646,13 @@ function serveAddress(job) {
   return scheme + "://" + (host.includes(":") ? "[" + host + "]" : host) + ":" + serve.port + "/";
 }
 
+// The daemon's count of the files a run sends; from what it sent, for a
+// daemon from before it said.
+function filesToSend(stats) {
+  if (stats.filesToTransfer !== undefined) return stats.filesToTransfer;
+  return stats.sourceFiles !== undefined ? stats.sourceFiles : stats.totalTransfers;
+}
+
 function jobCard(job) {
   const stats = job.stats || {};
   const done = stats.totalBytes ? (stats.bytes / stats.totalBytes) * 100 : 0;
@@ -658,10 +665,12 @@ function jobCard(job) {
     figures.push(bytes(stats.bytes));
   }
   if (job.running && stats.phase && stats.phase !== "transferring") figures.push(esc(stats.phase) + "…");
-  // Out of every file the source has, once counted: rclone's own total is
-  // the files begun so far ("0 of 2" for a folder of 328).
-  const allFiles = stats.sourceFiles !== undefined ? stats.sourceFiles : stats.totalTransfers;
-  if (stats.transfers || stats.sourceFiles) figures.push((stats.transfers || 0) + (allFiles ? " of " + allFiles : "") + " files");
+  // Out of the files this run sends, as the window counts them: rclone's own
+  // total is the files begun so far ("0 of 2" for a folder of 328), and
+  // every file of the source counts those already there ("0 of 328" when
+  // one is to go).
+  const allFiles = filesToSend(stats);
+  if (stats.transfers || allFiles) figures.push((stats.transfers || 0) + (allFiles ? " of " + allFiles : "") + " files");
   if (stats.totalChecks) figures.push(stats.checks + " of " + stats.totalChecks + " checked");
   if (stats.deletes) figures.push(stats.deletes + " deleted");
   if (stats.errors) figures.push(stats.errors + " errors");
@@ -745,11 +754,15 @@ async function askRate(what) {
 }
 
 function drawJobs() {
-  const s = state.system;
   // How fast everything is moving together, and one place to slow it all.
-  const head = s.transferring
-    ? '<div class="toolbar"><span>' + s.transferring + " transferring · <b>" +
-      bytes(s.speed || 0) + "/s</b> together</span>" +
+  // Added up here from the jobs as each says how it is going: /system's sum
+  // is read again only every 30 seconds, and stood still under cards that
+  // moved every second (2026-10-21).
+  const moving = state.jobs.filter((j) => j.running && j.kind === "transfer");
+  const together = moving.reduce((sum, j) => sum + ((j.stats && j.stats.speed) || 0), 0);
+  const head = moving.length
+    ? '<div class="toolbar"><span id="jobs-together">' + moving.length + " transferring · <b>" +
+      bytes(together) + "/s</b> together</span>" +
       '<button class="ghost small" data-speed-all="">Limit every running transfer…</button></div>'
     : "";
   // Only where a browser can show one: on HTTPS, or on this machine itself.
@@ -1221,9 +1234,7 @@ async function openJob(requestId, fromAddress) {
       ["Started", when(job.startedAt) + " by " + (job.startedBy || "?") + (job.askedBy ? ", asked by " + job.askedBy : "")],
       ["Now", job.running ? (s.phase || "running") : job.state],
       ["Moved", s.totalBytes ? bytes(s.bytes) + " of " + bytes(s.totalBytes) + " (" + (s.percent || 0) + "%)" : bytes(s.bytes || 0)],
-      ["Files", (s.transfers || 0) +
-        ((s.sourceFiles !== undefined ? s.sourceFiles : s.totalTransfers) ?
-          " of " + (s.sourceFiles !== undefined ? s.sourceFiles : s.totalTransfers) : "") +
+      ["Files", (s.transfers || 0) + (filesToSend(s) ? " of " + filesToSend(s) : "") +
         (s.totalChecks ? " · " + s.checks + " of " + s.totalChecks + " checked" : "") +
         (s.errors ? " · " + s.errors + " errors" : "")],
       ["Speed", job.running ? bytes(s.speed || 0) + "/s" + (job.bandwidth ? " (limited to " + job.bandwidth + ")" : "") +
@@ -2366,7 +2377,6 @@ async function drawApi() {
       ", for Swagger, Postman, a generated client · " + esc(origin) + "</span></p>" +
       '<div id="api-keys" class="api-keys"></div>' +
       '<div id="api-hooks" class="api-keys"></div>' +
-      '<div id="api-settings" class="api-keys"></div>' +
       '<input id="api-filter" type="text" placeholder="filter: tasks, schedule, stream…" autocomplete="off">' +
     "</div>",
   ];
@@ -2412,7 +2422,6 @@ async function drawApi() {
   box.innerHTML = parts.join("");
   drawKeys();
   drawHooks();
-  drawSettings();
 
   $("api-filter").addEventListener("input", () => {
     const words = $("api-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -2511,8 +2520,49 @@ const logLevelWords = {
   DEBUG: "DEBUG — everything rclone does; long",
 };
 
+// The groups of the window's Preferences the page shows, in its order.
+const settingGroups = {
+  rclone: ["rclone", ""],
+  folders: ["Folders", "Where Browse starts in the transfer form."],
+  log: ["The program's own log", ""],
+  scripts: ["Scripts", "Commands run on the machine the program runs on, by whoever can change this page's settings."],
+};
+
+// One of the window's Preferences, as the kind of thing it is.
+function settingInput(p) {
+  const id = "pref-" + p.name;
+  const off = p.fromEnvironment ? ' disabled title="' + esc(p.environment) + ' sets it: change it where the program is started"' : "";
+  const help = p.help ? '<span class="help">' + esc(p.help) + "</span>" : "";
+  if (p.kind === "bool") {
+    return '<label class="check"><input type="checkbox" id="' + id + '" data-pref="' + esc(p.name) + '"' +
+      (p.value ? " checked" : "") + off + "> " + esc(p.label) + "</label>" + help;
+  }
+  let input;
+  if (p.kind === "choice") {
+    input = '<select id="' + id + '" data-pref="' + esc(p.name) + '"' + off + ">" + (p.choices || []).map((c) =>
+      '<option value="' + esc(c) + '"' + (c === p.value ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select>";
+  } else {
+    input = '<input id="' + id + '" data-pref="' + esc(p.name) + '" spellcheck="false" type="' +
+      (p.kind === "number" ? 'number" min="' + p.min + '" max="' + p.max : "text") + '" value="' + esc(p.value) + '"' + off + ">";
+  }
+  return "<label>" + esc(p.label) + input + help + "</label>";
+}
+
+// What was changed on the tab, as PUT /settings takes it. Only what changed:
+// a value that was never touched is not held to the rules again.
+function changedPreferences(preferences) {
+  const changed = {};
+  for (const p of preferences) {
+    const el = $("pref-" + p.name);
+    if (!el || el.disabled) continue;
+    const now = p.kind === "bool" ? el.checked : p.kind === "number" ? Number(el.value) : el.value.trim();
+    if (now !== p.value) changed[p.name] = now;
+  }
+  return changed;
+}
+
 async function drawSettings() {
-  const box = $("api-settings");
+  const box = $("tab-settings");
   if (!box) return;
   const answer = await api("GET", "/settings").catch(() => null);
   if (!answer) return;
@@ -2523,9 +2573,18 @@ async function drawSettings() {
   if (answer.status !== 200) return;
   const s = answer.data;
   const fixed = (yes, name) => yes ? ' disabled title="' + name + ' sets it: change it where the program is started"' : "";
+  const preferences = s.preferences || [];
+  const groups = Object.keys(settingGroups).map((group) => {
+    const mine = preferences.filter((p) => p.group === group);
+    if (!mine.length) return "";
+    return '<fieldset data-group="' + group + '"><legend>' + esc(settingGroups[group][0]) + "</legend>" +
+      (settingGroups[group][1] ? '<p class="muted">' + esc(settingGroups[group][1]) + "</p>" : "") +
+      mine.map(settingInput).join("") + "</fieldset>";
+  }).join("");
   box.innerHTML =
-    "<h3>Program settings</h3>" +
     '<form id="settings-form" class="settings-form">' +
+      '<p class="muted">The program\'s own settings, the same as the window\'s Preferences. How the window looks is set in the window.</p>' +
+      '<fieldset data-group="program"><legend>Program</legend>' +
       '<p><label>A stream stops itself after it has not been played for (minutes, 0 for never)' +
         '<input id="set-idle" type="number" min="0" max="10080" value="' + esc(s.streamIdleMinutes) + '"' +
         fixed(s.streamIdleFromEnvironment, "RB_STREAM_IDLE_MINUTES") + "></label></p>" +
@@ -2538,9 +2597,12 @@ async function drawSettings() {
           '<option value="' + level + '"' + (level === s.rcloneLogLevel ? " selected" : "") + ">" +
           esc(logLevelWords[level] || level) + "</option>").join("") +
         "</select></label></p>" +
-      ((s.streamIdleFromEnvironment || s.localRootsFromEnvironment || s.rcloneLogLevelFromEnvironment)
+      "</fieldset>" +
+      groups +
+      ((s.streamIdleFromEnvironment || s.localRootsFromEnvironment || s.rcloneLogLevelFromEnvironment ||
+        preferences.some((p) => p.fromEnvironment))
         ? '<p class="muted">What the environment sets is shown, and is changed where the program is started.</p>' : "") +
-      '<p><button type="submit" class="small">Save</button> <span id="settings-state" class="error"></span></p>' +
+      '<p><button type="submit">Save</button> <span id="settings-state" class="error"></span></p>' +
     "</form>";
   $("settings-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2553,6 +2615,8 @@ async function drawSettings() {
           !await askYes("Let the API use every folder of the machine?\n\n" +
                         "Keys and the page will be able to read and write anywhere the program can.")) return;
     }
+    const changed = changedPreferences(preferences);
+    if (Object.keys(changed).length) body.preferences = changed;
     const result = await api("PUT", "/settings", body).catch(() => null);
     if (!result || result.status !== 200) {
       $("settings-state").textContent = result ? reasonFrom(result) : "could not reach the daemon";
@@ -3397,11 +3461,38 @@ $("taskbox").addEventListener("change", (event) => {
 $("task-cancel").addEventListener("click", closeTransfer);
 $("task-form").addEventListener("submit", (event) => event.preventDefault());
 
-// Saved first, whichever button it was: the window's are "Save and Run" and
-// "Save and Dry run", and a run with no task behind it would have nothing to
-// be run again from.
+// Dry run and Run: what is on the form, once, with nothing saved -- the
+// window's Run with no name. The page had only "Save and Run", so every
+// upload left a _tmp_ task behind (2026-10-21).
+async function formRunOnce(act) {
+  if ($("task-queue").checked) {
+    $("task-error").textContent = "the queue holds saved tasks: Save and Run to add this one to it";
+    return;
+  }
+  let started;
+  try {
+    started = await api("POST", "/tasks/once", Object.assign(formRead(), { dryRun: act === "dry" }));
+  } catch (e) {
+    $("task-error").textContent = "could not reach the daemon";
+    return;
+  }
+  if (started.status >= 400) {
+    $("task-error").textContent = reasonFrom(started);
+    return;
+  }
+  if (form.watch && act === "once" && started.data && started.data.requestId) {
+    watching.set(started.data.requestId, form.watch);
+  }
+  closeTransfer();
+  toast(act === "dry" ? "Dry run started, nothing saved — see Jobs" : "Started, nothing saved — see Jobs");
+  refresh();
+}
+
+// Save and Run, and Save task: the task first, then (for the first) it runs
+// or joins the queue.
 async function formSubmit(act) {
   $("task-error").textContent = "";
+  if (act === "dry" || act === "once") return formRunOnce(act);
   const target = form.id ? "/tasks/" + encodeURIComponent(form.id) : "/tasks";
 
   let saved;
@@ -3431,8 +3522,7 @@ async function formSubmit(act) {
   let started;
   try {
     started = await api("POST",
-      "/tasks/" + encodeURIComponent(form.id) + (queue ? "/enqueue" : "/run"),
-      act === "dry" ? { dryRun: true } : undefined);
+      "/tasks/" + encodeURIComponent(form.id) + (queue ? "/enqueue" : "/run"));
   } catch (e) {
     $("task-error").textContent = "saved, but could not reach the daemon to start it";
     return;
@@ -3448,8 +3538,7 @@ async function formSubmit(act) {
     watching.set(started.data.requestId, form.watch);
   }
   closeTransfer();
-  toast(queue ? "Saved and added to the queue"
-              : act === "dry" ? "Dry run started — see Jobs" : "Started — see Jobs");
+  toast(queue ? "Saved and added to the queue" : "Saved and started — see Jobs");
   refresh();
 }
 
@@ -4915,6 +5004,7 @@ document.addEventListener("click", async (event) => {
 function showTab(name) {
   tab = name;
   if (tab === "api") drawApi();
+  if (tab === "settings") drawSettings();
   // The tab bar's own buttons: the transfer form has a bar of its own.
   for (const b of document.querySelectorAll("#tabs button")) {
     b.classList.toggle("on", b.dataset.tab === tab);
@@ -4931,7 +5021,7 @@ function showTab(name) {
 // so a place can be kept, sent, opened in another tab and gone back to, and
 // the browser's Back and Forward walk the tabs and folders as they were seen.
 
-const TABS = ["remotes", "jobs", "queue", "tasks", "schedules", "history", "api"];
+const TABS = ["remotes", "jobs", "queue", "tasks", "schedules", "history", "settings", "api"];
 
 function remotesAddress() {
   const parts = ["remotes", browsing.remote].concat(browsing.path ? browsing.path.split("/") : []);

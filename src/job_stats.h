@@ -87,6 +87,11 @@ struct JobStats {
   QString etaText() const;       // "1m23s" or "-"
   QString checksText() const;    // "12 / 40"
   QString transfersText() const; // "3 / 9"
+  // How many files this run will send: every file of the source, less those
+  // rclone checked and found already there -- a folder of 328 with 327 on
+  // the remote sends one, not 328 (2026-10-22). Never fewer than rclone has
+  // begun. rclone's own total until the source is counted.
+  qint64 filesToTransfer() const;
   QString elapsedText() const;
 
   JobPhase phase() const;

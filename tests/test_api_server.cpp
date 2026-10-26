@@ -12,6 +12,7 @@
 #include "run_history.h"
 #include "scheduler_store.h"
 #include "schedule.h"
+#include "app_settings.h"
 #include "utils.h"
 #include "webhooks.h"
 #include "folder_watches.h"
@@ -510,6 +511,167 @@ private slots:
 
   // A path field is somewhere anything can be typed. What is saved has to
   // be about things that are there.
+  // The window's Preferences that are the program's, on the API: the same
+  // keys the window writes, held to what each may be, all or none
+  // (2026-10-21: the page had three of them).
+  void theWindowsPreferencesCanBeReadAndChanged() {
+    auto valueOf = [](const QByteArray &reply, const QString &name) {
+      for (const QJsonValue &each :
+           bodyOf(reply).object().value(QStringLiteral("preferences")).toArray()) {
+        if (each.toObject().value(QStringLiteral("name")).toString() == name) {
+          return each.toObject();
+        }
+      }
+      return QJsonObject();
+    };
+    const QByteArray read = ask("GET", "/api/v1/settings", mToken);
+    QCOMPARE(statusOf(read), 200);
+    for (const char *name : {"rclone", "rcloneConf", "defaultRcloneOptions", "defaultUploadOptions",
+                             "defaultDownloadOptions", "mount", "useProxy", "http_proxy",
+                             "defaultUploadDir", "defaultDownloadDir", "debugLog", "logMaxFileKb",
+                             "logKeepFiles", "queueScript", "transferOnScript", "transferOffScript",
+                             "jobFinishedScriptWhen"}) {
+      QVERIFY2(!valueOf(read, QLatin1String(name)).isEmpty(), name);
+    }
+    QCOMPARE(valueOf(read, QStringLiteral("jobFinishedScriptWhen"))
+                 .value(QStringLiteral("choices")).toArray().size(), 2);
+
+    const QByteArray changed = send("PUT", "/api/v1/settings", mToken,
+        "{\"preferences\":{\"defaultUploadOptions\":\"--exclude *.tmp\",\"logKeepFiles\":3,"
+        "\"jobFinishedScriptWhen\":\"every\",\"queueScriptRun\":true,\"queueScript\":\"echo done\"}}");
+    QCOMPARE(statusOf(changed), 200);
+    QCOMPARE(valueOf(changed, QStringLiteral("logKeepFiles")).value(QStringLiteral("value")).toInt(), 3);
+    // Where the window reads them.
+    QCOMPARE(GetSettings()->value("Settings/defaultUploadOptions").toString(),
+             QStringLiteral("--exclude *.tmp"));
+    QVERIFY(AppSettings::runFinishedScriptForEveryTransfer());
+    QCOMPARE(AppSettings::queueFinishedScript(), QStringLiteral("echo done"));
+    QCOMPARE(AppSettings::logKeepFiles(), 3);
+
+    // Refused, and nothing changed: a flag that runs a program, a folder that
+    // is not there beside a good value, a word for a number, a name nobody
+    // knows, a choice not offered.
+    QByteArray refused = send("PUT", "/api/v1/settings", mToken,
+                              "{\"preferences\":{\"defaultRcloneOptions\":\"--password-command evil\"}}");
+    QCOMPARE(statusOf(refused), 400);
+    QCOMPARE(bodyOf(refused).object().value(QStringLiteral("code")).toString(), QStringLiteral("bad_flag"));
+    refused = send("PUT", "/api/v1/settings", mToken,
+                   "{\"preferences\":{\"logKeepFiles\":5,\"defaultUploadDir\":\"/no/such/folder\"}}");
+    QCOMPARE(statusOf(refused), 400);
+    QCOMPARE(AppSettings::logKeepFiles(), 3);
+    for (const char *bad : {"{\"preferences\":{\"logKeepFiles\":\"5\"}}",
+                            "{\"preferences\":{\"nonsense\":1}}",
+                            "{\"preferences\":{\"jobFinishedScriptWhen\":\"sometimes\"}}",
+                            "{\"preferences\":{\"useProxy\":\"yes\"}}"}) {
+      QVERIFY2(statusOf(send("PUT", "/api/v1/settings", mToken, bad)) == 400, bad);
+    }
+    QCOMPARE(GetSettings()->value("Settings/defaultRcloneOptions").toString().contains(
+                 QLatin1String("password-command")), false);
+
+    // rclone has to be a program called rclone: what is put here is run by
+    // every transfer.
+    const QString rcloneWas = GetSettings()->value("Settings/rclone").toString();
+    const QString gRcloneWas = GetRclone();
+    QTemporaryDir bin;
+    const QString other = bin.filePath(QStringLiteral("notrclone.exe"));
+    const QString named = bin.filePath(QStringLiteral("rclone-copy.exe"));
+    QVERIFY(QFile::copy(QStringLiteral(RB_FAKE_RCLONE), other));
+    QVERIFY(QFile::copy(QStringLiteral(RB_FAKE_RCLONE), named));
+    for (const QString &path : {other, bin.filePath(QStringLiteral("rclone-missing")), QString()}) {
+      QJsonObject preferences{{QStringLiteral("rclone"), path}};
+      QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken,
+                             QJsonDocument(QJsonObject{{QStringLiteral("preferences"), preferences}})
+                                 .toJson(QJsonDocument::Compact))),
+               400);
+    }
+    QJsonObject good{{QStringLiteral("rclone"), named}};
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken,
+                           QJsonDocument(QJsonObject{{QStringLiteral("preferences"), good}})
+                               .toJson(QJsonDocument::Compact))),
+             200);
+    QCOMPARE(GetRclone(), named);
+    GetSettings()->setValue("Settings/rclone", rcloneWas);
+    SetRclone(gRcloneWas);
+
+    // The proxies reach the rclones started from now on, and go when switched off.
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken,
+                           "{\"preferences\":{\"http_proxy\":\"http://proxy.test:3128\",\"useProxy\":true}}")),
+             200);
+    QCOMPARE(qgetenv("HTTP_PROXY"), QByteArray("http://proxy.test:3128"));
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"preferences\":{\"useProxy\":false}}")),
+             200);
+    QVERIFY(qgetenv("HTTP_PROXY").isEmpty());
+
+    // Set by the environment: shown so, and not changed here.
+    qputenv("RB_DEBUG", "1");
+    const QByteArray forced = ask("GET", "/api/v1/settings", mToken);
+    QVERIFY(valueOf(forced, QStringLiteral("debugLog")).value(QStringLiteral("fromEnvironment")).toBool());
+    QCOMPARE(statusOf(send("PUT", "/api/v1/settings", mToken, "{\"preferences\":{\"debugLog\":false}}")),
+             409);
+    qunsetenv("RB_DEBUG");
+  }
+
+  // The window's Run with no name, over the API: started once, saved
+  // nowhere, held to the rules a task is. The page had only "Save and Run"
+  // (2026-10-21).
+  void somethingCanBeRunOnceWithoutSavingIt() {
+    QVERIFY(useFakeRclone(1));
+    QTemporaryDir given;
+    const QString root = givenFolder(&given);
+    QTemporaryDir logDir;
+    const QString calls = logDir.filePath(QStringLiteral("calls.txt"));
+    qputenv("FAKE_RCLONE_LOG", QFile::encodeName(calls));
+    const int before = ListOfJobOptions::getInstance()->getTasks().size();
+
+    QJsonObject asked = QJsonDocument::fromJson(
+        taskBody(QString(), root + "/films", QStringLiteral("fake:once"))).object();
+    asked.insert(QStringLiteral("dryRun"), true);
+    const QByteArray started = send("POST", "/api/v1/tasks/once", mToken,
+                                    QJsonDocument(asked).toJson(QJsonDocument::Compact));
+    QCOMPARE(statusOf(started), 202);
+    RunningJob *job = JobRegistry::instance().find(
+        bodyOf(started).object().value(QStringLiteral("requestId")).toString());
+    QVERIFY(job != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(), 10000);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+
+    QFile file(calls);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QString copy;
+    for (const QString &line : QString::fromUtf8(file.readAll()).split('\n')) {
+      if (line.startsWith(QLatin1String("copy\t"))) {
+        copy = line;
+      }
+    }
+    file.close();
+    QVERIFY2(copy.contains(QLatin1String("fake:once")), qPrintable(copy));
+    QVERIFY2(copy.contains(QLatin1String("--dry-run")), qPrintable(copy));
+
+    // The rules of a task: a flag that runs a program, an end that is not
+    // there, a folder outside those given, a mount.
+    QJsonObject flagged = QJsonDocument::fromJson(
+        taskBody(QString(), root + "/films", QStringLiteral("fake:once"))).object();
+    flagged.insert(QStringLiteral("extra"), QStringLiteral("--password-command evil"));
+    QCOMPARE(statusOf(send("POST", "/api/v1/tasks/once", mToken,
+                           QJsonDocument(flagged).toJson(QJsonDocument::Compact))),
+             400);
+    const QByteArray missing = send("POST", "/api/v1/tasks/once", mToken,
+                                    taskBody(QString(), root + "/films/no-such",
+                                             QStringLiteral("fake:once")));
+    QCOMPARE(statusOf(missing), 400);
+    QCOMPARE(bodyOf(missing).object().value(QStringLiteral("code")).toString(),
+             QStringLiteral("no_such_path"));
+    QTemporaryDir outside;
+    QCOMPARE(statusOf(send("POST", "/api/v1/tasks/once", mToken,
+                           taskBody(QString(), outside.path(), QStringLiteral("fake:once")))),
+             403);
+    QCOMPARE(statusOf(send("POST", "/api/v1/tasks/once", mToken, "{}")), 400);
+    QCOMPARE(statusOf(ask("POST", "/api/v1/tasks/once", QByteArray())), 401);
+    QCOMPARE(ListOfJobOptions::getInstance()->getTasks().size(), before);
+    qunsetenv("FAKE_RCLONE_LOG");
+    qunsetenv("RB_LOCAL_ROOTS");
+  }
+
   void aTaskIsNotSavedWithEndsThatAreNotThere() {
     QVERIFY(useFakeRclone(1));
     QTemporaryDir given;

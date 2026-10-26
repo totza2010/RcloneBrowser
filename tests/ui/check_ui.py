@@ -218,7 +218,7 @@ def pick(page, path):
 # ---- the steps ------------------------------------------------------------------
 
 def check_tabs(page, watch):
-    for name in ("jobs", "queue", "tasks", "schedules", "history", "api", "remotes"):
+    for name in ("jobs", "queue", "tasks", "schedules", "history", "settings", "api", "remotes"):
         def go(name=name):
             page.click('#tabs button[data-tab="%s"]' % name)
             page.wait_for_selector("#tab-%s.on" % name, timeout=5000)
@@ -643,7 +643,7 @@ def check_api_tab(page, watch, api, ctx):
 
 
 def check_log_level_setting(page, watch, api, ctx):
-    """API tab → Program settings: how much rclone writes into a transfer's
+    """Settings tab → Program: how much rclone writes into a transfer's
     log (V-88). Set, read back, and put back as it was."""
     st, settings, _ = api.get("/settings")
     if st != 200 or "rcloneLogLevel" not in (settings or {}):
@@ -653,7 +653,7 @@ def check_log_level_setting(page, watch, api, ctx):
         return say("skip", "Program settings: rclone's log level (V-88)", "set by RB_RCLONE_LOG_LEVEL")
 
     def choose():
-        page.click('#tabs button[data-tab="api"]')
+        page.click('#tabs button[data-tab="settings"]')
         page.wait_for_selector("#set-log-level", timeout=10000)
         offered = page.locator("#set-log-level option").all_inner_texts()
         page.select_option("#set-log-level", "DEBUG")
@@ -666,6 +666,70 @@ def check_log_level_setting(page, watch, api, ctx):
         step(page, watch, "Program settings: rclone's log level (V-88)", choose, toast_ok=True)
     finally:
         api.call("PUT", "/settings", {"rcloneLogLevel": was})
+
+
+def check_settings(page, watch, api, ctx):
+    """The Settings tab: the window's Preferences that are the program's,
+    as GET /settings lists them; changed through the page, refused as the
+    API refuses, and put back as they were (V-93)."""
+    st, settings, _ = api.get("/settings")
+    preferences = (settings or {}).get("preferences") or []
+    if st != 200 or not preferences:
+        return say("fail", "Settings tab (V-93)", "no preferences in /settings: %s" % st)
+    was = {p["name"]: p["value"] for p in preferences}
+
+    def open_tab():
+        page.goto(ctx["base"] + "/#/settings")
+        page.wait_for_selector("#tab-settings.on #settings-form", timeout=10000)
+
+    def every_one_shown():
+        open_tab()
+        groups = page.locator("#settings-form fieldset legend").all_inner_texts()
+        missing = [p["name"] for p in preferences if page.locator("#pref-" + p["name"]).count() != 1]
+        assert not missing, "not on the tab: %s" % missing
+        for p in preferences:
+            el = page.locator("#pref-" + p["name"])
+            if p["kind"] == "bool":
+                assert el.is_checked() == bool(p["value"]), "%s shows %s" % (p["name"], el.is_checked())
+            else:
+                assert el.input_value() == str(p["value"]), "%s shows %r" % (p["name"], el.input_value())
+        assert page.locator("#set-log-level").count() == 1, "the log level is not on the tab"
+        assert page.locator('#tab-api #settings-form').count() == 0, "still on the API tab too"
+        return "%d settings in %s · each shows what the program has" % (len(preferences), ", ".join(groups))
+    step(page, watch, "Settings tab: every setting, as the program has it (V-93)", every_one_shown)
+
+    def change_and_back():
+        open_tab()
+        keep = int(was["logKeepFiles"]) + 1
+        page.fill("#pref-logKeepFiles", str(keep))
+        page.fill("#pref-defaultUploadOptions", "--exclude *.check-ui")
+        page.locator("#settings-form button[type=submit]").click()
+        page.wait_for_timeout(1000)
+        now = {p["name"]: p["value"] for p in api.get("/settings")[1]["preferences"]}
+        assert now["logKeepFiles"] == keep, "logKeepFiles is %r" % now["logKeepFiles"]
+        assert now["defaultUploadOptions"] == "--exclude *.check-ui", "upload options %r" % now["defaultUploadOptions"]
+        untouched = [n for n in was if n not in ("logKeepFiles", "defaultUploadOptions") and now[n] != was[n]]
+        assert not untouched, "changed without being touched: %s" % untouched
+        return "logKeepFiles %s → %s · upload options saved · nothing else changed" % (was["logKeepFiles"], keep)
+    try:
+        step(page, watch, "Settings tab: a change is saved, and only it (V-93)", change_and_back, toast_ok=True)
+    finally:
+        api.call("PUT", "/settings", {"preferences": {"logKeepFiles": was["logKeepFiles"],
+                                                      "defaultUploadOptions": was["defaultUploadOptions"]}})
+
+    def refused():
+        open_tab()
+        page.fill("#pref-defaultRcloneOptions", "--password-command x")
+        page.fill("#pref-logKeepFiles", str(int(was["logKeepFiles"]) + 2))
+        page.locator("#settings-form button[type=submit]").click()
+        page.wait_for_function("document.getElementById('settings-state').innerText.length > 0", timeout=5000)
+        said = page.locator("#settings-state").inner_text()
+        now = {p["name"]: p["value"] for p in api.get("/settings")[1]["preferences"]}
+        assert now["defaultRcloneOptions"] == was["defaultRcloneOptions"], "saved: %r" % now["defaultRcloneOptions"]
+        assert now["logKeepFiles"] == was["logKeepFiles"], "half saved: logKeepFiles %r" % now["logKeepFiles"]
+        return "said %r · nothing saved" % said
+    step(page, watch, "Settings tab: a flag that runs a program is refused, all or none (V-93)", refused,
+         allowed={("PUT", "/settings")})
 
 
 def check_backup_and_schedule(page, watch, api, ctx):
@@ -934,18 +998,54 @@ def check_transfer_form(page, watch, api, ctx):
         ctx.setdefault("form_tasks", []).append(made[0]["id"])
         return made[0]["id"]
 
-    def dry():
-        task = run_one("dry", "ui check dry run", scratch + "/dry")
-        page.click('#tabs button[data-tab="jobs"]')
-        deadline = time.time() + 60
+    def run_unsaved(act, dest, wait=60):
+        """Dry run or Run: started, and no task saved (V-92)."""
+        before = set(tasks_now())
+        open_upload(page, ctx)
+        page.fill("#task-source", src)
+        page.fill("#task-dest", dest)
+        page.click('#taskbox [data-act="%s"]' % act)
+        page.wait_for_selector("#taskbox.hidden", state="attached", timeout=10000)
+        said = page.locator("#toast").inner_text()
+        assert "nothing saved" in said, "it said %r" % said
+        deadline = time.time() + wait
         row = None
         while time.time() < deadline and not row:
-            rows = api.get("/history?limit=10&task=" + urllib.parse.quote(task))[1] or []
-            row = next((r for r in rows if r.get("state") not in ("running", "")), None)
+            rows = api.get("/history?limit=20")[1] or []
+            row = next((r for r in rows if dest in json.dumps(r) and r.get("state") not in ("running", "")), None)
             time.sleep(1)
-        assert row and row.get("dryRun"), "its run: %s" % row
-        return "saved · ran as a dry run · %s" % row.get("state")
-    step(page, watch, "transfer form: Save and Dry run (V-38 #6)", dry, toast_ok=True)
+        made = set(tasks_now()) - before
+        assert not made, "a task was saved: %s" % made
+        assert row, "no run to %s in the history" % dest
+        return row
+
+    def dry():
+        row = run_unsaved("dry", scratch + "/dry")
+        assert row.get("dryRun"), "its run: %s" % row
+        return "no task saved · ran as a dry run · %s" % row.get("state")
+    step(page, watch, "transfer form: Dry run, nothing saved (V-38 #6 · V-92)", dry, toast_ok=True)
+
+    def once():
+        row = run_unsaved("once", scratch + "/once", 120)
+        assert row.get("state") == "finished" and not row.get("dryRun"), "its run: %s" % row
+        st, ls, _ = api.get("/remotes/%s/ls?path=%s" % (remote, urllib.parse.quote(scratch + "/once")))
+        names = [e["name"] for e in (ls or {}).get("entries", [])]
+        assert "a.txt" in names, "once/ holds %s" % names
+        return "no task saved · finished · once/a.txt on the remote"
+    step(page, watch, "transfer form: Run, nothing saved (V-92)", once, toast_ok=True)
+
+    def once_not_queued():
+        open_upload(page, ctx)
+        page.fill("#task-source", src)
+        page.fill("#task-dest", scratch + "/never")
+        page.check("#task-queue")
+        page.click('#taskbox [data-act="once"]')
+        page.wait_for_timeout(500)
+        said = page.locator("#task-error").inner_text()
+        page.click("#task-cancel")
+        assert "queue holds saved tasks" in said, "it said %r" % said
+        return said
+    step(page, watch, "transfer form: Run with Add to the queue says to save it (V-92)", once_not_queued)
 
     def run():
         task = run_one("run", "ui check run", scratch + "/up")
@@ -1641,6 +1741,58 @@ def check_browse_and_menu(page, watch, api, ctx):
     step(page, watch, "Right-click → Download… with two chosen (V-78 #2)", menu_download, toast_ok=True)
 
 
+def check_speed_together(page, watch, api, ctx):
+    """The Jobs tab's "together" follows each job's news, not the /system
+    read every 30 seconds: it stood still under cards that moved (V-92).
+    Two jobs made up and told to the page as the daemon would tell it;
+    nothing runs."""
+    def follows():
+        page.goto(ctx["base"] + "/#/jobs")
+        page.wait_for_selector("#tab-jobs.on", timeout=5000)
+
+        def tell(rid, speed, running=True):
+            job = {"requestId": rid, "kind": "transfer", "running": running,
+                   "state": "running" if running else "finished",
+                   "description": "made up by check_ui " + rid, "stats": {"speed": speed}}
+            page.evaluate("block => handleEvent(block)", "event: job\ndata: " + json.dumps(job))
+            page.wait_for_timeout(200)
+            return page.locator("#jobs-together").inner_text()
+
+        mb = 1024 * 1024
+        try:
+            tell("zz-ui-a", 10 * mb)
+            both = tell("zz-ui-b", 20 * mb)
+            assert "2 transferring" in both and "30.0 MB/s" in both, "two jobs: %r" % both
+            slower = tell("zz-ui-a", 5 * mb)
+            assert "25.0 MB/s" in slower, "one slowed: %r" % slower
+        finally:
+            for rid in ("zz-ui-a", "zz-ui-b"):
+                page.evaluate("rid => { state.jobs = state.jobs.filter((j) => j.requestId !== rid); draw(); }", rid)
+        return "%s · then %s" % (both, slower)
+    step(page, watch, "Jobs: the speed together follows each job's news (V-92)", follows)
+
+    def files_to_send():
+        """Out of the files the run sends, not every file of the source: 327
+        of 328 already on the remote leaves one (V-94)."""
+        page.goto(ctx["base"] + "/#/jobs")
+        page.wait_for_selector("#tab-jobs.on", timeout=5000)
+        job = {"requestId": "zz-ui-files", "kind": "transfer", "running": True, "state": "running",
+               "description": "made up by check_ui", "stats": {"transfers": 0, "totalTransfers": 1,
+               "sourceFiles": 328, "checks": 327, "totalChecks": 327, "filesToTransfer": 1,
+               "bytes": 1, "totalBytes": 100}}
+        try:
+            page.evaluate("block => handleEvent(block)", "event: job\ndata: " + json.dumps(job))
+            page.wait_for_timeout(300)
+            card = page.locator("#tab-jobs").inner_text()
+        finally:
+            page.evaluate("rid => { state.jobs = state.jobs.filter((j) => j.requestId !== rid); draw(); }",
+                          "zz-ui-files")
+        assert "0 of 1 files" in card, "the card says: %r" % [l for l in card.split("\n") if "files" in l]
+        assert "of 328 files" not in card, "every file of the source counted"
+        return "0 of 1 files · 327 of 327 checked"
+    step(page, watch, "Jobs: files out of those the run sends (V-94)", files_to_send)
+
+
 def check_running_transfer(page, watch, api, ctx):
     """A transfer while it runs, on the Jobs tab: every file of its source,
     the speed now and on average (V-87). Slowed so it is still running."""
@@ -1700,7 +1852,7 @@ def check_tasks(page, watch, api, ctx):
 
 def check_phone(page, watch, ctx):
     page.set_viewport_size({"width": 375, "height": 800})
-    for name in ("remotes", "jobs", "queue", "tasks", "schedules", "history"):
+    for name in ("remotes", "jobs", "queue", "tasks", "schedules", "history", "settings"):
         def fits(name=name):
             page.click('#tabs button[data-tab="%s"]' % name)
             page.wait_for_selector("#tab-%s.on" % name, timeout=5000)
@@ -1868,6 +2020,7 @@ def main():
                 ("copy_move", lambda: check_copy_move(page, watch, api, ctx)),
                 ("browse", lambda: check_browse_and_menu(page, watch, api, ctx)),
                 ("serve", lambda: check_serve_and_stop(page, watch, api, ctx)),
+                ("speed_together", lambda: check_speed_together(page, watch, api, ctx)),
                 ("running_transfer", lambda: check_running_transfer(page, watch, api, ctx)),
                 ("mount", lambda: check_mount(page, watch, api, ctx)),
                 ("schedules", lambda: check_schedules(page, watch, api, ctx)),
@@ -1876,6 +2029,7 @@ def main():
                 ("new_remote", lambda: check_new_remote_form(page, watch, api, ctx)),
                 ("api_tab", lambda: check_api_tab(page, watch, api, ctx)),
                 ("log_level", lambda: check_log_level_setting(page, watch, api, ctx)),
+                ("settings", lambda: check_settings(page, watch, api, ctx)),
                 ("backup", lambda: check_backup_and_schedule(page, watch, api, ctx)),
                 ("tasks", lambda: check_tasks(page, watch, api, ctx)),
                 ("phone", lambda: check_phone(page, watch, ctx)),

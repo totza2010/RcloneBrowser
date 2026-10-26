@@ -135,6 +135,14 @@ QList<Route> build() {
         "Saves nothing. Secrets are taken out of what is shown.", "",
         R"({"type":"upload","source":"/media/films","dest":"gdrive:films","dryRun":true})",
         "200: the command; 400: a field or a flag that cannot be"),
+      r("POST", "/api/v1/tasks/once", kTasks, "Run without saving",
+        "What a task with this body would run, started once and saved "
+        "nowhere: the window's Run with no name. Held to every rule making a "
+        "task is held to; a mount is started from the remote instead. "
+        "Started at once, not queued -- the queue holds saved tasks.",
+        "", R"({"type":"upload","source":"/media/films","dest":"gdrive:films","dryRun":false})",
+        "202: started, with its requestId; 400: see making a task; 403: "
+        "outside the folders the API may use"),
       r("POST", "/api/v1/tasks/{id}/run", kTasks, "Run a task now",
         "Refused while the same task is already running: two rclones would "
         "be writing one destination.",
@@ -215,7 +223,9 @@ QList<Route> build() {
         "refused. An empty localRoots is every folder of this machine. "
         "rcloneLogLevel: how much rclone writes into a transfer's log -- "
         "ERROR, NOTICE, INFO (what was copied) or DEBUG; from the next "
-        "transfer on.",
+        "transfer on. preferences: {name: value} for any of the window's "
+        "Preferences GET lists -- all or none; options that run a program are "
+        "refused as in a task; rclone has to be a program called rclone*.",
         "", R"({"streamIdleMinutes":30,"localRoots":["/media","/downloads"],"rcloneLogLevel":"INFO"})",
         "200: the settings now; 400: not a number of minutes, or not a "
         "folder; 409: the environment sets it"),

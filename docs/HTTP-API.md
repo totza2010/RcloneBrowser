@@ -208,6 +208,7 @@ task ที่ส่งโฟลเดอร์ของเครื่องน
 | `PUT /api/v1/tasks/{id}` | แก้ — **ส่งเฉพาะช่องที่เปลี่ยน** ช่องที่ไม่เอ่ยถึงคงเดิม |
 | `DELETE /api/v1/tasks/{id}` | ลบ → `200` `{"deleted": id}` |
 | `POST /api/v1/tasks/preview` | คำสั่งที่ task แบบนี้จะรัน (`{"command": …}`) ไม่บันทึกอะไร · `dryRun: true` ได้ |
+| `POST /api/v1/tasks/once` | รัน task แบบนี้ครั้งเดียว ไม่บันทึกอะไร (Run ของหน้าต่างเมื่อไม่ใส่ชื่อ) · body เหมือนสร้าง task · `dryRun: true` ได้ · ตรวจกติกาเดียวกับตอนสร้าง task · เริ่มทันที ไม่เข้าคิว · mount ไม่ได้ · 202 พร้อม `requestId` |
 
 ```json
 { "type": "upload", "name": "nightly", "source": "/media/films", "dest": "gdrive:films",
