@@ -104,18 +104,19 @@ jobs:
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
             echo "kind=release" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" != "pull_request" ] && \
-               [ "${{ github.ref }}" = "refs/heads/${{ env.DEV_BRANCH }}" ]; then
+               [ "${{ github.ref }}" = "refs/heads/${{ env.DEV_BRANCH }}" ] && \
+               [ "${{ matrix.name }}" = "tgdrive" ]; then
+            # One dev image of each kind, full and web-only: the tgdrive
+            # rclone is mainline with teldrive added, and either image takes
+            # another rclone at start (RB_RCLONE_REPO=rclone/rclone).
             echo "kind=dev" >> "$GITHUB_OUTPUT"
           else
             echo "kind=none" >> "$GITHUB_OUTPUT"
           fi
-          # dev, dev-web for tgdrive (the default, as latest is); the mainline
-          # variant carries its name. And the commit, to go back to one.
+          # dev and dev-web, and each with the commit to go back to one.
           sha="$(echo "${{ github.sha }}" | cut -c1-7)"
-          base="dev"
-          [ "${{ matrix.name }}" = "tgdrive" ] || base="dev-mainline"
-          echo "dev=${{ env.IMAGE }}:${base}" >> "$GITHUB_OUTPUT"
-          echo "devsha=${{ env.IMAGE }}:${base}-${sha}" >> "$GITHUB_OUTPUT"
+          echo "dev=${{ env.IMAGE }}:dev" >> "$GITHUB_OUTPUT"
+          echo "devsha=${{ env.IMAGE }}:dev-${sha}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 

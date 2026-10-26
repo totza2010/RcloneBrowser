@@ -117,8 +117,11 @@ development branch (`modernize/rc-progress-and-hardening`), amd64 only:
 | tag | application | rclone | moves? |
 |---|---|---|---|
 | `dev` · `dev-web` | the development branch | newest fork | on every push |
-| `dev-mainline` · `dev-mainline-web` | the development branch | newest mainline | on every push |
 | `dev-1a2b3c4` · `dev-1a2b3c4-web` | that commit | newest fork then | never |
+
+One of each kind -- with the window, and the web page only. Mainline rclone
+is a setting rather than another image: `RB_RCLONE_REPO=rclone/rclone`
+(see "Choosing rclone without rebuilding").
 
 ```bash
 RB_TAG=dev docker compose -f docker/compose.yaml up -d        # with the window
