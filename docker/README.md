@@ -111,6 +111,23 @@ it is pinned:
 | `latest` | newest release | newest fork | on either |
 | `latest-mainline` | newest release | newest mainline | on either |
 
+And what is being worked on, before it is released -- every push to the
+development branch (`modernize/rc-progress-and-hardening`), amd64 only:
+
+| tag | application | rclone | moves? |
+|---|---|---|---|
+| `dev` · `dev-web` | the development branch | newest fork | on every push |
+| `dev-mainline` · `dev-mainline-web` | the development branch | newest mainline | on every push |
+| `dev-1a2b3c4` · `dev-1a2b3c4-web` | that commit | newest fork then | never |
+
+```bash
+RB_TAG=dev docker compose -f docker/compose.yaml up -d        # with the window
+RB_TAG=dev docker compose -f docker/compose.lite.yaml up -d   # web page only (pulls dev-web)
+```
+
+A dev image is for trying what is coming; it may be broken in ways a release
+is not. Go back to `latest` to leave it.
+
 Pin the first form if you need to know exactly what you are running. Follow
 `latest` if you would rather not think about it. Use the middle form to hold
 an rclone version while still picking up application releases.

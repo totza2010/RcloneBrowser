@@ -27,6 +27,9 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/rclonebrowser
+  # The branch whose every push is published as the dev images: what is
+  # being worked on, to pull and try before a release.
+  DEV_BRANCH: modernize/rc-progress-and-hardening
 
 jobs:
   build:
@@ -34,7 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Only used by the publish step, which is skipped except on a tag.
+      # Only used by the publish steps: on a version tag, and on a push to
+      # DEV_BRANCH (the dev images).
       packages: write
 
     strategy:
@@ -91,6 +95,28 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "application $app, rclone $rc"
 
+      # What this run publishes: a release (a v* tag), the dev images (a push
+      # to DEV_BRANCH, or run by hand from it), or nothing. A pull request
+      # never publishes.
+      - name: Publish what
+        id: publish
+        run: |
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" != "pull_request" ] && \
+               [ "${{ github.ref }}" = "refs/heads/${{ env.DEV_BRANCH }}" ]; then
+            echo "kind=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=none" >> "$GITHUB_OUTPUT"
+          fi
+          # dev, dev-web for tgdrive (the default, as latest is); the mainline
+          # variant carries its name. And the commit, to go back to one.
+          sha="$(echo "${{ github.sha }}" | cut -c1-7)"
+          base="dev"
+          [ "${{ matrix.name }}" = "tgdrive" ] || base="dev-mainline"
+          echo "dev=${{ env.IMAGE }}:${base}" >> "$GITHUB_OUTPUT"
+          echo "devsha=${{ env.IMAGE }}:${base}-${sha}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v3
 
       # Both variants share the stage that compiles the application, so the
@@ -145,7 +171,7 @@ jobs:
           '
 
       - name: Log in to ghcr.io
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.publish.outputs.kind != 'none'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -195,6 +221,21 @@ jobs:
             rclone version | head -1
             /usr/bin/rclone-browser --help > /dev/null
           '
+
+      # The dev images: the ones just built and checked, pushed as they are.
+      # amd64 only -- arm64 is built by emulation and takes the better part of
+      # an hour, which a release is worth and a push is not.
+      - name: Publish the dev images
+        if: steps.publish.outputs.kind == 'dev'
+        run: |
+          set -eu
+          for suffix in "" "-web"; do
+            built="${{ env.IMAGE }}:ci-${{ matrix.name }}${suffix}"
+            for tag in "${{ steps.publish.outputs.dev }}${suffix}" "${{ steps.publish.outputs.devsha }}${suffix}"; do
+              docker tag "$built" "$tag"
+              docker push "$tag"
+            done
+          done
 
       # arm64 is built by emulation, so only for what is published: a Raspberry
       # Pi or an ARM NAS pulls the same tag and gets its own image. Slow --
@@ -248,11 +289,15 @@ jobs:
             echo "### ${{ matrix.name }}"
             echo
             echo "- rclone: \`${{ matrix.repo }} v${{ steps.rclone.outputs.version }}\`"
-            if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            if [ "${{ steps.publish.outputs.kind }}" = "release" ]; then
               echo "- published:"
               echo "  - \`${{ steps.tags.outputs.exact }}\`"
               echo "  - \`${{ steps.tags.outputs.byrclone }}\`"
               echo "  - \`${{ steps.tags.outputs.moving }}\`"
+            elif [ "${{ steps.publish.outputs.kind }}" = "dev" ]; then
+              echo "- published (dev, amd64):"
+              echo "  - \`${{ steps.publish.outputs.dev }}\` and \`-web\`"
+              echo "  - \`${{ steps.publish.outputs.devsha }}\` and \`-web\`"
             else
               echo "- built and checked, not published"
               echo "- would have been \`${{ steps.tags.outputs.exact }}\`"
